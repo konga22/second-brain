@@ -1,0 +1,9 @@
+# 의존성 (npm install로 다시 받는다)
+node_modules/
+
+# macOS·USB가 만드는 파일
+.DS_Store
+._*
+
+# Word가 문서를 열 때 만드는 임시 파일
+~$*
