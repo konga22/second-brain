@@ -1,0 +1,63 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>세컨드 브레인 플랫폼 주간 보고 · 기점</title><style>
+  @page { size: A4; margin: 20mm; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+  body { font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 10pt; line-height: 1.6; color: #222; margin: 0; }
+  .cover { height: 255mm; padding-top: 38mm; break-after: page; }
+  .cover .label { color: #2E6DB4; font-weight: 700; font-size: 13pt; margin-bottom: 6px; }
+  .cover .title { color: #1F3A5F; font-weight: 800; font-size: 30pt; line-height: 1.25; }
+  .cover .title small { color: #666666; font-weight: 400; font-size: 13pt; margin-left: 8px; }
+  .cover .subtitle { color: #666666; font-size: 12pt; padding-bottom: 12px; border-bottom: 3px solid #1F3A5F; margin-bottom: 30mm; }
+  .cover table.info th { width: 25%; }
+  .cover .toc-title { color: #1F3A5F; font-weight: 700; font-size: 12pt; margin-top: 20mm; margin-bottom: 4px; }
+  .cover ul.toc { list-style: none; padding: 0; margin: 0; font-size: 10pt; line-height: 1.9; }
+  h1 { color: #1F3A5F; font-size: 15pt; border-bottom: 2px solid #2E6DB4; padding-bottom: 4px; margin: 26px 0 10px; break-after: avoid; }
+  h1.break { break-before: page; margin-top: 0; }
+  h2 { color: #2E6DB4; font-size: 11.5pt; margin: 16px 0 6px; break-after: avoid; }
+  p { margin: 4px 0 8px; }
+  p.note { font-size: 8.5pt; color: #666666; margin-top: 2px; }
+  ul, ol { margin: 4px 0 10px; padding-left: 22px; }
+  li { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9pt; line-height: 1.45; }
+  th, td { border: 1px solid #B8C4D2; padding: 5px 7px; vertical-align: middle; }
+  th { background: #DCE6F2; font-weight: 700; text-align: center; }
+  td.c { text-align: center; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .callout, .terms { padding: 9px 13px; margin: 8px 0 12px; break-inside: avoid; }
+  .callout { background: #EEF3F9; border-left: 4px solid #2E6DB4; }
+  .terms { background: #F6F7F9; border-left: 4px solid #B8C4D2; font-size: 8.8pt; }
+  .box-title { font-weight: 700; color: #2E6DB4; margin-bottom: 3px; }
+  .terms .box-title { color: #666666; }
+  .callout ul, .terms ul { margin: 0; }
+  figure { margin: 10px 0 14px; text-align: center; break-inside: avoid; }
+  figure img { width: 100%; }
+  figcaption { font-size: 8.5pt; color: #666666; margin-top: 4px; }
+  </style></head><body>
+  <section class="cover">
+    <div class="label">주간 진행 보고 · 기점</div>
+    <div class="title">세컨드 브레인 플랫폼<small>(가칭)</small></div>
+    <div class="subtitle">기획·설계 단계 결과와 개발 착수 계획</div>
+    <table class="info"><tr><th>문서 구분</th><td>주간 진행 보고</td></tr><tr><th>회차</th><td>기점 (이후 7일마다 보고)</td></tr><tr><th>보고 기간</th><td>2026년 10월 29일 ~ 11월 5일</td></tr><tr><th>작성일</th><td>2026년 11월 5일</td></tr><tr><th>작성자</th><td>김민상 (대림대학교 3학년 2반)</td></tr><tr><th>수신</th><td>양윤모 교수님</td></tr></table>
+    <div class="toc-title">목차</div>
+    <ul class="toc"><li>1. 요약</li><li>2. 일정 현황</li><li>3. 이번 기간 한 일</li><li>4. 수정 내역 (기획안 v1.0 → 설계서 v1.2)</li><li>5. 피드백 반영 현황</li><li>6. 문제와 대응</li><li>7. 다음 7일 계획 (11/06 ~ 11/12)</li><li>8. 확인 요청 사항</li></ul>
+  </section>
+  <h1>1. 요약</h1>
+<div class="callout"><div class="box-title">한눈에 보기</div><ul><li><strong>진척</strong>: 기획·설계 단계를 마쳤다. 기획안 v1.0을 제출했고, 피드백 9건을 내부 설계서(현재 v1.2)에 반영했다</li><li><strong>주요 변경</strong>: 웹 → <strong>macOS 데스크톱</strong> 본 제품(웹은 홍보 페이지), 임베딩 검색 → <strong>md 파일 + SQLite FTS5</strong>, 신뢰도 점수 → <strong>검증 에이전트</strong></li><li><strong>개발 기준 정리</strong>: 교수님 코드 스타일을 앱용·데스크톱/웹용 두 가지 스타일팩으로 정리했다</li><li><strong>다음 7일 (11/06 ~ 11/12)</strong>: 개발 환경을 갖추고, 빈 앱 실행과 검색 색인(FTS5) 동작을 확인한다</li><li><strong>위험</strong>: 개발 컴퓨터 저장 공간 부족(여유 2GB)으로 Xcode를 아직 설치하지 못했다. 11/07까지 해결한다</li></ul></div>
+<div class="terms"><div class="box-title">용어 설명</div><ul><li><strong>FTS5 / BM25</strong>: SQLite에 들어 있는 전문 검색 기능과, 검색어가 문서에 얼마나 중요한지로 순위를 매기는 계산 방식</li><li><strong>경로 A / 경로 B</strong>: A는 사용자가 쓰는 AI(Claude Code·Codex)가 기기 안에서 바로 지식을 찾는 길, B는 앱 안에서 질문해 우리 서버(AI 게이트웨이)를 거치는 길</li></ul></div>
+<h1>2. 일정 현황</h1>
+<table><colgroup><col style="width:13.49%"><col style="width:17.64%"><col style="width:48.12%"><col style="width:9.34%"><col style="width:11.41%"></colgroup><thead><tr><th>단계</th><th>기간</th><th>목표</th><th>상태</th><th>보고일</th></tr></thead><tbody><tr><td class="c">기획·설계</td><td class="c">10/29 ~ 11/05</td><td>기획안 제출, 피드백 반영, 설계서 확정</td><td class="c"><strong>완료</strong></td><td class="c">11/05</td></tr><tr><td class="c">1주차</td><td class="c">11/06 ~ 11/12</td><td>개발 환경, 빈 앱 실행, Supabase 연결, FTS5 확인</td><td class="c">예정</td><td class="c">11/12</td></tr><tr><td class="c">2주차</td><td class="c">11/13 ~ 11/19</td><td>로그인, 노트 저장·편집, 검색 색인, 가져오기</td><td class="c">예정</td><td class="c">11/19</td></tr><tr><td class="c">3주차</td><td class="c">11/20 ~ 11/26</td><td>brain CLI, AI 도구 연동, 뇌 그래프, 앱 안 AI 질문</td><td class="c">예정</td><td class="c">11/26</td></tr><tr><td class="c">4주차</td><td class="c">11/27 ~ 12/03</td><td>실수 노트·검증 에이전트, 할 일, 요금제, 홍보 페이지</td><td class="c">예정</td><td class="c">12/03</td></tr><tr><td class="c">마무리·제출</td><td class="c">12/04 ~ 12/08</td><td>통합 테스트, 시연 영상, 결과 보고서, 제출</td><td class="c">예정</td><td class="c">12/08</td></tr></tbody></table>
+<h1>3. 이번 기간 한 일</h1>
+<table><colgroup><col style="width:12.45%"><col style="width:54.35%"><col style="width:33.20%"></colgroup><thead><tr><th>날짜</th><th>한 일</th><th>결과물</th></tr></thead><tbody><tr><td class="c">10/29</td><td>프로젝트 주제 구상 (세컨드 브레인, 뇌 그래프형 AI 위키), 개발 도구를 Flutter로 확정</td><td>-</td></tr><tr><td class="c">11/04</td><td>기능 추가 구상: 회의 대화 텍스트 변환·요약, 가입자 지식 자동 최적화, AI 도구 "연동만 하면" 동작</td><td>-</td></tr><tr><td class="c">11/05</td><td>기획안 v1.0 작성·제출</td><td>기획안 PDF</td></tr><tr><td class="c">11/05</td><td>피드백 9건을 반영해 내부 설계서 v1.1 작성 (구조·검색·연동·교정 방식 변경)</td><td>설계서 v1.1</td></tr><tr><td class="c">11/05</td><td>교수님 GitHub 코드로 스타일 근거를 다시 확인해 스타일팩 갱신, 데스크톱·웹 전용 스타일팩 신설</td><td>GitHub 레포 2개</td></tr><tr><td class="c">11/05</td><td>홍보 웹·데스크톱·디자인·백엔드·연동 분야 오픈소스 조사 (별 수·라이선스·쓰는 법)</td><td>참고 레포 조사 문서</td></tr><tr><td class="c">11/05</td><td>웹 범위 결정: 웹은 홍보 페이지(정적 사이트)만 두고, 앱 기능은 데스크톱에서만 제공</td><td>설계서 v1.2</td></tr><tr><td class="c">11/05</td><td>주간 보고 체계 마련 (작업일지, 피드백 기록, 보고서 자동 생성)</td><td>이 보고서</td></tr></tbody></table>
+<h1>4. 수정 내역 (기획안 v1.0 → 설계서 v1.2)</h1>
+<table><colgroup><col style="width:13.49%"><col style="width:26.98%"><col style="width:33.60%"><col style="width:25.94%"></colgroup><thead><tr><th>항목</th><th>v1.0</th><th>현재 (v1.2)</th><th>이유 (피드백 번호)</th></tr></thead><tbody><tr><td class="c">앱 형태</td><td>Flutter 웹이 본 제품, 브라우저 저장소(IndexedDB)</td><td><strong>macOS 데스크톱 앱</strong>이 본 제품, 웹은 <strong>홍보 페이지</strong>(정적 사이트)</td><td>IndexedDB가 느림 (3)</td></tr><tr><td class="c">지식 저장</td><td>브라우저 저장소</td><td><strong>md 파일</strong> (노트 1개 = 파일 1개)</td><td>사용자 AI가 직접 읽을 수 있게 (1, 4)</td></tr><tr><td class="c">검색</td><td>임베딩 검색 (외부 서비스)</td><td><strong>SQLite FTS5 + BM25</strong>, 한글은 2글자 분할</td><td>임베딩 불필요, 색인 방식 (1, 2)</td></tr><tr><td class="c">서버 역할</td><td>모든 AI 요청을 중계하는 "AI 중계"</td><td>앱 안 질문만 거치는 <strong>"AI 게이트웨이"</strong></td><td>명칭과 필요성 (1)</td></tr><tr><td class="c">AI 도구 연동</td><td>-</td><td><strong>brain CLI</strong> + 스킬·훅 자동 설치(온보딩)</td><td>온보딩, CLI 토큰 절약 (5, 6)</td></tr><tr><td class="c">교정</td><td>신뢰도 점수 (0.7에서 시작해 반응마다 더하고 뺌)</td><td><strong>검증 에이전트</strong>가 판단, 놓친 실수로 검사 기준을 스스로 고침</td><td>검증 에이전트 제안 (7)</td></tr><tr><td class="c">참고 자료</td><td>gbrain, claude-mem, ECC</td><td>제외. 가져온 것과 라이선스만 명시</td><td>비추천 (8)</td></tr><tr><td class="c">결과물</td><td>-</td><td>직접 만든 연동 스킬을 참고 자료로 첨부</td><td>직접 제작 (9)</td></tr></tbody></table>
+<p class="note">기획안 PDF는 제출본 그대로 두고, 이후 설계 변경은 내부 설계서에만 반영해 주간 보고로 알린다.</p>
+<h1>5. 피드백 반영 현황</h1>
+<table><colgroup><col style="width:6.23%"><col style="width:40.46%"><col style="width:37.75%"><col style="width:15.56%"></colgroup><thead><tr><th>#</th><th>피드백</th><th>대응</th><th>상태</th></tr></thead><tbody><tr><td class="c">1</td><td>사용자 AI가 읽으면 임베딩이 필요 없는데 왜 서버를 거치나, 명칭</td><td>경로 A·B 분리, 임베딩 제거, "AI 게이트웨이"로 변경</td><td class="c">설계 반영</td></tr><tr><td class="c">2</td><td>색인 알고리즘</td><td>SQLite FTS5 + BM25, 한글 2글자 분할</td><td class="c">설계 반영</td></tr><tr><td class="c">3</td><td>웹 IndexedDB는 느림</td><td>macOS 데스크톱을 본 제품으로, 웹은 홍보 페이지로</td><td class="c">설계 반영</td></tr><tr><td class="c">4</td><td>md 파일이 많아지면 문제 (RAG·raw RAG)</td><td>색인, 계층 목차, 원본(raw) 분리, 중복 합치기</td><td class="c">설계 반영</td></tr><tr><td class="c">5</td><td>.claude·.codex 파일로 온보딩</td><td>연동 버튼으로 스킬·훅 설치, 사용자 요약 자동 주입</td><td class="c">설계 반영</td></tr><tr><td class="c">6</td><td>CLI로 작동하나 (토큰 최적화)</td><td>brain CLI, 기본 출력 5줄</td><td class="c">설계 반영</td></tr><tr><td class="c">7</td><td>교정은 검증 에이전트로 (RSI 언급)</td><td>점수 규칙 제거, 검증 에이전트, 검사 기준 자기 개선</td><td class="c">설계 반영</td></tr><tr><td class="c">8</td><td>gbrain·claude-mem·ECC 비추천, 차별성</td><td>참고 자료 정리, 공식 기능과 비교</td><td class="c">설계 반영</td></tr><tr><td class="c">9</td><td>직접 만든 스킬을 참고 자료로</td><td>연동 스킬 제작, 결과 보고서 첨부</td><td class="c">진행 (3주차)</td></tr></tbody></table>
+<p class="note">"설계 반영"은 설계서에 들어간 상태다. 실제 구현은 2절 일정에 따라 1~4주차에 진행하고 매주 보고한다.</p>
+<h1>6. 문제와 대응</h1>
+<table><colgroup><col style="width:23.86%"><col style="width:25.94%"><col style="width:37.75%"><col style="width:12.45%"></colgroup><thead><tr><th>문제</th><th>영향</th><th>대응</th><th>기한</th></tr></thead><tbody><tr><td>개발 컴퓨터 저장 공간 부족 (여유 2GB)</td><td>Xcode를 설치할 수 없어 macOS 앱을 빌드하지 못함</td><td>불필요한 파일 정리, 또는 프로젝트·Flutter SDK를 외장 SSD(APFS)로 이동하고 Xcode는 내장 디스크에 설치</td><td class="c">11/07</td></tr><tr><td>Supabase를 내 컴퓨터에서 돌리려면 Docker 필요</td><td>저장 공간을 더 씀</td><td>개발 중에는 Supabase 클라우드 프로젝트에 바로 연결</td><td class="c">1주차</td></tr><tr><td>검색 색인(FTS5)이 앱·CLI 양쪽에서 되는지 미확인</td><td>검색 기능 전체에 영향</td><td>1주차에 앱과 CLI에서 각각 색인 생성·검색 시험</td><td class="c">11/12</td></tr><tr><td>Codex 보조 에이전트 설치 형식 미확인</td><td>Codex 연동 설치</td><td>Codex 공식 문서와 소스 확인</td><td class="c">11/12</td></tr></tbody></table>
+<h1>7. 다음 7일 계획 (11/06 ~ 11/12)</h1>
+<table><colgroup><col style="width:41.50%"><col style="width:58.50%"></colgroup><thead><tr><th>작업</th><th>완료 기준</th></tr></thead><tbody><tr><td>저장 공간 확보, Xcode 설치</td><td>flutter doctor의 macOS 항목 통과</td></tr><tr><td>Flutter macOS 프로젝트 생성</td><td>빈 앱이 macOS에서 실행됨</td></tr><tr><td>Supabase 프로젝트 생성·연결</td><td>앱에서 Supabase 연결 확인</td></tr><tr><td>검색 색인(FTS5) 확인</td><td>앱과 CLI 양쪽에서 색인 생성·검색 성공</td></tr><tr><td>화면 설계</td><td>화면 10개의 배치도 완성</td></tr><tr><td>연동 스킬 초안</td><td>Claude Code용 스킬 파일 초안 작성</td></tr><tr><td>미결정 사항 확정</td><td>폴더 구조, Codex 에이전트 형식을 정해 설계서 v1.3으로 갱신</td></tr></tbody></table>
+<h1>8. 확인 요청 사항</h1>
+<ol><li><strong>교정 방식</strong>: 피드백 7번에서 "RSI"를 언급하셨는데, 설계서에는 검증 에이전트가 놓친 실수로 검사 기준을 스스로 고치는 방식으로 해석해 넣었습니다. 같은 대목에서 괜찮다고 하신 방식이 하나 더 있었는데 정확히 기록하지 못했습니다. 수정 전후 차이(<strong>diff</strong>)로 교정을 남기는 방식을 말씀하신 것인지 여쭙고 싶습니다.</li><li><strong>질문 내역 공유</strong>: 다음 주에 보여 주시기로 한 질문 내역(프롬프트)을 받으면 설계서와 대조해 1주차 보고에 반영하겠습니다.</li><li><strong>보고 형식</strong>: 이 형식으로 7일마다 보고드려도 될지 의견 부탁드립니다.</li></ol>
+  </body></html>
