@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>세컨드 브레인 시안</title>
+  <!-- Pretendard (OFL-1.1). CDN을 못 쓰면 시스템 글꼴로 대신 보인다 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="window" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="메뉴"></aside>
+    <main class="center" id="center" data-screen="home"></main>
+    <aside class="detail" id="detail" aria-label="오른쪽 패널"></aside>
+  </div>
+
+  <div class="overlay" id="palette" hidden>
+    <div class="palette" role="dialog" aria-modal="true" aria-label="명령 창">
+      <div class="palette-input">
+        <span class="faint" id="pal-icon"></span>
+        <input id="pal-input" type="text" placeholder="노트 찾기, 화면 이동, 새 노트…" autocomplete="off" aria-label="검색어">
+        <span class="kbd">esc</span>
+      </div>
+      <div class="palette-body" id="pal-body"></div>
+      <div class="palette-foot">
+        <span><span class="kbd">↑</span><span class="kbd">↓</span> 이동</span>
+        <span><span class="kbd">↵</span> 열기</span>
+        <span><span class="kbd">⌘K</span> 닫기</span>
+        <span style="margin-left:auto">brain find와 같은 색인을 씁니다</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
