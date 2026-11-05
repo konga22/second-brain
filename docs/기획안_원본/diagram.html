@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  svg { display: block; font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+</style>
+</head>
+<body>
+<svg width="1600" height="760" viewBox="0 0 1600 760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E6DB4"/>
+    </marker>
+    <marker id="arrowGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5B6B7D"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E8B57"/>
+    </marker>
+    <marker id="arrowSmall" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E6DB4"/>
+    </marker>
+  </defs>
+
+  <!-- 사용자 기기 -->
+  <rect x="20" y="30" width="900" height="700" rx="18" fill="#EEF3F9" stroke="#2E6DB4" stroke-width="3"/>
+  <text x="470" y="80" text-anchor="middle" font-size="34" font-weight="700" fill="#1F3A5F">사용자 기기 (Mac)</text>
+  <text x="470" y="116" text-anchor="middle" font-size="22" fill="#2E6DB4">지식은 모두 여기에 저장</text>
+
+  <!-- 왼쪽 열: 사용자 AI → brain CLI (경로 A) -->
+  <rect x="50" y="150" width="360" height="160" rx="12" fill="#ffffff" stroke="#8CC4A4" stroke-width="2"/>
+  <text x="230" y="195" text-anchor="middle" font-size="26" font-weight="700" fill="#1F3A5F">사용자 AI</text>
+  <text x="230" y="232" text-anchor="middle" font-size="21" fill="#4A5A6A">Claude Code · Codex</text>
+  <text x="230" y="266" text-anchor="middle" font-size="19" fill="#7A8794">스킬 · 훅 설치 (온보딩)</text>
+  <text x="230" y="294" text-anchor="middle" font-size="17" fill="#7A8794">본인 AI 구독으로 동작</text>
+
+  <line x1="230" y1="314" x2="230" y2="394" stroke="#2E8B57" stroke-width="4" marker-end="url(#arrowGreen)"/>
+  <text x="250" y="350" font-size="19" font-weight="700" fill="#2E8B57">경로 A</text>
+  <text x="250" y="376" font-size="17" fill="#2E8B57">명령 1줄</text>
+
+  <rect x="50" y="400" width="360" height="130" rx="12" fill="#ffffff" stroke="#8CC4A4" stroke-width="2"/>
+  <text x="230" y="446" text-anchor="middle" font-size="26" font-weight="700" fill="#1F3A5F">brain CLI</text>
+  <text x="230" y="483" text-anchor="middle" font-size="19" fill="#4A5A6A">찾기 · 열기 · 실수 노트 · 저장</text>
+  <text x="230" y="513" text-anchor="middle" font-size="17" fill="#7A8794">결과는 제목 몇 줄만</text>
+
+  <text x="230" y="610" text-anchor="middle" font-size="21" font-weight="700" fill="#2E8B57">우리 서버를 거치지 않음</text>
+  <text x="230" y="642" text-anchor="middle" font-size="19" fill="#2E8B57">검색 1번 ≈ 10토큰</text>
+
+  <!-- 오른쪽 열: 앱, 지식 폴더, 색인 -->
+  <rect x="520" y="150" width="380" height="110" rx="12" fill="#ffffff" stroke="#9DB6D6" stroke-width="2"/>
+  <text x="710" y="195" text-anchor="middle" font-size="26" font-weight="700" fill="#1F3A5F">데스크톱 앱</text>
+  <text x="710" y="233" text-anchor="middle" font-size="19" fill="#4A5A6A">Flutter · 노트 · 그래프 · AI 질문</text>
+
+  <line x1="710" y1="266" x2="710" y2="324" stroke="#2E6DB4" stroke-width="4" marker-start="url(#arrowSmall)" marker-end="url(#arrowSmall)"/>
+
+  <rect x="520" y="330" width="380" height="150" rx="12" fill="#ffffff" stroke="#9DB6D6" stroke-width="2"/>
+  <text x="710" y="375" text-anchor="middle" font-size="26" font-weight="700" fill="#1F3A5F">지식 폴더</text>
+  <text x="710" y="412" text-anchor="middle" font-size="19" fill="#4A5A6A">md 파일 · 노트 1개 = 파일 1개</text>
+  <text x="710" y="446" text-anchor="middle" font-size="18" fill="#7A8794">노트 · 실수 노트 · 할 일</text>
+
+  <line x1="710" y1="486" x2="710" y2="544" stroke="#2E6DB4" stroke-width="4" marker-start="url(#arrowSmall)" marker-end="url(#arrowSmall)"/>
+
+  <rect x="520" y="550" width="380" height="140" rx="12" fill="#ffffff" stroke="#9DB6D6" stroke-width="2"/>
+  <text x="710" y="597" text-anchor="middle" font-size="26" font-weight="700" fill="#1F3A5F">검색 색인</text>
+  <text x="710" y="634" text-anchor="middle" font-size="19" fill="#4A5A6A">SQLite FTS5 · BM25</text>
+  <text x="710" y="666" text-anchor="middle" font-size="18" fill="#7A8794">한국어 2글자 단위</text>
+
+  <!-- CLI ↔ 지식 폴더 -->
+  <line x1="416" y1="445" x2="514" y2="445" stroke="#2E8B57" stroke-width="4" marker-start="url(#arrowGreen)" marker-end="url(#arrowGreen)"/>
+  <text x="465" y="428" text-anchor="middle" font-size="16" font-weight="700" fill="#2E8B57">읽기 · 쓰기</text>
+
+  <!-- 서버 -->
+  <rect x="1080" y="30" width="290" height="700" rx="18" fill="#F4F5F7" stroke="#5B6B7D" stroke-width="3"/>
+  <text x="1225" y="80" text-anchor="middle" font-size="34" font-weight="700" fill="#2B3440">서버</text>
+  <text x="1225" y="116" text-anchor="middle" font-size="20" fill="#5B6B7D">Supabase · 최소 정보만</text>
+
+  <rect x="1100" y="150" width="250" height="150" rx="12" fill="#ffffff" stroke="#B8C4D2" stroke-width="2"/>
+  <text x="1225" y="192" text-anchor="middle" font-size="25" font-weight="700" fill="#2B3440">AI 게이트웨이</text>
+  <text x="1225" y="228" text-anchor="middle" font-size="19" fill="#5B6B7D">API 키 보관</text>
+  <text x="1225" y="256" text-anchor="middle" font-size="19" fill="#5B6B7D">사용량 확인</text>
+  <text x="1225" y="284" text-anchor="middle" font-size="17" fill="#7A8794">앱 안 AI 질문만</text>
+
+  <rect x="1100" y="330" width="250" height="80" rx="12" fill="#ffffff" stroke="#B8C4D2" stroke-width="2"/>
+  <text x="1225" y="380" text-anchor="middle" font-size="25" font-weight="700" fill="#2B3440">로그인 정보</text>
+
+  <rect x="1100" y="430" width="250" height="80" rx="12" fill="#ffffff" stroke="#B8C4D2" stroke-width="2"/>
+  <text x="1225" y="480" text-anchor="middle" font-size="25" font-weight="700" fill="#2B3440">구독 · 결제 상태</text>
+
+  <text x="1225" y="610" text-anchor="middle" font-size="21" font-weight="700" fill="#C0392B">지식과 질문 내용은</text>
+  <text x="1225" y="642" text-anchor="middle" font-size="21" font-weight="700" fill="#C0392B">저장하지 않음</text>
+
+  <!-- AI -->
+  <rect x="1430" y="30" width="150" height="700" rx="18" fill="#F3EFFA" stroke="#6C4BB4" stroke-width="3"/>
+  <text x="1505" y="80" text-anchor="middle" font-size="34" font-weight="700" fill="#3E2A6E">AI</text>
+  <rect x="1445" y="175" width="120" height="100" rx="12" fill="#ffffff" stroke="#BFB0E0" stroke-width="2"/>
+  <text x="1505" y="218" text-anchor="middle" font-size="21" font-weight="700" fill="#3E2A6E">대화형 AI</text>
+  <text x="1505" y="248" text-anchor="middle" font-size="18" fill="#6A5A8A">(LLM)</text>
+
+  <!-- 앱 ↔ 게이트웨이 (경로 B) -->
+  <text x="1000" y="140" text-anchor="middle" font-size="19" font-weight="700" fill="#2E6DB4">경로 B</text>
+  <line x1="904" y1="190" x2="1072" y2="190" stroke="#2E6DB4" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="1000" y="168" text-anchor="middle" font-size="17" font-weight="700" fill="#2E6DB4">질문 + 관련 지식만</text>
+  <line x1="1076" y1="240" x2="908" y2="240" stroke="#2E6DB4" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="1000" y="272" text-anchor="middle" font-size="17" font-weight="700" fill="#2E6DB4">답변</text>
+
+  <!-- 게이트웨이 ↔ AI -->
+  <line x1="1352" y1="205" x2="1438" y2="205" stroke="#5B6B7D" stroke-width="4" marker-end="url(#arrowGray)"/>
+  <text x="1400" y="180" text-anchor="middle" font-size="16" font-weight="700" fill="#5B6B7D">호출</text>
+  <line x1="1440" y1="250" x2="1354" y2="250" stroke="#5B6B7D" stroke-width="4" marker-end="url(#arrowGray)"/>
+  <text x="1400" y="288" text-anchor="middle" font-size="16" font-weight="700" fill="#5B6B7D">결과</text>
+</svg>
+</body>
+</html>

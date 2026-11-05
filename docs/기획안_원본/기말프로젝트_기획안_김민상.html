@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>세컨드 브레인 플랫폼 기획안</title><style>
+  @page { size: A4; margin: 20mm; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+  body { font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 10pt; line-height: 1.6; color: #222; margin: 0; }
+  .cover { height: 255mm; padding-top: 38mm; break-after: page; }
+  .cover .label { color: #2E6DB4; font-weight: 700; font-size: 13pt; margin-bottom: 6px; }
+  .cover .title { color: #1F3A5F; font-weight: 800; font-size: 30pt; line-height: 1.25; }
+  .cover .title small { color: #666666; font-weight: 400; font-size: 13pt; margin-left: 8px; }
+  .cover .subtitle { color: #666666; font-size: 12pt; padding-bottom: 12px; border-bottom: 3px solid #1F3A5F; margin-bottom: 30mm; }
+  .cover table.info th { width: 25%; }
+  .cover .toc-title { color: #1F3A5F; font-weight: 700; font-size: 12pt; margin-top: 20mm; margin-bottom: 4px; }
+  .cover ul.toc { list-style: none; padding: 0; margin: 0; font-size: 10pt; line-height: 1.9; }
+  h1 { color: #1F3A5F; font-size: 15pt; border-bottom: 2px solid #2E6DB4; padding-bottom: 4px; margin: 26px 0 10px; break-after: avoid; }
+  h1.break { break-before: page; margin-top: 0; }
+  h2 { color: #2E6DB4; font-size: 11.5pt; margin: 16px 0 6px; break-after: avoid; }
+  p { margin: 4px 0 8px; }
+  p.note { font-size: 8.5pt; color: #666666; margin-top: 2px; }
+  ul, ol { margin: 4px 0 10px; padding-left: 22px; }
+  li { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9pt; line-height: 1.45; }
+  th, td { border: 1px solid #B8C4D2; padding: 5px 7px; vertical-align: middle; }
+  th { background: #DCE6F2; font-weight: 700; text-align: center; }
+  td.c { text-align: center; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .callout, .terms { padding: 9px 13px; margin: 8px 0 12px; break-inside: avoid; }
+  .callout { background: #EEF3F9; border-left: 4px solid #2E6DB4; }
+  .terms { background: #F6F7F9; border-left: 4px solid #B8C4D2; font-size: 8.8pt; }
+  .box-title { font-weight: 700; color: #2E6DB4; margin-bottom: 3px; }
+  .terms .box-title { color: #666666; }
+  .callout ul, .terms ul { margin: 0; }
+  figure { margin: 10px 0 14px; text-align: center; break-inside: avoid; }
+  figure img { width: 100%; }
+  figcaption { font-size: 8.5pt; color: #666666; margin-top: 4px; }
+  </style></head><body>
+  <section class="cover">
+    <div class="label">기말 프로젝트 기획안</div>
+    <div class="title">세컨드 브레인 플랫폼<small>(가칭)</small></div>
+    <div class="subtitle">AI가 내 지식을 기억하고, 같은 실수를 반복하지 않게 돕는 개인 지식 플랫폼</div>
+    <table class="info"><tr><th>문서 구분</th><td>기말 프로젝트 기획안</td></tr><tr><th>버전</th><td>v1.1 (교수님 피드백 반영)</td></tr><tr><th>작성일</th><td>2026년 11월 5일</td></tr><tr><th>작성자</th><td>김민상 (대림대학교 3학년 2반)</td></tr><tr><th>수신</th><td>양윤모 교수님</td></tr><tr><th>프로젝트 형태</th><td>1인 프로젝트</td></tr></table>
+    <div class="toc-title">목차</div>
+    <ul class="toc"><li>0. 요약</li><li>1. 배경과 목표</li><li>2. 핵심 기능</li><li>3. 서비스 구조: 로컬 우선</li><li>4. 수익 모델</li><li>5. 경쟁 서비스와 차별점</li><li>6. 개발 범위와 일정</li><li>7. 역할 분담</li><li>8. 위험 요소와 대응</li><li>참고 자료</li></ul>
+  </section>
+  <h1>0. 요약</h1>
+<div class="callout"><div class="box-title">한눈에 보기</div><ul><li><strong>무엇을</strong>: Claude Code·Codex 같은 AI 도구와 연동하면 대화와 지식이 자동으로 쌓이고 정리되는 세컨드 브레인 플랫폼 (데스크톱 앱)</li><li><strong>왜</strong>: AI 도구로 직접 세컨드 브레인을 만들 수는 있지만, 설정이 어렵고 번거로워 일반 사용자는 쓰기 어렵다</li><li><strong>어떻게</strong>: 지식은 사용자 기기에 md 파일로 저장한다. 연동한 AI는 우리 서버를 거치지 않고 명령 한 줄로 지식을 찾는다. 서버는 로그인·결제·앱 안 AI 질문만 맡는다</li><li><strong>수익</strong>: 무료 요금제 + 월 구독(Pro)</li><li><strong>기말 범위</strong>: macOS 데스크톱 MVP — 노트, 뇌 그래프, Claude Code·Codex 연동, AI 질문, 검증되는 실수 노트, 할 일, 요금제 화면 (웹은 체험판)</li></ul></div>
+<div class="terms"><div class="box-title">용어 설명</div><ul><li><strong>세컨드 브레인(Second Brain)</strong>: 머릿속 대신 외부 시스템에 지식을 저장·정리해 두고 필요할 때 꺼내 쓰는 방식</li><li><strong>MVP(최소 기능 제품)</strong>: 핵심 가치를 확인할 수 있는 최소한의 기능만 담은 첫 버전</li></ul></div>
+<h1>1. 배경과 목표</h1>
+<h2>1.1 문제 정의</h2>
+<table><colgroup><col style="width:26.98%"><col style="width:73.02%"></colgroup><thead><tr><th>문제</th><th>현재 상황</th></tr></thead><tbody><tr><td><strong>지식이 흩어진다</strong></td><td>AI 대화, 메모, 회의 내용이 도구마다 흩어져 있어 다시 찾기 어렵다</td></tr><tr><td><strong>AI가 같은 실수를 반복한다</strong></td><td>새 대화를 시작하면 이전에 바로잡아 준 내용을 기억하지 못한다</td></tr><tr><td><strong>해결 방법이 어렵다</strong></td><td>Claude Code·Codex의 메모리 파일, 훅, MCP를 설정하면 해결할 수 있지만 개발 지식과 시간이 필요하다</td></tr></tbody></table>
+<div class="terms"><div class="box-title">용어 설명</div><ul><li><strong>훅(Hook)</strong>: AI 도구에서 대화 시작·종료 같은 특정 시점에 자동으로 실행되는 작업</li><li><strong>MCP(Model Context Protocol)</strong>: AI가 외부 서비스의 데이터와 기능을 쓸 수 있게 연결하는 표준 규격</li></ul></div>
+<h2>1.2 해결 방향</h2>
+<p>번거로운 설정을 플랫폼이 대신한다. 사용자가 연동 버튼을 누르면 플랫폼이 AI 도구에 <strong>온보딩 파일</strong>(스킬·훅)을 설치한다. 그러면 AI는 따로 설명하지 않아도 내 지식을 찾아 쓰고, 대화는 자동으로 지식이 된다.</p>
+<h2>1.3 대상 사용자와 목표</h2>
+<ul><li><strong>대상 사용자</strong>: AI 도구를 매일 쓰는 대학생·직장인·개발자. 특히 개발 설정 없이 AI를 많이 쓰는 사용자</li><li><strong>목표 1</strong>: 가입 후 5분 안에 첫 지식 그래프를 만든다</li><li><strong>목표 2</strong>: 한 번 교정한 실수가 다음 관련 질문에 반영된다 (시연으로 검증)</li><li><strong>목표 3</strong>: 연동한 AI가 명령 한 줄(10토큰 안팎)로 필요한 지식만 찾게 해 토큰 사용을 줄인다</li></ul>
+<h1>2. 핵심 기능</h1>
+<table><colgroup><col style="width:6.23%"><col style="width:19.71%"><col style="width:42.93%"><col style="width:15.56%"><col style="width:15.56%"></colgroup><thead><tr><th>No.</th><th>기능</th><th>설명</th><th>무료</th><th>Pro</th></tr></thead><tbody><tr><td class="c">1</td><td><strong>지식 수집</strong></td><td>노트 작성, AI 대화기록·세션 기록 가져오기</td><td class="c">○ (개수 제한)</td><td class="c">○</td></tr><tr><td class="c">2</td><td><strong>뇌 그래프</strong></td><td>저장된 지식을 신경망처럼 연결해 보여 준다</td><td class="c">○</td><td class="c">○</td></tr><tr><td class="c">3</td><td><strong>위키 기반 AI 답변</strong></td><td>앱 안에서 질문하면 관련 지식만 찾아 AI에 함께 보낸다</td><td class="c">월 사용량 제한</td><td class="c">넉넉한 사용량</td></tr><tr><td class="c">4</td><td><strong>AI 실수 노트</strong></td><td>교정 반응을 검증 에이전트가 판단해 규칙으로 저장하고, 관련 질문에 자동 반영한다</td><td class="c">직접 교정</td><td class="c">자동 감지 포함</td></tr><tr><td class="c">5</td><td><strong>문서 정리·할 일</strong></td><td>대화에서 할 일을 뽑아 목록으로 관리한다</td><td class="c">직접 등록</td><td class="c">자동 추출</td></tr><tr><td class="c">6</td><td><strong>자동 최적화</strong></td><td>중복 합치기, 자동 연결, 목차 파일 갱신</td><td class="c">[정리하기] 버튼</td><td class="c">매일 자동</td></tr><tr><td class="c">7</td><td><strong>AI 도구 연동</strong></td><td>Claude Code·Codex에 연동 스킬을 설치해, AI가 내 지식을 바로 찾고 대화를 저장한다</td><td class="c">-</td><td class="c">○</td></tr><tr><td class="c">8</td><td><strong>회의 기록</strong>*</td><td>음성을 텍스트로 바꾸고 요약해 지식으로 저장</td><td class="c">텍스트 붙여넣기</td><td class="c">녹음 변환</td></tr><tr><td class="c">9</td><td><strong>기기 간 동기화</strong>*</td><td>암호화된 상태로 여러 기기에서 이어 쓰기</td><td class="c">-</td><td class="c">○</td></tr></tbody></table>
+<p class="note">* 표시는 2단계(기말 이후) 기능이다.</p>
+<h2>2.1 AI 실수 노트와 검증 에이전트</h2>
+<ol><li><strong>반응 감지</strong>: 사용자가 [틀렸어]를 누르거나 "아니야", "다시 해" 같은 교정 반응을 보이면 검증을 시작한다</li><li><strong>검증</strong>: 검증 에이전트가 진짜 교정인지 판단한다. 사용자 반응을 그대로 믿지 않고, 근거 노트와 교정 내용이 맞는지 확인한다</li><li><strong>규칙화</strong>: 교정이 맞으면 "언제 → 무엇을 → 왜" 형태의 규칙으로 만든다. 비슷한 규칙이 있으면 새로 만들지 않고 합친다</li><li><strong>적용 검사</strong>: 규칙이 들어간 답변은 내보내기 전에 규칙을 지켰는지 검사하고, 어겼으면 한 번 다시 쓴다</li><li><strong>자기 개선(RSI)</strong>: 검증 에이전트가 놓친 실수를 사용자가 나중에 바로잡으면, 그 내용을 검증 에이전트의 검사 기준에 추가한다</li></ol>
+<p class="note">점수를 미리 정해 두고 반응에 따라 더하고 빼는 방식은 쓰지 않는다. 사용자는 대충 "좋아"라고 답하는 경우가 많아 점수가 올라가기만 하기 때문이다. 규칙 문장 형식("언제 → 무엇을 → 왜")만 오픈소스 agent-librarian의 rule-creator를 참고했다.</p>
+<div class="terms"><div class="box-title">용어 설명</div><ul><li><strong>검증 에이전트</strong>: 답변과 교정을 따로 검사하는 보조 AI</li><li><strong>RSI(Recursive Self-Improvement, 재귀적 자기 개선)</strong>: AI가 자기 결과를 검사·수정하고, 그 경험으로 다음 결과를 개선하는 과정을 반복하는 방식. 본 서비스는 AI 모델 자체가 아니라 AI가 쓰는 규칙과 검사 기준을 개선하는 범위에서 적용한다</li></ul></div>
+<h2>2.2 신규 사용자 자동 최적화</h2>
+<ul><li><strong>가입 직후</strong>: 가져온 대화기록을 주제별로 묶고, 묶음마다 이름을 붙여 그래프를 자동으로 만든다</li><li><strong>온보딩 요약</strong>: 사용자의 주요 주제와 자주 받은 교정을 짧게 요약해, 연동한 AI가 첫 대화부터 사용자를 알고 시작하게 한다</li><li><strong>쓰는 동안</strong>: 중복 합치기, 새 노트 자동 연결, 목차 파일 갱신, 오래 쓰지 않은 지식 보관</li><li><strong>안전장치</strong>: AI는 지우지 않고 제안만 한다. 자동으로 적용한 변경은 이력을 남기고 되돌릴 수 있다</li></ul>
+<h1 class="break">3. 서비스 구조: 로컬 우선</h1>
+<p>핵심 원칙은 <strong>"지식은 사용자 기기에, 서버에는 꼭 필요한 정보만"</strong>이다. 연동한 AI는 우리 서버를 거치지 않고 기기의 지식을 바로 찾는다.</p>
+<figure><img src="diagram.png" alt=""><figcaption>그림 1. 서비스 구조 — 연동한 AI는 서버 없이 기기의 지식을 찾고(경로 A), 서버는 로그인·결제·앱 안 AI 질문(경로 B)만 맡는다</figcaption></figure>
+<h2>3.1 데이터 저장 위치</h2>
+<table><colgroup><col style="width:28.01%"><col style="width:26.33%"><col style="width:45.65%"></colgroup><thead><tr><th>데이터</th><th>저장 위치</th><th>이유</th></tr></thead><tbody><tr><td>노트·그래프·실수 노트·할 일</td><td><strong>사용자 기기</strong> (md 파일)</td><td>개인 지식을 외부에 두지 않고, 사용자 AI와 다른 노트 앱에서도 바로 읽을 수 있다</td></tr><tr><td>검색 색인</td><td><strong>사용자 기기</strong> (SQLite)</td><td>md 파일에서 언제든 다시 만들 수 있다</td></tr><tr><td>로그인 정보</td><td>서버</td><td>계정 보호</td></tr><tr><td>구독·결제 상태</td><td>서버</td><td>월 결제 갱신 관리</td></tr><tr><td>AI 서비스 키(API 키)</td><td>서버</td><td>사용자 화면에 키가 노출되지 않게 한다</td></tr><tr><td>앱 안 AI 질문 내용</td><td><strong>저장하지 않음</strong> (서버는 전달만)</td><td>AI 호출에 키가 필요해 서버를 거치지만, 내용은 남기지 않는다</td></tr><tr><td>연동한 AI가 찾은 지식</td><td><strong>서버를 거치지 않음</strong></td><td>사용자 AI가 기기에서 직접 찾고, 사용자 본인의 AI 서비스로만 전달된다</td></tr></tbody></table>
+<h2>3.2 저장 방식</h2>
+<ul><li>저장 위치를 묻는 확인 창 없이 <strong>자동으로 저장</strong>한다. 사용 경험은 일반 클라우드 서비스와 같다</li><li>데스크톱 앱은 앱 전용 폴더에 <strong>노트 1개를 md 파일 1개로</strong> 저장한다. 웹은 샘플 데이터로 기능을 보여 주는 체험판이다</li><li>저장 위치와 방식은 설정 화면과 개인정보처리방침에 명시하고, 폴더째 백업할 수 있게 한다</li></ul>
+<h2>3.3 md 파일이 많아질 때</h2>
+<ul><li><strong>AI가 전부 읽지 않는다</strong>: 색인으로 관련 노트 제목 5개만 찾고, 본문은 필요한 것만 연다</li><li><strong>목차로 좁힌다</strong>: 맨 위 목차는 주제 목록만 담고, 주제별 목차로 한 단계씩 좁힌다</li><li><strong>원본과 정리본을 나눈다</strong>: 가져온 원본(raw)은 따로 보관하고, 평소 검색은 정리본(wiki)에서만 한다</li><li><strong>파일 수를 줄인다</strong>: 자동 정리가 중복 노트를 하나로 합친다</li><li><strong>측정한다</strong>: 노트 1만 개 기준으로 검색 시간을 측정해 확인한다</li></ul>
+<div class="callout"><div class="box-title">왜 이 구조인가</div><ul><li><strong>대안 A — 모든 지식을 서버에 저장</strong>: 여러 기기에서 쓰기 쉽지만 개인정보 부담과 서버 비용이 크다 → 미채택</li><li><strong>대안 B — 임베딩(의미) 검색</strong>: 단어가 달라도 찾지만 노트를 외부 임베딩 서비스로 보내야 한다. 개인 규모에서는 원문 검색으로 충분하다 → 2단계 선택 기능</li><li><strong>대안 C — MCP로 연결</strong>: 표준 방식이지만 연결해 두면 도구 설명이 대화에 계속 실려 토큰을 쓴다 → CLI 채택, MCP는 2단계</li><li><strong>대안 D — 웹 앱을 본 제품으로</strong>: 설치가 필요 없지만 브라우저 저장소(IndexedDB)가 느리고 사용자 AI가 읽을 수 없다 → 웹은 체험판</li><li><strong>채택안 — 데스크톱 앱 + md 파일 + CLI 연동 + 서버 최소 정보</strong>: 개인정보 보호, 간편함, 적은 토큰을 함께 얻는다</li></ul></div>
+<h2>3.4 기술 스택</h2>
+<table><colgroup><col style="width:17.64%"><col style="width:30.09%"><col style="width:52.27%"></colgroup><thead><tr><th>구분</th><th>기술</th><th>하는 일</th></tr></thead><tbody><tr><td>화면</td><td>Flutter (macOS 앱, 웹 체험판)</td><td>로그인, 노트, 뇌 그래프, AI 질문, 할 일, 연동 화면</td></tr><tr><td>지식 저장</td><td>md 파일 (앱 전용 폴더)</td><td>노트·실수 노트·할 일 보관. 사용자 AI와 Obsidian에서도 읽힌다</td></tr><tr><td>검색 색인</td><td>SQLite FTS5 (BM25)</td><td>원문 검색. 한국어는 조사 때문에 2글자 단위로 색인</td></tr><tr><td>연동</td><td>brain CLI, 연동 스킬·훅</td><td>Claude Code·Codex가 명령 한 줄로 내 지식을 찾고 저장</td></tr><tr><td>회원·결제</td><td>Supabase (Auth, Database)</td><td>로그인, 구독 상태 관리 (지식은 저장하지 않음)</td></tr><tr><td>AI 게이트웨이</td><td>Supabase Edge Functions</td><td>앱 안 AI 질문일 때만 AI 키를 숨긴 채 호출하고, 회원 등급과 사용량을 확인</td></tr><tr><td>AI</td><td>대화형 AI (LLM)</td><td>답변, 요약, 교정 검증</td></tr><tr><td>결제</td><td>모의 결제 화면</td><td>기말에서는 화면만 구현, 실서비스 시 결제 대행사 연동</td></tr></tbody></table>
+<h2>3.5 지식을 찾는 두 경로</h2>
+<table><colgroup><col style="width:13.49%"><col style="width:43.26%"><col style="width:43.26%"></colgroup><thead><tr><th>단계</th><th>경로 A: 연동한 AI</th><th>경로 B: 앱 안 AI 질문</th></tr></thead><tbody><tr><td class="c">질문</td><td>평소처럼 Claude Code·Codex에 질문한다</td><td>앱 화면에서 질문한다</td></tr><tr><td class="c">찾기</td><td>AI가 "brain find 검색어"를 실행해 관련 노트 제목 5줄을 받는다</td><td>앱이 기기 색인에서 관련 노트 5개와 실수 노트 최대 3개를 찾는다</td></tr><tr><td class="c">읽기</td><td>필요한 노트만 "brain show"로 연다</td><td>찾은 지식만 질문과 함께 AI 게이트웨이로 보낸다</td></tr><tr><td class="c">답변</td><td>사용자 본인의 AI가 답한다</td><td>서버가 등급·사용량을 확인하고 AI에 전달해, 결과만 돌려준다</td></tr><tr><td class="c">서버</td><td><strong>거치지 않음</strong></td><td>내용은 저장하지 않음</td></tr><tr><td class="c">비용</td><td><strong>우리 비용 없음</strong> (검색 명령 10토큰 안팎)</td><td>사용량 1회 차감</td></tr></tbody></table>
+<p class="note">예: AI가 "brain find 결제 오류"를 실행하면 "n_0042 결제 웹훅 재시도 규칙"처럼 제목 몇 줄만 받고, 필요할 때 "brain show n_0042"로 본문을 연다.</p>
+<div class="terms"><div class="box-title">용어 설명</div><ul><li><strong>md(Markdown) 파일</strong>: 제목·목록 같은 간단한 표시를 넣을 수 있는 텍스트 파일</li><li><strong>색인 / BM25</strong>: 색인은 단어마다 그 단어가 든 문서를 미리 정리해 둔 목록이다. BM25는 검색어가 많이 나오고 드문 단어일수록 점수를 높이는 표준 검색 공식이다</li><li><strong>CLI</strong>: 글자로 명령을 입력해 쓰는 프로그램. Claude Code·Codex는 CLI 명령을 직접 실행할 수 있다</li><li><strong>스킬(Skill) / 온보딩 파일</strong>: 스킬은 AI 도구가 필요할 때 꺼내 읽는 사용 설명서 파일이다. 온보딩 파일은 AI가 처음 읽고 바로 일할 수 있게 하는 안내 파일(스킬·훅 설정)이다</li><li><strong>AI 게이트웨이</strong>: AI 키를 보관하고 회원 등급·사용량을 확인한 뒤 AI를 호출해 주는 서버 기능 (Supabase Edge Functions로 구현)</li></ul></div>
+<h1>4. 수익 모델</h1>
+<p><strong>원칙</strong>: 비용이 드는 기능(앱 안 AI 호출, 음성 변환, 동기화)은 유료로 제공한다. 지식은 사용자 기기에 저장되고 연동한 AI의 검색은 우리 서버를 거치지 않아 비용이 들지 않으므로, 저장은 무료로 넉넉하게 제공한다.</p>
+<table><colgroup><col style="width:29.05%"><col style="width:35.47%"><col style="width:35.47%"></colgroup><thead><tr><th>항목</th><th>무료</th><th>Pro (월 9,900원, 가안)</th></tr></thead><tbody><tr><td>노트 저장</td><td class="c">최대 200개</td><td class="c">무제한</td></tr><tr><td>앱 안 AI 질문</td><td class="c">월 50회</td><td class="c">월 1,000회</td></tr><tr><td>AI 실수 노트</td><td class="c">직접 교정, 최대 20개</td><td class="c">자동 감지 포함, 무제한</td></tr><tr><td>자동 정리</td><td class="c">[정리하기] 버튼</td><td class="c">매일 자동</td></tr><tr><td>AI 도구 연동</td><td class="c">-</td><td class="c">Claude Code·Codex</td></tr><tr><td>회의 기록</td><td class="c">텍스트 붙여넣기</td><td class="c">녹음 변환</td></tr><tr><td>기기 간 동기화</td><td class="c">-</td><td class="c">암호화 동기화</td></tr></tbody></table>
+<p class="note">금액과 수치는 가안이며, 개발 후 실제 AI 비용을 측정해 조정한다. AI 질문 횟수는 앱 안 질문에만 적용하고, 연동한 AI의 검색은 횟수에 포함하지 않는다.</p>
+<p><strong>참고 사례</strong>: Obsidian은 앱을 개인 사용자에게 무료로 제공해 기기에 저장하게 하고, 기기 간 동기화를 유료로 판매한다. 본 서비스도 같은 구조를 따른다.</p>
+<h1>5. 경쟁 서비스와 차별점</h1>
+<table><colgroup><col style="width:18.68%"><col style="width:19.71%"><col style="width:30.81%"><col style="width:30.81%"></colgroup><thead><tr><th>구분</th><th>예시</th><th>특징</th><th>본 서비스와의 차이</th></tr></thead><tbody><tr><td>노트 도구</td><td>Notion, Obsidian</td><td>사람이 직접 쓰고 정리한다</td><td>AI가 지식을 자동으로 모으고 정리한다</td></tr><tr><td>AI 도구 자체 기능</td><td>Claude Code 메모리, Codex AGENTS.md</td><td>도구마다 따로 저장되고, 사용자가 직접 관리한다</td><td>Claude·Codex가 같은 지식을 함께 쓰고, 검증된 규칙만 남긴다</td></tr><tr><td>AI 메모리 오픈소스</td><td>claude-mem, mem0</td><td>개발자가 직접 설치·설정해 쓴다</td><td>설정 없이 가입·연동만으로 쓴다</td></tr><tr><td>회의 기록 서비스</td><td>클로바노트</td><td>회의 녹음과 요약에 집중한다</td><td>회의 내용을 기존 지식·할 일과 연결한다</td></tr></tbody></table>
+<p><strong>차별점 4가지</strong></p>
+<ol><li><strong>연동만으로 자동</strong>: 연동 버튼이 온보딩 파일(스킬·훅)을 설치해 설정 없이 시작한다</li><li><strong>검증되는 실수 노트</strong>: 검증 에이전트가 맞는 규칙만 남기고, 놓친 실수로 검사 기준을 스스로 고친다</li><li><strong>도구 공통 + 로컬 우선</strong>: Claude와 Codex가 내 기기의 같은 지식을 함께 쓰고, 지식은 내 기기에 남는다</li><li><strong>적은 토큰</strong>: 지식을 찾는 명령이 10토큰 안팎이고, 필요한 노트만 열어 AI 사용량을 아낀다</li></ol>
+<h1>6. 개발 범위와 일정</h1>
+<h2>6.1 기말 범위 (MVP)</h2>
+<table><colgroup><col style="width:18.68%"><col style="width:81.32%"></colgroup><thead><tr><th>구분</th><th>기능</th></tr></thead><tbody><tr><td class="c"><strong>포함</strong></td><td>회원가입·로그인, macOS 데스크톱 앱, 노트 md 저장과 검색 색인, AI 대화기록 파일 가져오기, 뇌 그래프, brain CLI와 Claude Code·Codex 연동 스킬, 앱 안 AI 질문, 실수 노트와 검증 에이전트, 할 일, 요금제·모의 결제 화면, 웹 체험판</td></tr><tr><td class="c"><strong>제외 (2단계)</strong></td><td>임베딩 검색, MCP 연결, Windows 앱(Windows PC 필요), 회의 녹음 변환, 매일 자동 정리, 암호화 동기화, 실제 결제</td></tr></tbody></table>
+<p><strong>범위를 정한 이유</strong>: 핵심 가치인 "지식 저장 → 연동한 AI가 찾아 쓰기 → 실수 없는 답변" 흐름을 기말 안에 완성해 시연하기 위함이다. 임베딩 검색을 원문 검색으로 바꿔 줄어든 작업량만큼 연동 기능을 기말 범위로 당겼다.</p>
+<h2>6.2 일정 (12월 8일 제출)</h2>
+<table><colgroup><col style="width:12.45%"><col style="width:17.64%"><col style="width:45.01%"><col style="width:24.90%"></colgroup><thead><tr><th>단계</th><th>기간</th><th>작업</th><th>산출물</th></tr></thead><tbody><tr><td class="c">1주차</td><td class="c">11/06 ~ 11/12</td><td>기획 확정, 설계서·화면 설계, 개발 환경(Xcode·Flutter 데스크톱) 구성, 연동 스킬 초안</td><td>설계서, 화면 설계, 스킬 초안</td></tr><tr><td class="c">2주차</td><td class="c">11/13 ~ 11/19</td><td>회원가입·로그인, 노트 md 저장, 검색 색인, AI 대화기록 가져오기</td><td>로그인·노트·검색 기능</td></tr><tr><td class="c">3주차</td><td class="c">11/20 ~ 11/26</td><td>brain CLI, 연동 스킬·훅 설치, 뇌 그래프, AI 게이트웨이와 앱 안 AI 질문</td><td>연동·그래프·AI 질문 기능</td></tr><tr><td class="c">4주차</td><td class="c">11/27 ~ 12/03</td><td>실수 노트와 검증 에이전트, 할 일, 요금제·모의 결제, 웹 체험판</td><td>핵심 기능 완성본</td></tr><tr><td class="c">마무리</td><td class="c">12/04 ~ 12/07</td><td>통합 테스트, 버그 수정, 시연 영상, 결과 보고서 (직접 만든 스킬 첨부)</td><td>시연 영상·결과 보고서</td></tr><tr><td class="c"><strong>제출</strong></td><td class="c"><strong>12/08</strong></td><td><strong>최종 결과물 제출</strong></td><td>-</td></tr></tbody></table>
+<p class="note">12/04 ~ 12/07은 테스트와 보완을 위한 여유 기간으로 두어, 일정이 밀려도 제출일을 지킨다.</p>
+<h1>7. 역할 분담</h1>
+<p>1인 프로젝트이므로 실제 회사의 직무 기준으로 역할을 나누고, 모든 역할을 본인이 수행한다. 역할마다 산출물을 정해 단계별로 스스로 점검한다.</p>
+<table><colgroup><col style="width:15.56%"><col style="width:35.28%"><col style="width:24.26%"><col style="width:10.38%"><col style="width:14.53%"></colgroup><thead><tr><th>역할</th><th>담당 업무</th><th>산출물</th><th>비중</th><th>담당</th></tr></thead><tbody><tr><td><strong>PM (기획)</strong></td><td>요구사항 정의, 일정·범위 관리</td><td>기획안, 주간 진행 기록</td><td class="c">15%</td><td class="c">김민상</td></tr><tr><td><strong>UX/UI 디자인</strong></td><td>화면 흐름, 화면 설계, 디자인</td><td>화면 설계서</td><td class="c">15%</td><td class="c">김민상</td></tr><tr><td><strong>프론트엔드</strong></td><td>Flutter 데스크톱 앱, 뇌 그래프, 웹 체험판</td><td>데스크톱 앱, 웹 체험판</td><td class="c">25%</td><td class="c">김민상</td></tr><tr><td><strong>백엔드</strong></td><td>로그인, 구독 관리, AI 게이트웨이</td><td>서버 기능</td><td class="c">15%</td><td class="c">김민상</td></tr><tr><td><strong>AI·연동</strong></td><td>검색 색인, brain CLI, 연동 스킬, 검증 에이전트, 프롬프트 설계</td><td>AI·연동 기능, 연동 스킬</td><td class="c">20%</td><td class="c">김민상</td></tr><tr><td><strong>QA·문서</strong></td><td>테스트, 버그 관리, 결과 보고서, 발표</td><td>테스트 결과, 결과 보고서</td><td class="c">10%</td><td class="c">김민상</td></tr></tbody></table>
+<h2>7.1 작업 원칙</h2>
+<ul><li>상세 기술 설계는 별도 내부 설계서로 관리하고, 개발은 설계서를 기준으로 진행한다</li><li>AI 코딩 도구는 보조로만 사용하고, 기능 설계·핵심 로직·검증은 직접 수행한다</li><li>AI가 만든 코드는 이해하고 검토한 뒤에만 반영한다</li><li>연동 스킬은 직접 만들고, 제작 과정과 시행착오를 기록해 결과 보고서에 참고 자료로 첨부한다</li><li>참고한 오픈소스는 출처와 라이선스를 문서에 표기한다</li></ul>
+<h1>8. 위험 요소와 대응</h1>
+<table><colgroup><col style="width:25.94%"><col style="width:22.83%"><col style="width:51.23%"></colgroup><thead><tr><th>위험</th><th>영향</th><th>대응</th></tr></thead><tbody><tr><td><strong>기기 데이터 유실</strong></td><td>사용자 지식 유실</td><td>md 파일이라 폴더째 백업 가능, 백업 안내, (2단계) 암호화 동기화</td></tr><tr><td><strong>md 파일 증가</strong></td><td>검색 속도 저하, 토큰 증가</td><td>색인으로 관련 노트만 찾기, 목차로 범위 좁히기, 원본 분리, 중복 합치기 (3.3 참고)</td></tr><tr><td><strong>AI 비용 증가</strong></td><td>운영비 부담</td><td>연동 경로는 서버를 거치지 않음, 앱 안 질문은 관련 지식만 전송, 무료 사용량 제한</td></tr><tr><td><strong>개인정보·비밀값 노출</strong></td><td>서비스 신뢰 하락</td><td>서버에 지식 비저장, 전송 전 API 키·비밀번호 자동 가림</td></tr><tr><td><strong>AI의 잘못된 학습</strong></td><td>엉뚱한 규칙 적용</td><td>검증 에이전트가 확인 가능한 기준으로 판단, 규칙 개수 상한, 수정·삭제·되돌리기</td></tr><tr><td><strong>개발 환경 준비</strong></td><td>개발 착수 지연</td><td>1주차에 Xcode 설치와 빈 macOS 앱 빌드부터 확인</td></tr><tr><td><strong>일정 지연</strong></td><td>기말 미완성</td><td>MVP 범위 고정, 늦어지면 웹 체험판 → Codex 연동 순으로 2단계 이월</td></tr></tbody></table>
+<h1>참고 자료</h1>
+<ul><li>Andrej Karpathy, "LLM Wiki" — 원본·정리본 구분과 목차 파일 구조 참고 — gist.github.com/karpathy/442a6bf555914893e9891c11519de94f</li><li>j-token/agent-librarian (rule-creator 스킬, Apache-2.0) — 규칙 문장 형식만 참고 — github.com/j-token/agent-librarian</li><li>SQLite FTS5 공식 문서 — sqlite.org/fts5.html</li><li>Claude Code 공식 문서 (Skills, Subagents, Hooks) — code.claude.com/docs/en/skills</li><li>Codex 공식 문서 (Skills, AGENTS.md, Hooks) — developers.openai.com/codex/skills</li><li>직접 제작: second-brain 연동 스킬 — 1주차 초안 작성, 결과 보고서에 제작 기록과 함께 첨부</li></ul>
+  </body></html>
