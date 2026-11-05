@@ -7,6 +7,7 @@
 - 작업 폴더: `/Volumes/SecondBrain/second-brain`. USB(FAT32) 안 `프로젝트/세컨드브레인/SecondBrain.sparsebundle`을 열면 APFS 볼륨으로 붙는다. FAT32에 바로 두면 심볼릭 링크·실행 권한이 없어 Flutter macOS 빌드와 git이 깨지기 때문이다.
 - USB를 뽑기 전에 Finder에서 SecondBrain을 먼저 꺼낸다. 꺼내지 않고 뽑으면 이미지가 깨질 수 있다.
 - 원격 저장소: https://github.com/konga22/second-brain (비공개). USB가 고장 날 때를 대비해 자주 push한다. 커밋·push는 매번 사용자 허락을 받는다.
+- main에는 직접 push하지 않는다. 작업은 `feat/`·`bug/`·`perf/`·`refactor/`·`misc/` 브랜치에서 하고 draft PR로 올린다. (2026-11-05 첫 push만 빈 레포라 main에 바로 올렸다.)
 - `~/Desktop/양윤모교수님 기말`은 2026-11-05에 옮기기 전 사본이다. 더 고치지 않는다.
 
 ## 기준 문서
@@ -14,6 +15,7 @@
 - 개발 기준: `docs/설계서.md`. 구현이 설계와 달라지면 설계서를 먼저 고친다.
 - 교수님 제출용: `기말프로젝트_기획안_김민상.pdf` (원본: `docs/기획안_원본/`, 다시 만들기: `bash docs/기획안_원본/make.sh`). 기획안은 제출을 마쳤다. 설계가 바뀌면 설계서만 고치고, 기획안은 사용자가 요청할 때만 다시 만든다.
 - 참고 오픈소스 후보: `docs/참고레포_조사.md`. 실제로 쓰기로 한 것만 설계서 11절로 옮긴다.
+- 설계 검토 기록: `docs/설계검토_최종안.md` (v1.3 판단 근거. 설계서 부록 B에 반영 위치가 있다).
 
 ## 기록과 주간 보고
 
