@@ -4,7 +4,9 @@ import 'package:args/command_runner.dart';
 import 'package:brain_core/brain_core.dart';
 
 import 'brain_context.dart';
+import 'commands/check_commands.dart';
 import 'commands/hook_command.dart';
+import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
 import 'commands/sessions_command.dart';
 
@@ -23,6 +25,10 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(SessionsCommand(context))
         ..addCommand(HookCommand(context))
         ..addCommand(IndexCommand(context))
+        ..addCommand(LessonCommand(context))
+        ..addCommand(UndoCommand(context))
+        ..addCommand(LintCommand(context))
+        ..addCommand(BenchCommand(context))
         ..addCommand(_DoctorCommand(context));
   // `brain sessions [옵션]`은 `brain sessions list [옵션]`과 같다.
   final args = [...arguments];
@@ -31,6 +37,13 @@ Future<int> runBrain(List<String> arguments) async {
       (args.length == 1 ||
           args[1].startsWith('-') && args[1] != '-h' && args[1] != '--help')) {
     args.insert(1, 'list');
+  }
+  // `brain lesson <상황>`은 `brain lesson find <상황>`과 같다.
+  if (args.length >= 2 &&
+      args.first == 'lesson' &&
+      !args[1].startsWith('-') &&
+      !LessonCommand.subcommandNames.contains(args[1])) {
+    args.insert(1, 'find');
   }
   try {
     return await runner.run(args) ?? 0;

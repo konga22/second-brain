@@ -37,7 +37,7 @@ class FindCommand extends Command<int> {
     }
     for (final doc in hits) {
       final draft = doc.isDraft ? '[초안] ' : '';
-      final summary = doc.summary.isEmpty ? '' : ' — ${clip(doc.summary, 40)}';
+      final summary = doc.summary.isEmpty ? '' : ' — ${doc.summary}';
       stdout.writeln('${doc.id}  $draft${doc.title}$summary  ${doc.folder}');
     }
     return 0;
@@ -88,7 +88,25 @@ class ShowCommand extends Command<int> {
             ? '--- 끝 (이어 보기: brain show ${doc.id} --from $end) ---'
             : '--- 끝 ---',
       );
+    final links = _linksOf(doc.id);
+    if (links.isNotEmpty) stdout.writeln('연결: ${links.join(', ')}');
     return 0;
+  }
+
+  /// 이 노트와 이어진 노트 최대 5개. `[[링크]]`가 먼저, 추천은 `(추천)`.
+  List<String> _linksOf(String id) {
+    final dismissed = DismissedLinks(context.vault).load();
+    final out = <String>[];
+    for (final link in context.index.links(dismissed: dismissed)) {
+      final other = link.fromId == id
+          ? link.toId
+          : (link.toId == id ? link.fromId : null);
+      if (other == null || out.any((l) => l.startsWith('$other '))) continue;
+      final title = context.index.byId(other)?.title ?? '';
+      out.add('$other ${clip(title, 20)}${link.isSuggested ? ' (추천)' : ''}');
+      if (out.length >= 5) break;
+    }
+    return out;
   }
 
   /// `## 섹션` 제목부터 같은 단계 이상의 다음 제목 전까지.
@@ -122,6 +140,7 @@ class AddCommand extends Command<int> {
       ..addOption('tags', help: '쉼표로 구분', defaultsTo: '')
       ..addOption('topic', help: '주제 폴더 (없으면 첫 태그, 그것도 없으면 미분류)')
       ..addFlag('draft', help: '정리 대기로 저장', negatable: false)
+      ..addOption('aliases', help: '다른 표기·다른 이름, 쉼표로 구분 (예: 엑스코드,Xcode)', defaultsTo: '')
       ..addOption('source-session', help: '근거가 된 Claude Code 세션 id (앞 8자 이상)');
   }
 
@@ -162,6 +181,9 @@ class AddCommand extends Command<int> {
         draft: args['draft'] as bool,
         source: sessionId == null ? 'ai' : 'session',
         sources: sources,
+        aliases: (args['aliases'] as String).split(','),
+        // 한 세션에서 저장한 노트는 한 묶음: brain undo s_<세션 앞 8자>로 통째로 되돌린다.
+        batch: sessionId == null ? null : 's_${sessionId.substring(0, 8)}',
       );
       if (sessionId != null) {
         context.registry.mark(sessionId, SessionStatus.saved, notes: [id]);
@@ -236,6 +258,7 @@ class IndexCommand extends Command<int> {
     final result = argResults!['rebuild'] as bool
         ? context.index.rebuild()
         : context.index.sync();
+    VaultSummary(context.vault, context.index).writeAll();
     stdout.writeln('색인 $result (노트 ${context.index.notes().length}개)');
     return 0;
   }
