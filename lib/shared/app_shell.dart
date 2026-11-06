@@ -8,6 +8,7 @@ import '../app/router/app_page.dart';
 import '../app/theme/app_colors.dart';
 import '../core/app_config_provider.dart';
 import '../core/brain_providers.dart';
+import '../features/connect/auto_tidy.dart';
 import '../features/notes/note_editor_dialog.dart';
 import '../features/notes/note_panel.dart';
 import 'command_palette.dart';
@@ -30,6 +31,8 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = AppColors.of(context);
     final config = ref.watch(appConfigProvider);
+    // 자동 정리 타이머를 앱과 함께 띄운다 (설정에서 켰을 때만 실제로 돈다).
+    ref.watch(autoTidyProvider);
     final configNotifier = ref.read(appConfigProvider.notifier);
     final selected = ref.watch(selectedNoteProvider);
     // 패널을 닫아 둔 상태에서 노트를 고르면 연다.

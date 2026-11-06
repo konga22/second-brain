@@ -8,7 +8,9 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
+import '../connect/auto_tidy.dart';
 
 /// 설정 (설계서 3절 `/settings`, 4.1, 5.7): 지식 폴더 위치·Finder 열기, 백업·복원, 온보딩 요약.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -19,15 +21,37 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  AppConfig _config = AppConfig.load();
+  // 설정은 한 저장소(appConfigProvider)로만 읽고 쓴다. 따로 읽으면 패널 너비·배율을 옛값으로 덮어쓴다.
+  AppConfig get _config => ref.read(appConfigProvider);
   String? _message;
   bool _isWorking = false;
 
   static const backupRemindDays = 7;
 
   void _save(AppConfig config) {
-    config.save();
-    setState(() => _config = config);
+    ref.read(appConfigProvider.notifier).update((_) => config);
+    setState(() {});
+  }
+
+  Future<void> _onAutoTidy(bool isOn) async {
+    if (isOn) {
+      final isConfirmed = await showShadDialog<bool>(
+        context: context,
+        builder: (context) => ShadDialog(
+          title: const Text('자동 정리를 켤까요?'),
+          description: Text(
+            '대화 중 자동 저장에서 빠진 세션을 앱이 6시간마다 정리합니다. 사용자의 Claude Code 사용량을 쓰며, '
+            '하루 ${_config.autoTidyDailyUsd.toStringAsFixed(1)}달러에 닿으면 멈춥니다. 긴 세션(대화 150개 넘음)은 건너뜁니다.',
+          ),
+          actions: [
+            ShadButton.outline(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
+            ShadButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('켜기')),
+          ],
+        ),
+      );
+      if (isConfirmed != true) return;
+    }
+    _save(_config.copyWith(isAutoTidyOn: isOn));
   }
 
   /// iCloud 동기화 폴더는 파일이 기기에 없을 수 있어 경고한다 (설계서 4.1).
@@ -104,9 +128,82 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
+  /// 자동으로 지식 넣기: 대화 중 자동 저장 + 자동 정리(안전망).
+  Widget _autoCard(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final config = ref.watch(appConfigProvider);
+    final tidy = ref.watch(autoTidyProvider);
+    final spent = ref.read(autoTidyProvider.notifier).spentToday(config);
+    return ShadCard(
+      title: const Text('자동으로 지식 넣기'),
+      description: const Text(
+        '대화를 하다 결정·문제 해결·작업 규칙 같은 지식이 생기면 묻지 않고 정리 대기에 초안으로 넣습니다. 확인은 노트·정리 보드에서 합니다.',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                ShadSwitch(
+                  value: !config.isAutoCaptureOff,
+                  onChanged: (on) => _save(config.copyWith(isAutoCaptureOff: !on)),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('대화 중 자동 저장 — Claude Code 세션마다 그 자리에서 저장 (새 세션부터 적용, 노트 하나에 출력 몇백 토큰)'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                ShadSwitch(value: config.isAutoTidyOn, onChanged: _onAutoTidy),
+                const SizedBox(width: 10),
+                const Expanded(child: Text('자동 정리 — 그래도 빠진 세션을 앱이 6시간마다 정리 (안전망)')),
+              ],
+            ),
+            if (config.isAutoTidyOn) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('하루 상한', style: theme.textTheme.muted),
+                  const SizedBox(width: 8),
+                  for (final usd in const [0.5, 1.0, 3.0])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: (config.autoTidyDailyUsd == usd ? ShadButton.secondary : ShadButton.ghost)(
+                        size: ShadButtonSize.sm,
+                        height: 26,
+                        onPressed: () => _save(config.copyWith(autoTidyDailyUsd: usd)),
+                        child: Text('${usd.toStringAsFixed(1)}달러'),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  Text('오늘 ${spent.toStringAsFixed(2)}달러 씀', style: theme.textTheme.muted),
+                  const Spacer(),
+                  ShadButton.outline(
+                    size: ShadButtonSize.sm,
+                    enabled: !tidy.isRunning,
+                    onPressed: () => ref.read(autoTidyProvider.notifier).run(),
+                    child: Text(tidy.isRunning ? '정리 중…' : '지금 정리'),
+                  ),
+                ],
+              ),
+              if (tidy.isRunning) Text(tidy.step, style: theme.textTheme.muted),
+              for (final line in tidy.log.take(6)) Text(line, style: theme.textTheme.muted.copyWith(fontSize: 12)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    ref.watch(appConfigProvider);
     final colors = AppColors.of(context);
     final vault = ref.watch(vaultProvider);
     final warning = _cloudWarning(vault.root);
@@ -198,6 +295,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        _autoCard(context),
         if (_message != null)
           Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!, style: theme.textTheme.muted)),
       ],
