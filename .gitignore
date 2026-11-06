@@ -10,3 +10,14 @@ node_modules/
 
 # 시안 작업 폴더 (최종본만 docs/시안/에 복사해 둔다)
 .codex/temp/
+
+# Flutter·Dart가 만드는 파일 (flutter create 기본값)
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+.idea/
+*.iml
+.vscode/
+macos/Flutter/ephemeral/
+macos/Pods/
+**/xcuserdata/
