@@ -146,6 +146,11 @@ class PastSessionsController extends Notifier<PastSessionsState> {
     state = state.copyWith(excludedProjects: excluded);
   }
 
+  /// 모든 프로젝트를 고르거나(빈 제외 목록) 모두 뺀다.
+  void selectAll(bool isOn) => state = state.copyWith(
+    excludedProjects: isOn ? <String>{} : state.unsavedByProject.keys.toSet(),
+  );
+
   void stop() {
     _isStopRequested = true;
     _process?.kill();

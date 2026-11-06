@@ -141,7 +141,7 @@ final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
   ];
   final edges = [
     for (final link in links)
-      GraphEdge(link.fromId, link.toId, weight: link.isSuggested ? 0.5 : 1),
+      GraphEdge(link.fromId, link.toId, weight: link.isSuggested ? 0.25 : 1),
   ];
   final initial = index.graphPositions();
   if (nodes.every((n) => initial.containsKey(n.id))) {

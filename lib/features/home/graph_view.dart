@@ -20,6 +20,10 @@ class GraphView extends ConsumerStatefulWidget {
 class _GraphViewState extends ConsumerState<GraphView> {
   final _transform = TransformationController();
   bool _isLocal = false;
+  bool _showSuggested = false;
+
+  /// 폴더(뇌) 하나만 보기. null이면 전체.
+  String? _topic;
   String? _fittedKey;
   String? _hovered;
 
@@ -73,6 +77,16 @@ class _GraphViewState extends ConsumerState<GraphView> {
       ..scaleByDouble(scale, scale, 1, 1);
   }
 
+  /// 가운데를 기준으로 확대·축소.
+  void _zoomBy(double factor, Size viewport) {
+    final center = Offset(viewport.width / 2, viewport.height / 2);
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(center.dx, center.dy, 0, 1)
+      ..scaleByDouble(factor, factor, 1, 1)
+      ..translateByDouble(-center.dx, -center.dy, 0, 1)
+      ..multiply(_transform.value);
+  }
+
   String? _hit(Offset world, Map<String, Point<double>> positions, double scale) {
     String? best;
     var bestDist = 14 / scale;
@@ -98,9 +112,11 @@ class _GraphViewState extends ConsumerState<GraphView> {
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
+        // 가운데가 밝은 보라빛 어둠: 노드가 빛나 보이되 너무 어둡지 않게 (11/07 가시성 의견)
         gradient: const RadialGradient(
-          radius: 1.2,
-          colors: [AppColors.graphTop, AppColors.graphBottom],
+          radius: 1.1,
+          colors: [Color(0xff2b2550), Color(0xff16132a), Color(0xff0d0b18)],
+          stops: [0, 0.55, 1],
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -121,9 +137,12 @@ class _GraphViewState extends ConsumerState<GraphView> {
             );
           }
           final isLocal = _isLocal && selected != null && allPositions.containsKey(selected);
-          final visible = isLocal
+          var visible = isLocal
               ? _neighborhood(selected, allLinks)
               : allPositions.keys.toSet();
+          if (_topic != null) {
+            visible = {for (final id in visible) if (docs[id]?.topic == _topic) id};
+          }
           final positions = {
             for (final id in visible) id: ?allPositions[id],
           };
@@ -131,11 +150,24 @@ class _GraphViewState extends ConsumerState<GraphView> {
             for (final l in allLinks)
               if (positions.containsKey(l.fromId) && positions.containsKey(l.toId)) l,
           ];
+          final topics = {for (final d in notes) d.topic}.toList()..sort();
           final degree = <String, int>{};
           for (final l in links) {
+            if (l.isSuggested) continue; // 허브·크기는 확정 연결 기준
+
             degree.update(l.fromId, (n) => n + 1, ifAbsent: () => 1);
             degree.update(l.toId, (n) => n + 1, ifAbsent: () => 1);
           }
+          // 추천 연결(점선)은 노드를 골랐을 때 그 노드 것만, 또는 [추천 연결]을 켰을 때만 그린다.
+          final focusForEdges = _hovered ?? selected;
+          final drawn = [
+            for (final l in links)
+              if (!l.isSuggested ||
+                  _showSuggested ||
+                  l.fromId == focusForEdges ||
+                  l.toId == focusForEdges)
+                l,
+          ];
           final focus = _hovered ?? selected;
           final neighbors = <String>{
             if (focus != null) ...[
@@ -154,7 +186,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
           return LayoutBuilder(
             builder: (context, constraints) {
               final viewport = constraints.biggest;
-              final fitKey = '${isLocal ? selected : 'all'}:${positions.length}:${viewport.width.round()}';
+              final fitKey = '${isLocal ? selected : 'all'}:$_topic:${positions.length}:${viewport.width.round()}';
               if (_fittedKey != fitKey) {
                 _fittedKey = fitKey;
                 WidgetsBinding.instance.addPostFrameCallback((_) => _fit(Offset.zero & bounds.size, viewport));
@@ -186,7 +218,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
                             painter: _GraphPainter(
                               origin: bounds.topLeft,
                               positions: positions,
-                              links: links,
+                              links: drawn,
                               degree: degree,
                               docs: docs,
                               focus: focus,
@@ -216,12 +248,52 @@ class _GraphViewState extends ConsumerState<GraphView> {
                       ],
                     ),
                   ),
+                  // 폴더(뇌)별로 걸러 보기
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    right: 260,
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: [
+                        _ModeButton(label: '모든 폴더', isOn: _topic == null, onTap: () => setState(() => _topic = null)),
+                        for (final t in topics)
+                          _ModeButton(label: t, isOn: _topic == t, onTap: () => setState(() => _topic = _topic == t ? null : t)),
+                      ],
+                    ),
+                  ),
                   Positioned(
                     left: 12,
                     bottom: 10,
-                    child: Text(
-                      '노드 ${positions.length} · 연결 ${links.where((l) => !l.isSuggested).length} · 추천 ${links.where((l) => l.isSuggested).length} (점선)',
-                      style: theme.textTheme.muted.copyWith(color: AppColors.graphLabel, fontSize: 11),
+                    child: Row(
+                      children: [
+                        const _Legend(color: Color(0xffffffff), label: '선택한 노트', dot: true),
+                        const _Legend(color: Color(0xb3c4b5fd), label: '직접 연결 [[ ]]'),
+                        const _Legend(color: Color(0x80d6d3e8), label: '추천 연결', dashed: true),
+                        const SizedBox(width: 8),
+                        _ModeButton(
+                          label: _showSuggested ? '추천 연결 숨기기' : '추천 연결 모두 보기',
+                          isOn: _showSuggested,
+                          onTap: () => setState(() => _showSuggested = !_showSuggested),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          '노드 ${positions.length} · 연결 ${links.where((l) => !l.isSuggested).length} · 추천 ${links.where((l) => l.isSuggested).length}',
+                          style: theme.textTheme.muted.copyWith(color: AppColors.graphLabel, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    right: 10,
+                    bottom: 10,
+                    child: Column(
+                      children: [
+                        _ModeButton(label: '+', isOn: false, onTap: () => _zoomBy(1.25, viewport)),
+                        const SizedBox(height: 4),
+                        _ModeButton(label: '−', isOn: false, onTap: () => _zoomBy(0.8, viewport)),
+                      ],
                     ),
                   ),
                 ],
@@ -232,6 +304,38 @@ class _GraphViewState extends ConsumerState<GraphView> {
       ),
     );
   }
+}
+
+/// 그래프 이름표: 괄호 뒤·쌍점 뒤 설명을 빼고 10자로 줄인다.
+/// "AI 실수 교정 설계: 검증 에이전트와 diff" → "AI 실수 교정 설계"
+String shortTitle(String title, {int max = 10}) {
+  var t = title.split(RegExp(r'[:(\[—-]')).first.trim();
+  if (t.isEmpty) t = title;
+  final runes = t.runes.toList();
+  return runes.length <= max ? t : '${String.fromCharCodes(runes.take(max))}…';
+}
+
+class _Legend extends StatelessWidget {
+  const _Legend({required this.color, required this.label, this.dot = false, this.dashed = false});
+
+  final Color color;
+  final String label;
+  final bool dot;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(right: 12),
+    child: Row(
+      children: [
+        dot
+            ? Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle))
+            : Text(dashed ? '┄┄' : '──', style: TextStyle(color: color, fontSize: 11)),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(color: AppColors.graphLabel, fontSize: 11)),
+      ],
+    ),
+  );
 }
 
 class _ModeButton extends StatelessWidget {
@@ -289,6 +393,9 @@ class _GraphPainter extends CustomPainter {
 
   static const _accent = Color(0xff8b5cf6);
 
+  /// 노드가 이 수 이하면 이름표를 모두 단다 (적을 때는 이름이 보여야 무엇인지 안다).
+  static const labelAllLimit = 60;
+
   Offset _at(String id) {
     final p = positions[id]!;
     return Offset(p.x, p.y) - origin;
@@ -305,7 +412,9 @@ class _GraphPainter extends CustomPainter {
     for (final e in groups.entries) {
       if (e.value.length < 2) continue;
       final c = e.value.reduce((a, b) => a + b) / e.value.length.toDouble();
-      _label(canvas, e.key, c + const Offset(0, -40), const Color(0x40d6d3e8), 13 / scale.clamp(0.6, 2), bold: true);
+      // 주제 이름은 그 주제 노드들 위쪽 끝에
+      final top = e.value.map((o) => o.dy).reduce(min);
+      _label(canvas, e.key, Offset(c.dx, top - 28), const Color(0x99c4b5fd), 14 / scale.clamp(0.6, 2), bold: true);
     }
 
     for (final link in links) {
@@ -327,13 +436,13 @@ class _GraphPainter extends CustomPainter {
     for (final id in positions.keys) {
       final c = _at(id);
       final d = degree[id] ?? 0;
-      final r = (3.5 + sqrt(d) * 2.2).clamp(3.5, 12.0);
+      final r = (4.5 + sqrt(d) * 2.6).clamp(4.5, 14.0);
       final isSelected = id == selected;
       final isHot = id == focus || neighbors.contains(id);
       final isDraft = docs[id]?.isDraft ?? false;
       final color = isSelected || id == focus
-          ? _accent
-          : (isHot ? const Color(0xffc4b5fd) : AppColors.graphNode);
+          ? const Color(0xffffffff)
+          : (isHot ? const Color(0xffc4b5fd) : const Color(0xffe4e1f5));
       canvas.drawCircle(
         c,
         r * 2.4,
@@ -352,15 +461,17 @@ class _GraphPainter extends CustomPainter {
             ..color = const Color(0x99f59e0b),
         );
       }
-      final showLabel = id == focus || isSelected || neighbors.contains(id) || d >= 3 || scale > 1.3;
+      // 이름표는 고른 노드·이웃·허브(확정 연결 2개 이상)에만, 확대하면 전부. 길면 10자로 줄인다.
+      final showLabel = positions.length <= labelAllLimit || id == focus || isSelected || neighbors.contains(id) || d >= 2 || scale > 1.4;
       if (showLabel) {
-        final title = docs[id]?.title ?? id;
+        final title = shortTitle(docs[id]?.title ?? id);
         _label(
           canvas,
-          title.length > 22 ? '${title.substring(0, 21)}…' : title,
-          c + Offset(0, r + 9),
-          isHot || isSelected ? const Color(0xffede9fe) : AppColors.graphLabel,
-          11 / scale.clamp(0.6, 2.5),
+          title,
+          c + Offset(0, r + 10),
+          isHot || isSelected ? const Color(0xffffffff) : const Color(0xddeae7f7),
+          12 / scale.clamp(0.6, 2.5),
+          shadow: true,
         );
       }
     }
@@ -375,7 +486,7 @@ class _GraphPainter extends CustomPainter {
     }
   }
 
-  void _label(Canvas canvas, String text, Offset center, Color color, double fontSize, {bool bold = false}) {
+  void _label(Canvas canvas, String text, Offset center, Color color, double fontSize, {bool bold = false, bool shadow = false}) {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
@@ -383,7 +494,8 @@ class _GraphPainter extends CustomPainter {
           color: color,
           fontSize: fontSize,
           fontFamily: 'Pretendard',
-          fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
+          fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+          shadows: shadow ? const [Shadow(color: Color(0xcc000000), blurRadius: 4)] : null,
         ),
       ),
       textDirection: TextDirection.ltr,

@@ -33,6 +33,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _input = TextEditingController();
   final _turns = <_Turn>[];
 
+  /// 답할 범위: 주제 폴더(뇌) 하나. 그 폴더에서 먼저 찾고 모자라면 전체에서 채운다.
+  String? _topic;
+
   @override
   void dispose() {
     _input.dispose();
@@ -48,7 +51,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     final gateway = ref.read(aiGatewayProvider);
     final vault = ref.read(vaultProvider);
     try {
-      final (answer, context) = await gateway.ask(vault, ref.read(searchIndexProvider), question);
+      final (answer, context) = await gateway.ask(vault, ref.read(searchIndexProvider), question, topic: _topic);
       var text = answer.answer;
       // 실수 노트가 들어간 답이면 검증해서, 어겼으면 한 번 다시 쓴다 (설계서 5.3).
       if (context.lessons.isNotEmpty) {
@@ -180,6 +183,27 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               const Spacer(),
               if (user == null)
                 ShadButton(size: ShadButtonSize.sm, onPressed: () => showLoginDialog(context), child: const Text('로그인')),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(32, 0, 32, 8),
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('답할 범위', style: theme.textTheme.muted),
+              const SizedBox(width: 4),
+              for (final t in [null, ...ref.watch(searchIndexProvider).topics()])
+                (t == _topic ? ShadButton.secondary : ShadButton.ghost)(
+                  size: ShadButtonSize.sm,
+                  height: 26,
+                  onPressed: () => setState(() => _topic = t),
+                  child: Text(t ?? '모든 폴더'),
+                ),
+              if (_topic != null)
+                Text('· $_topic 지식으로 먼저 답하고, 없으면 전체에서 찾습니다', style: theme.textTheme.muted.copyWith(fontSize: 12)),
             ],
           ),
         ),

@@ -191,7 +191,24 @@ class _PastSessionsCard extends ConsumerWidget {
             if (state.isLoaded && projects.isEmpty && !state.isRunning)
               Text('정리할 세션이 없습니다.', style: theme.textTheme.muted),
             if (projects.isNotEmpty) ...[
-              Text('정리할 프로젝트 (체크를 빼면 제외)', style: theme.textTheme.small),
+              Row(
+                children: [
+                  Text('정리할 프로젝트 (체크를 빼면 제외)', style: theme.textTheme.small),
+                  const Spacer(),
+                  ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    enabled: !state.isRunning,
+                    onPressed: () => controller.selectAll(true),
+                    child: const Text('전체 선택'),
+                  ),
+                  ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    enabled: !state.isRunning,
+                    onPressed: () => controller.selectAll(false),
+                    child: const Text('전체 해제'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 6),
               for (final entry in projects)
                 Padding(

@@ -88,9 +88,10 @@ class AiGateway {
   Future<(ChatAnswer, ChatContext)> ask(
     Vault vault,
     SearchIndex index,
-    String question,
-  ) async {
-    var context = ChatContext.build(vault, index, question);
+    String question, {
+    String? topic,
+  }) async {
+    var context = ChatContext.build(vault, index, question, topic: topic);
     var counted = false;
     if (context.needsExpansion && index.notes().isNotEmpty) {
       final expanded = await _invoke('ai-chat', {
@@ -103,6 +104,7 @@ class AiGateway {
         vault,
         index,
         question,
+        topic: topic,
         extraQueries: [for (final q in (expanded['queries'] as List? ?? [])) '$q'],
       );
     }

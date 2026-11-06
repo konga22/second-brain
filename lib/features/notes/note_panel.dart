@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:brain_core/brain_core.dart';
-import 'package:flutter/material.dart' show SelectableText;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -9,11 +8,17 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
+import '../../shared/markdown_view.dart';
 import 'note_editor_dialog.dart';
 
 /// 오른쪽 노트 패널 (설계서 3.2 3단 배치). 어느 화면에서든 노트를 고르면 여기 열린다.
 class NotePanel extends ConsumerWidget {
-  const NotePanel({super.key});
+  const NotePanel({super.key, this.width = 340, this.onClose});
+
+  final double width;
+
+  /// 패널 닫기 (⌘\\). 고른 노트는 그대로 두어 다시 열면 이어 본다.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -21,19 +26,36 @@ class NotePanel extends ConsumerWidget {
     final id = ref.watch(selectedNoteProvider);
     ref.watch(vaultRevisionProvider);
     return Container(
-      width: 340,
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border(left: BorderSide(color: colors.border)),
-      ),
-      child: id == null
-          ? Center(
-              child: Text(
-                '노트를 고르면 여기에 열립니다',
-                style: ShadTheme.of(context).textTheme.muted,
+      width: width,
+      color: colors.surface,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: id == null
+                ? Center(
+                    child: Text(
+                      '노트를 고르면 여기에 열립니다',
+                      style: ShadTheme.of(context).textTheme.muted,
+                    ),
+                  )
+                : _NoteDetail(id: id),
+          ),
+          if (onClose != null)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: ShadTooltip(
+                builder: (_) => const Text('패널 닫기 (⌘\\)'),
+                child: ShadIconButton.ghost(
+                  width: 26,
+                  height: 26,
+                  icon: const Icon(LucideIcons.panelRightClose, size: 15),
+                  onPressed: onClose,
+                ),
               ),
-            )
-          : _NoteDetail(id: id),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -119,32 +141,33 @@ class _NoteDetail extends ConsumerWidget {
         if (link.fromId == id || link.toId == id)
           (link, link.fromId == id ? link.toId : link.fromId),
     ];
+    final relatedLessons = isRaw
+        ? const <Lesson>[]
+        : ref.watch(lessonStoreProvider).match('${note.title} ${note.summary}');
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 36, 20, 24),
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: Text(note.title, style: theme.textTheme.h4)),
-            ShadIconButton.ghost(
-              width: 26,
-              height: 26,
-              icon: const Icon(LucideIcons.x, size: 14),
-              onPressed: () => ref.read(selectedNoteProvider.notifier).select(null),
+            Icon(LucideIcons.folder, size: 13, color: colors.textFaint),
+            const SizedBox(width: 4),
+            Expanded(child: Text(doc.folder, style: theme.textTheme.muted.copyWith(fontSize: 12))),
+            Text(doc.id, style: theme.textTheme.muted.copyWith(fontSize: 12, fontFamily: 'Menlo')),
+            const SizedBox(width: 30),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(note.title, style: theme.textTheme.h4),
+        if (doc.isDraft || isRaw)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(
+              children: [
+                if (doc.isDraft) ShadBadge.secondary(child: const Text('정리 대기')),
+                if (isRaw) ShadBadge.outline(child: const Text('원본')),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text('${doc.id} · ${doc.folder}', style: theme.textTheme.muted),
-            if (doc.isDraft) ShadBadge.secondary(child: const Text('정리 대기')),
-            if (isRaw) ShadBadge.outline(child: const Text('원본')),
-          ],
-        ),
+          ),
         if (note.summary.isNotEmpty) ...[
           const SizedBox(height: 10),
           Text(note.summary, style: theme.textTheme.small),
@@ -161,6 +184,11 @@ class _NoteDetail extends ConsumerWidget {
             ],
           ),
         ],
+        const SizedBox(height: 6),
+        Text(
+          '출처 ${note.source} · 수정 ${_date(note.updated ?? note.created ?? doc.mtime)} · 연결 ${links.length}',
+          style: theme.textTheme.muted.copyWith(fontSize: 12),
+        ),
         const SizedBox(height: 12),
         Wrap(
           spacing: 6,
@@ -205,17 +233,32 @@ class _NoteDetail extends ConsumerWidget {
         const SizedBox(height: 16),
         Container(height: 1, color: colors.border),
         const SizedBox(height: 12),
-        SelectableText(
-          note.body.trim().isEmpty ? '(본문 없음)' : note.body.trim(),
-          style: theme.textTheme.p.copyWith(fontSize: 13, height: 1.6),
+        MarkdownView(
+          text: note.body.trim().isEmpty ? '(본문 없음)' : note.body.trim(),
+          onLink: (title) {
+            final target = index.byTitle(title);
+            if (target != null) ref.read(selectedNoteProvider.notifier).select(target.id);
+          },
         ),
-        if (links.isNotEmpty) ...[
+        if (links.any((l) => !l.$1.isSuggested)) ...[
           const SizedBox(height: 20),
-          Text('연결 ${links.length}', style: theme.textTheme.small),
-          const SizedBox(height: 6),
+          _SectionTitle(icon: LucideIcons.link, label: '연결된 노트'),
           for (final (link, otherId) in links)
-            if (index.byId(otherId) case final other?)
-              _LinkRow(
+            if (!link.isSuggested)
+              if (index.byId(otherId) case final other?)
+                _LinkRow(
+                  other: other,
+                  isSuggested: false,
+                  onOpen: () => ref.read(selectedNoteProvider.notifier).select(otherId),
+                ),
+        ],
+        if (links.any((l) => l.$1.isSuggested)) ...[
+          const SizedBox(height: 16),
+          _SectionTitle(icon: LucideIcons.sparkles, label: '추천 연결 — 확정하면 본문에 [[제목]]으로 써요'),
+          for (final (link, otherId) in links)
+            if (link.isSuggested)
+              if (index.byId(otherId) case final other?)
+                _LinkRow(
                 other: other,
                 isSuggested: link.isSuggested,
                 onOpen: () =>
@@ -230,9 +273,46 @@ class _NoteDetail extends ConsumerWidget {
         ],
         if (note.sources.isNotEmpty) ...[
           const SizedBox(height: 16),
-          Text('근거: ${note.sources.join(', ')}', style: theme.textTheme.muted),
+          _SectionTitle(icon: LucideIcons.fileText, label: '근거 원본'),
+          for (final source in note.sources)
+            Text(source, style: theme.textTheme.muted.copyWith(fontSize: 12, fontFamily: 'Menlo')),
+        ],
+        if (relatedLessons.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _SectionTitle(icon: LucideIcons.lightbulb, label: '관련 실수 노트'),
+          for (final lesson in relatedLessons)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: colors.surfaceRaised, borderRadius: BorderRadius.circular(8)),
+              child: Text('${lesson.trigger} → ${lesson.action}  ${lesson.id}', style: const TextStyle(fontSize: 12)),
+            ),
         ],
       ],
+    );
+  }
+}
+
+String _date(DateTime t) => '${t.toLocal().month}/${t.toLocal().day}';
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: colors.textMuted),
+          const SizedBox(width: 6),
+          Expanded(child: Text(label, style: TextStyle(fontSize: 12, color: colors.textMuted))),
+        ],
+      ),
     );
   }
 }
@@ -280,25 +360,11 @@ class _LinkRow extends StatelessWidget {
             ),
           ),
           if (onAccept != null)
-            ShadTooltip(
-              builder: (_) => const Text('[[링크]]로 확정'),
-              child: ShadIconButton.ghost(
-                width: 24,
-                height: 24,
-                icon: const Icon(LucideIcons.check, size: 13),
-                onPressed: onAccept,
-              ),
-            ),
-          if (onDismiss != null)
-            ShadTooltip(
-              builder: (_) => const Text('이 추천 거절 (다시 추천 안 함)'),
-              child: ShadIconButton.ghost(
-                width: 24,
-                height: 24,
-                icon: const Icon(LucideIcons.x, size: 13),
-                onPressed: onDismiss,
-              ),
-            ),
+            ShadButton(size: ShadButtonSize.sm, height: 24, onPressed: onAccept, child: const Text('연결')),
+          if (onDismiss != null) ...[
+            const SizedBox(width: 4),
+            ShadButton.outline(size: ShadButtonSize.sm, height: 24, onPressed: onDismiss, child: const Text('거절')),
+          ],
         ],
       ),
     );
