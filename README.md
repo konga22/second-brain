@@ -40,6 +40,12 @@ flutter test
 cd packages/brain_core && dart test
 ```
 
+지난 대화 정리를 실제 앱 화면에서 버튼으로 돌려 보는 시험이다. 사용자의 Claude Code를 실제로 부르므로 사용량이 든다. `PROJECT`에는 짧은 세션이 있는 프로젝트 이름을 넣는다.
+
+```bash
+flutter test integration_test/past_sessions_test.dart -d macos --dart-define=START_PAGE=/connect --dart-define=PROJECT=<프로젝트 이름>
+```
+
 ```bash
 cd packages/brain_cli && dart run bin/brain.dart doctor
 ```
