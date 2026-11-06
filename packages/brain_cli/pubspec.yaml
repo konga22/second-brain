@@ -11,6 +11,7 @@ dependencies:
   args: ^2.7.0
   brain_core:
     path: ../brain_core
+  path: ^1.9.1
 
 dev_dependencies:
   lints: ^6.0.0
