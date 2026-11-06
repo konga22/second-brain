@@ -66,7 +66,23 @@ class AppConfig {
     this.uiScale = 1,
     this.panelWidth = 340,
     this.isPanelOpen = true,
+    this.isAutoCaptureOff = false,
+    this.isAutoTidyOn = false,
+    this.autoTidyDailyUsd = 1.0,
+    this.autoTidySpentDay,
+    this.autoTidySpentUsd = 0,
   });
+
+  /// 대화 중 자동 저장 끄기. 기본은 켬: 세션 시작 훅이 "지식이 확정되면 바로 초안으로 저장"을 알린다.
+  final bool isAutoCaptureOff;
+
+  /// 자동 정리: 앱이 저장 안 한 세션을 하루 비용 상한 안에서 정리한다 (기본 끔, 켤 때 동의).
+  final bool isAutoTidyOn;
+  final double autoTidyDailyUsd;
+
+  /// 자동 정리에 오늘 쓴 비용 (날짜가 바뀌면 0부터).
+  final String? autoTidySpentDay;
+  final double autoTidySpentUsd;
 
   /// 화면 전체 크기 (⌘+ / ⌘-), 오른쪽 노트 패널 너비·열림.
   final double uiScale;
@@ -99,6 +115,11 @@ class AppConfig {
         uiScale: (json['uiScale'] as num?)?.toDouble() ?? 1,
         panelWidth: (json['panelWidth'] as num?)?.toDouble() ?? 340,
         isPanelOpen: json['panelOpen'] != false,
+        isAutoCaptureOff: json['autoCaptureOff'] == true,
+        isAutoTidyOn: json['autoTidy'] == true,
+        autoTidyDailyUsd: (json['autoTidyDailyUsd'] as num?)?.toDouble() ?? 1.0,
+        autoTidySpentDay: json['autoTidySpentDay'] as String?,
+        autoTidySpentUsd: (json['autoTidySpentUsd'] as num?)?.toDouble() ?? 0,
       );
     } on FormatException {
       return const AppConfig();
@@ -112,6 +133,11 @@ class AppConfig {
     double? uiScale,
     double? panelWidth,
     bool? isPanelOpen,
+    bool? isAutoCaptureOff,
+    bool? isAutoTidyOn,
+    double? autoTidyDailyUsd,
+    String? autoTidySpentDay,
+    double? autoTidySpentUsd,
   }) => AppConfig(
     vaultPath: vaultPath ?? this.vaultPath,
     lastBackupAt: lastBackupAt ?? this.lastBackupAt,
@@ -119,6 +145,11 @@ class AppConfig {
     uiScale: uiScale ?? this.uiScale,
     panelWidth: panelWidth ?? this.panelWidth,
     isPanelOpen: isPanelOpen ?? this.isPanelOpen,
+    isAutoCaptureOff: isAutoCaptureOff ?? this.isAutoCaptureOff,
+    isAutoTidyOn: isAutoTidyOn ?? this.isAutoTidyOn,
+    autoTidyDailyUsd: autoTidyDailyUsd ?? this.autoTidyDailyUsd,
+    autoTidySpentDay: autoTidySpentDay ?? this.autoTidySpentDay,
+    autoTidySpentUsd: autoTidySpentUsd ?? this.autoTidySpentUsd,
   );
 
   void save() => writeFileAtomic(
@@ -130,6 +161,11 @@ class AppConfig {
       'uiScale': uiScale,
       'panelWidth': panelWidth,
       'panelOpen': isPanelOpen,
+      'autoCaptureOff': isAutoCaptureOff,
+      'autoTidy': isAutoTidyOn,
+      'autoTidyDailyUsd': autoTidyDailyUsd,
+      'autoTidySpentDay': ?autoTidySpentDay,
+      'autoTidySpentUsd': autoTidySpentUsd,
     }),
   );
 }

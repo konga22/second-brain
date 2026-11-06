@@ -113,10 +113,21 @@ class ClaudeSessions {
   }
 
   /// 앞 6자 이상으로 세션을 찾는다.
+  ///
+  /// 세션 파일 이름이 세션 id라서 이름으로 바로 찾는다. 목록(list)의 걸러 내기
+  /// (사용자 대화 2개 미만, 지식 폴더 안 세션)는 적용하지 않는다: 대화 중 자동 저장은
+  /// 첫 메시지에서도 그 세션을 근거로 남겨야 하기 때문이다 (사용기 #17).
   ClaudeSession? find(String idPrefix, {required Vault vault}) {
     if (idPrefix.length < 6) return null;
-    for (final session in list(vault: vault)) {
-      if (session.sessionId.startsWith(idPrefix)) return session;
+    final dir = Directory(projectsDir);
+    if (!dir.existsSync()) return null;
+    for (final project in dir.listSync().whereType<Directory>()) {
+      for (final file in project.listSync().whereType<File>()) {
+        final name = file.uri.pathSegments.last;
+        if (!name.endsWith('.jsonl') || !name.startsWith(idPrefix)) continue;
+        final session = _summary(file, file.statSync());
+        if (session != null) return session;
+      }
     }
     return null;
   }

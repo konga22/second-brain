@@ -35,7 +35,7 @@ class HookCommand extends Command<int> {
     try {
       switch (event) {
         case 'session-start':
-          _sessionStart();
+          _sessionStart(input);
         case 'prompt':
           _prompt(input);
         case 'session-end':
@@ -47,22 +47,43 @@ class HookCommand extends Command<int> {
     return 0;
   }
 
-  /// 온보딩 요약(`_profile.md`)이 있을 때만 짧게 넣는다. 없으면 0토큰.
-  void _sessionStart() {
-    if (AppConfig.load().isOnboardingOff) return; // 설정에서 끔
-    final profile = File(context.vault.profilePath);
-    if (!profile.existsSync()) return;
-    final text = clip(profile.readAsStringSync(), 600);
-    if (text.isEmpty) return;
+  /// 세션 시작: 온보딩 요약(`_profile.md`)과, 대화 중 자동 저장이 켜져 있으면 그 안내 한 줄.
+  /// 둘 다 꺼져 있으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
+  void _sessionStart(Map<String, dynamic> input) {
+    final config = AppConfig.load();
+    final cwd = input['cwd'] as String? ?? '';
+    final sessionId = input['session_id'] as String?;
+    final parts = <String>[];
+    if (!config.isOnboardingOff) {
+      final profile = File(context.vault.profilePath);
+      if (profile.existsSync()) {
+        final text = clip(profile.readAsStringSync(), 600);
+        if (text.isNotEmpty) {
+          parts.add('사용자의 세컨드 브레인 요약 (brain find로 더 찾을 수 있음): $text');
+        }
+      }
+    }
+    if (!config.isAutoCaptureOff &&
+        sessionId != null &&
+        !(cwd.isNotEmpty && context.vault.contains(cwd))) {
+      parts.add(autoCaptureNote(sessionId));
+    }
+    if (parts.isEmpty) return;
     stdout.write(
       jsonEncode({
         'hookSpecificOutput': {
           'hookEventName': 'SessionStart',
-          'additionalContext': '사용자의 세컨드 브레인 요약 (brain find로 더 찾을 수 있음): $text',
+          'additionalContext': parts.join('\n'),
         },
       }),
     );
   }
+
+  /// 대화 중 자동 저장 안내 (설계서 5.6 "대화 중 자동 저장", 2026-11-07 사용자 요청).
+  static String autoCaptureNote(String sessionId) =>
+      '세컨드 브레인 자동 저장이 켜져 있다. 이 대화에서 오래 쓸 지식(결정과 이유, 문제→원인→해결, 사용자 선호·작업 규칙, 자주 쓸 설정·명령)이 '
+      '확정되면 사용자에게 묻지 말고 그때 brain-save 스킬 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄만 덧붙인다. '
+      '세션 id는 $sessionId 이다(brain add --source-session). 잡담·추측·한 번 쓰고 마는 내용·비밀값은 저장하지 않고, 같은 지식은 brain find로 확인해 다시 넣지 않는다. 한 세션에 많아도 5개.';
 
   static final _systemInput = RegExp(r'<task-notification>|^\s*\[SYSTEM NOTIFICATION|^\s*<system-reminder');
 

@@ -91,4 +91,24 @@ void main() {
     // 지식 폴더 안에서 돈 세션은 뺀다.
     expect(sessions.list(vault: Vault('/Users/me')), isEmpty);
   });
+
+  test('대화 중 자동 저장: 사용자 메시지 1개인 세션도 id로 찾는다', () {
+    final temp = Directory.systemTemp.createTempSync('sessions_short_');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final project = Directory(p.join(temp.path, 'projects', '-Users-me-app'))
+      ..createSync(recursive: true);
+    File(p.join(project.path, 'feedbeef-0001.jsonl')).writeAsStringSync(
+      jsonEncode({
+        'type': 'user',
+        'sessionId': 'feedbeef-0001',
+        'cwd': '/Users/me/app',
+        'timestamp': '2026-11-07T10:00:00.000Z',
+        'message': {'role': 'user', 'content': '로그는 14일만 보관하기로 했어'},
+      }),
+    );
+    final sessions = ClaudeSessions(projectsDir: p.join(temp.path, 'projects'));
+    final vault = Vault(p.join(temp.path, 'SecondBrain'));
+    expect(sessions.list(vault: vault), isEmpty); // 목록에서는 짧아서 빠지지만
+    expect(sessions.find('feedbeef', vault: vault)?.sessionId, 'feedbeef-0001'); // id로는 찾는다
+  });
 }
