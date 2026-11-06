@@ -21,6 +21,10 @@ flutter run -d macos
 ```
 
 ```bash
+flutter test
+```
+
+```bash
 cd packages/brain_core && dart test
 ```
 
