@@ -3,12 +3,13 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'app_colors.dart';
 
-/// 차분한 도구형 + 보라 1색 (설계서 3.2). 글꼴은 Pretendard를 넣기 전까지 시스템 글꼴을 쓴다.
+/// 차분한 도구형 + 보라 1색 + Pretendard (설계서 3.2).
 ShadThemeData buildAppTheme(Brightness brightness) {
   final c = brightness == Brightness.dark ? AppColors.dark : AppColors.light;
   return ShadThemeData(
     brightness: brightness,
     radius: const BorderRadius.all(Radius.circular(6)),
+    textTheme: ShadTextTheme(family: 'Pretendard'),
     colorScheme: ShadColorScheme(
       background: c.background,
       foreground: c.text,

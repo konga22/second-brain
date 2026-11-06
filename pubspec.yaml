@@ -28,3 +28,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Pretendard v1.3.9 (OFL-1.1, assets/fonts/pretendard/LICENSE.txt). 쓰는 굵기 4개만 넣는다.
+  fonts:
+    - family: Pretendard
+      fonts:
+        - asset: assets/fonts/pretendard/Pretendard-Regular.otf
+          weight: 400
+        - asset: assets/fonts/pretendard/Pretendard-Medium.otf
+          weight: 500
+        - asset: assets/fonts/pretendard/Pretendard-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/pretendard/Pretendard-Bold.otf
+          weight: 700
