@@ -14,6 +14,14 @@ class ClaudeCode {
   static const marketplaceName = 'second-brain-local';
   static const pluginId = 'second-brain@$marketplaceName';
 
+  /// 플러그인에 넣는 스킬 4개 (설계서 5.2).
+  static const skillNames = [
+    'second-brain',
+    'brain-save',
+    'brain-ingest',
+    'brain-lint',
+  ];
+
   final Vault vault;
 
   String get _home => Platform.environment['HOME'] ?? '.';
@@ -104,7 +112,7 @@ class ClaudeCode {
 
   /// 설치 전에 사용자에게 보여 줄 바뀔 내용.
   List<String> plannedChanges() => [
-    '파일 만들기: $marketplaceRoot (플러그인 원본, 스킬 2개, 훅 2개, brain 명령)',
+    '파일 만들기: $marketplaceRoot (플러그인 원본, 스킬 4개, 검증 에이전트 1개, 훅 3개, brain 명령)',
     'Claude Code 설정에 로컬 마켓플레이스 "$marketplaceName" 추가 (claude plugin marketplace add)',
     'Claude Code 플러그인 "$pluginId" 설치 (claude plugin install, 사용자 범위)',
     '지식 폴더 ${vault.root}에 AGENTS.md·CLAUDE.md가 없으면 만들기',
@@ -145,12 +153,16 @@ class ClaudeCode {
       '$source/hooks.json',
       p.join(pluginDir, 'hooks', 'hooks.json'),
     );
-    for (final skill in ['second-brain', 'brain-save']) {
+    for (final skill in skillNames) {
       await copyText(
         '$source/skills/$skill/SKILL.md',
         p.join(pluginDir, 'skills', skill, 'SKILL.md'),
       );
     }
+    await copyText(
+      '$source/agents/brain-verifier.md',
+      p.join(pluginDir, 'agents', 'brain-verifier.md'),
+    );
     await copyBinary(
       'assets/brain/bin/brain',
       p.join(pluginDir, 'bin', 'brain'),

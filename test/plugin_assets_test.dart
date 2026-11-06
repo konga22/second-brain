@@ -12,6 +12,9 @@ void main() {
       'integrations/claude-code/hooks.json',
       'integrations/claude-code/skills/second-brain/SKILL.md',
       'integrations/claude-code/skills/brain-save/SKILL.md',
+      'integrations/claude-code/skills/brain-ingest/SKILL.md',
+      'integrations/claude-code/skills/brain-lint/SKILL.md',
+      'integrations/claude-code/agents/brain-verifier.md',
     ]) {
       expect(await rootBundle.loadString(path), isNotEmpty, reason: path);
     }
