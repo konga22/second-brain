@@ -1,0 +1,43 @@
+# brain bench 질문 세트 (설계서 5.8). 질문 → 찾아야 할 노트 id.
+# 2026-11-06 개발 맥 지식 폴더(노트 29개) 기준 시작판 20개. 제목을 그대로 쓰지 않고 사람이 물을 법한 말로 썼다.
+# 실행: brain bench --queries bench/questions.yaml
+- q: 맥 저장 공간이 부족할 때 뭘 지워야 해?
+  expect: [n_0003]
+- q: 스위프트 빌드가 이상하게 안 될 때
+  expect: [n_0004]
+- q: 아이폰 사진을 외장하드로 옮기는 법
+  expect: [n_0005]
+- q: 윈도우에서 아이폰 백업하기
+  expect: [n_0006]
+- q: Manifest.db가 안 생겨
+  expect: [n_0007]
+- q: 회의 녹음 받아쓰기 앱 구성
+  expect: [n_0001, n_0002]
+- q: 받아쓰기 용량 줄이기
+  expect: [n_0002]
+- q: 게임 AI 스킬 설치 방법
+  expect: [n_0008]
+- q: dart compile exe가 실패하는 이유
+  expect: [n_0011]
+- q: 띄어쓰기 상관없이 한글 찾기
+  expect: [n_0012]
+- q: 클로드 코드 플러그인 설치는 어떻게 해?
+  expect: [n_0013]
+- q: 앱에서 claude를 화면 없이 돌릴 때 로그인 오류
+  expect: [n_0014]
+- q: 세션 jsonl 파일 형식
+  expect: [n_0015]
+- q: 정리 시작 눌렀는데 진행이 안 될 때
+  expect: [n_0016]
+- q: 상태 관리랑 라우팅 뭐 쓰기로 했지
+  expect: [n_0017]
+- q: API 키는 어디에 보관해?
+  expect: [n_0018]
+- q: 커밋 규칙
+  expect: [n_0019]
+- q: 사용자가 고친 답으로 규칙 만들기
+  expect: [n_0020]
+- q: USB에서 플러터 개발
+  expect: [n_0026]
+- q: 엑스코드 꼭 설치해야 해?
+  expect: [n_0029]

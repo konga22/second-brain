@@ -8,10 +8,13 @@ import 'package:path/path.dart' as p;
 class Vault {
   Vault(String root) : root = p.normalize(p.absolute(root));
 
-  /// `BRAIN_VAULT` 환경변수, 없으면 `~/SecondBrain`.
+  /// `BRAIN_VAULT` 환경변수 → 앱 설정(`config.json`의 vault) → `~/SecondBrain`.
+  /// 앱과 CLI가 같은 순서로 찾아서 같은 폴더를 쓴다.
   factory Vault.resolve() {
     final env = Platform.environment['BRAIN_VAULT'];
     if (env != null && env.isNotEmpty) return Vault(env);
+    final configured = AppConfig.load().vaultPath;
+    if (configured != null && configured.isNotEmpty) return Vault(configured);
     return Vault(p.join(Platform.environment['HOME'] ?? '.', 'SecondBrain'));
   }
 
@@ -22,6 +25,7 @@ class Vault {
   String get wikiDir => p.join(root, 'wiki');
   String get rawSessionsDir => p.join(root, 'raw', 'sessions');
   String get logDir => p.join(root, '_log');
+  String get lessonsDir => p.join(root, 'lessons');
   String get metaDir => p.join(root, '_meta');
   String get profilePath => p.join(root, '_profile.md');
 
@@ -50,6 +54,57 @@ class Vault {
     final file = File(path);
     if (!file.existsSync()) writeFileAtomic(path, content);
   }
+}
+
+/// 앱 설정 `~/Library/Application Support/com.konga22.secondbrain/config.json`.
+/// 지식 데이터가 아니라 폴더 위치·마지막 백업 시각 같은 기기 설정만 둔다.
+class AppConfig {
+  const AppConfig({this.vaultPath, this.lastBackupAt, this.isOnboardingOff = false});
+
+  final String? vaultPath;
+  final DateTime? lastBackupAt;
+
+  /// SessionStart 온보딩 요약 끄기 (설계서 5.2 "설정에서 끌 수 있다").
+  final bool isOnboardingOff;
+
+  static String get path => p.join(
+    Platform.environment['HOME'] ?? '.',
+    'Library',
+    'Application Support',
+    Vault.bundleId,
+    'config.json',
+  );
+
+  static AppConfig load() {
+    final file = File(path);
+    if (!file.existsSync()) return const AppConfig();
+    try {
+      final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      return AppConfig(
+        vaultPath: json['vault'] as String?,
+        lastBackupAt: DateTime.tryParse('${json['lastBackupAt'] ?? ''}'),
+        isOnboardingOff: json['onboardingOff'] == true,
+      );
+    } on FormatException {
+      return const AppConfig();
+    }
+  }
+
+  AppConfig copyWith({String? vaultPath, DateTime? lastBackupAt, bool? isOnboardingOff}) =>
+      AppConfig(
+        vaultPath: vaultPath ?? this.vaultPath,
+        lastBackupAt: lastBackupAt ?? this.lastBackupAt,
+        isOnboardingOff: isOnboardingOff ?? this.isOnboardingOff,
+      );
+
+  void save() => writeFileAtomic(
+    path,
+    const JsonEncoder.withIndent('  ').convert({
+      'vault': ?vaultPath,
+      if (lastBackupAt != null) 'lastBackupAt': lastBackupAt!.toIso8601String(),
+      'onboardingOff': isOnboardingOff,
+    }),
+  );
 }
 
 /// 임시 파일에 쓰고 이름을 바꾼다. 쓰다가 꺼져도 반쪽 파일이 남지 않는다.

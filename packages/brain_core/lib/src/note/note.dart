@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:yaml/yaml.dart';
 
+import '../text/nfc.dart';
+
 /// 노트 상태 (설계서 4.1).
 enum NoteStatus {
   draft('draft', '정리 대기'),
@@ -91,10 +93,10 @@ class Note {
         : (v == null || '$v'.isEmpty ? [] : ['$v']);
     return Note(
       id: '${meta['id'] ?? fallbackId}',
-      title: '${meta['title'] ?? fallbackTitle}',
+      title: toNfc('${meta['title'] ?? fallbackTitle}'),
       summary: '${meta['summary'] ?? ''}',
-      tags: list(meta['tags']),
-      aliases: list(meta['aliases']),
+      tags: list(meta['tags']).map(toNfc).toList(),
+      aliases: list(meta['aliases']).map(toNfc).toList(),
       source: '${meta['source'] ?? 'manual'}',
       sources: list(meta['sources']),
       created: DateTime.tryParse('${meta['created'] ?? ''}'),
@@ -137,12 +139,20 @@ class Note {
     return '${lines.join('\n')}\n${text.trimRight()}\n';
   }
 
-  Note copyWith({String? body, NoteStatus? status, DateTime? updated}) => Note(
+  Note copyWith({
+    String? body,
+    NoteStatus? status,
+    DateTime? updated,
+    String? title,
+    String? summary,
+    List<String>? tags,
+    List<String>? aliases,
+  }) => Note(
     id: id,
-    title: title,
-    summary: summary,
-    tags: tags,
-    aliases: aliases,
+    title: title ?? this.title,
+    summary: summary ?? this.summary,
+    tags: tags ?? this.tags,
+    aliases: aliases ?? this.aliases,
     source: source,
     sources: sources,
     created: created,
