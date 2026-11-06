@@ -19,6 +19,7 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^3.4.3
   go_router: ^18.1.3
+  path: ^1.9.1
   shadcn_ui: ^0.57.4
   supabase_flutter: ^2.18.3
 
@@ -29,6 +30,14 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # 연동 묶음 원본과 brain CLI (bash tool/build_brain.sh로 먼저 만든다)
+  assets:
+    - assets/brain/bin/
+    - assets/brain/lib/
+    - integrations/claude-code/
+    - integrations/claude-code/skills/second-brain/
+    - integrations/claude-code/skills/brain-save/
 
   # Pretendard v1.3.9 (OFL-1.1, assets/fonts/pretendard/LICENSE.txt). 쓰는 굵기 4개만 넣는다.
   fonts:
