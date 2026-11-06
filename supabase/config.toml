@@ -1,0 +1,11 @@
+# Supabase 프로젝트 설정 (supabase CLI). project_id는 `supabase link --project-ref <ref>`로 연결한다.
+project_id = "second-brain"
+
+[functions.ai-chat]
+verify_jwt = true
+
+[functions.ai-verify]
+verify_jwt = true
+
+[functions.mock-checkout]
+verify_jwt = true
