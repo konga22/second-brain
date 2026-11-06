@@ -1,0 +1,12 @@
+{
+  "name": "second-brain-local",
+  "owner": { "name": "konga22" },
+  "description": "세컨드 브레인 앱이 이 맥에 설치한 로컬 플러그인 묶음",
+  "plugins": [
+    {
+      "name": "second-brain",
+      "source": "./second-brain",
+      "description": "내 지식 폴더(~/SecondBrain)를 brain 명령으로 찾고, 대화에서 지식을 뽑아 저장한다"
+    }
+  ]
+}

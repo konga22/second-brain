@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:brain_core/brain_core.dart';
 
-/// 지식 폴더 기본 위치 (설계서 4.1). 설정에서 바꾸는 기능은 2주차에 붙인다.
-String defaultVaultPath() => '${Platform.environment['HOME']}/SecondBrain';
+/// 지식 폴더 위치. CLI와 같은 규칙(`BRAIN_VAULT`, 없으면 `~/SecondBrain`)을 쓴다.
+String defaultVaultPath() => Vault.resolve().root;

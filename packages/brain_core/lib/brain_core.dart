@@ -2,5 +2,15 @@
 library;
 
 export 'src/index/bigram.dart';
+export 'src/index/search_index.dart';
 export 'src/index/sqlite_support.dart';
+export 'src/log/change_log.dart';
+export 'src/note/file_name.dart';
+export 'src/note/note.dart';
+export 'src/note/note_store.dart';
+export 'src/security/secret_mask.dart';
+export 'src/sessions/claude_sessions.dart';
+export 'src/sessions/session_archive.dart';
+export 'src/sessions/session_registry.dart';
+export 'src/vault/vault.dart';
 export 'src/vault/vault_access.dart';

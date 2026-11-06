@@ -3,11 +3,279 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/brain_providers.dart';
+import '../../core/claude_code.dart';
+import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
 
-/// 연동·설정. 지금은 실행 환경 점검만 있다. 연동 설치는 3주차 (설계서 5.2).
+/// 연동·설정: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
   const ConnectPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ShadTheme.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
+      children: [
+        Text('연동·설정', style: theme.textTheme.h4),
+        const SizedBox(height: 24),
+        const _ClaudeCodeCard(),
+        const SizedBox(height: 16),
+        const _PastSessionsCard(),
+        const SizedBox(height: 16),
+        const _SystemCheckCard(),
+      ],
+    );
+  }
+}
+
+class _ClaudeCodeCard extends ConsumerStatefulWidget {
+  const _ClaudeCodeCard();
+
+  @override
+  ConsumerState<_ClaudeCodeCard> createState() => _ClaudeCodeCardState();
+}
+
+class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
+  bool _isWorking = false;
+  List<String> _log = const [];
+  String? _error;
+
+  Future<void> _onInstall() async {
+    final claude = ref.read(claudeCodeProvider);
+    final isConfirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text('Claude Code에 연동할까요?'),
+        description: const Text('아래 내용이 바뀝니다. 해제하면 우리가 넣은 것만 지웁니다.'),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('연동'),
+          ),
+        ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final line in claude.plannedChanges()) Text('• $line'),
+          ],
+        ),
+      ),
+    );
+    if (isConfirmed != true) return;
+    setState(() {
+      _isWorking = true;
+      _error = null;
+    });
+    try {
+      final log = await claude.install();
+      setState(() => _log = log);
+    } on ClaudeCodeException catch (e) {
+      setState(() => _error = e.message);
+    } finally {
+      setState(() => _isWorking = false);
+      ref.invalidate(claudeCodeStatusProvider);
+    }
+  }
+
+  Future<void> _onUninstall() async {
+    setState(() => _isWorking = true);
+    await ref.read(claudeCodeProvider).uninstall();
+    setState(() {
+      _isWorking = false;
+      _log = const ['연동 해제함'];
+    });
+    ref.invalidate(claudeCodeStatusProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final status = ref.watch(claudeCodeStatusProvider);
+    return ShadCard(
+      title: const Text('Claude Code'),
+      description: const Text(
+        '스킬 2개(찾기·지식 저장)와 훅 2개를 플러그인으로 설치합니다. 우리 서버를 거치지 않습니다.',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: status.when(
+          loading: () => const Text('확인 중…'),
+          error: (e, _) => Text('확인 실패: $e'),
+          data: (s) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _CheckRow(
+                label: s.isFound
+                    ? 'Claude Code ${s.version} (${s.executable})'
+                    : 'Claude Code를 찾지 못함',
+                isOk: s.isFound,
+              ),
+              _CheckRow(
+                label: s.isInstalled
+                    ? '플러그인 설치됨${s.isEnabled ? '' : ' (꺼짐)'}'
+                    : '플러그인 없음',
+                isOk: s.isInstalled && s.isEnabled,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ShadButton(
+                    size: ShadButtonSize.sm,
+                    enabled: s.isFound && !_isWorking,
+                    onPressed: _onInstall,
+                    child: Text(s.isInstalled ? '다시 설치' : '연동'),
+                  ),
+                  const SizedBox(width: 8),
+                  if (s.isInstalled)
+                    ShadButton.outline(
+                      size: ShadButtonSize.sm,
+                      enabled: !_isWorking,
+                      onPressed: _onUninstall,
+                      child: const Text('해제'),
+                    ),
+                ],
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_error!),
+                ),
+              for (final line in _log) Text(line, style: theme.textTheme.muted),
+              const SizedBox(height: 8),
+              Text(
+                '설치한 뒤 Claude Code를 새로 열면 적용됩니다. 대화 중에 "지식 저장해 줘"라고 하면 정리 대기에 노트가 생깁니다.',
+                style: theme.textTheme.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PastSessionsCard extends ConsumerWidget {
+  const _PastSessionsCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ShadTheme.of(context);
+    final state = ref.watch(pastSessionsProvider);
+    final controller = ref.read(pastSessionsProvider.notifier);
+    final projects = state.unsavedByProject.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return ShadCard(
+      title: const Text('지난 대화 정리'),
+      description: const Text(
+        '이 맥에 남은 Claude Code 대화(최근 90일)에서 지식을 뽑아 정리 대기에 넣습니다. '
+        'Claude Code는 오래된 기록을 30일 뒤 지우므로 연동할 때 한 번 정리해 두는 것이 좋습니다.',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!state.isLoaded)
+              ShadButton.outline(
+                size: ShadButtonSize.sm,
+                enabled: !state.isLoading,
+                onPressed: controller.load,
+                child: Text(state.isLoading ? '세션 기록 읽는 중…' : '세션 목록 불러오기'),
+              ),
+            if (state.isLoaded && projects.isEmpty && !state.isRunning)
+              Text('정리할 세션이 없습니다.', style: theme.textTheme.muted),
+            if (projects.isNotEmpty) ...[
+              Text('정리할 프로젝트 (체크를 빼면 제외)', style: theme.textTheme.small),
+              const SizedBox(height: 6),
+              for (final entry in projects)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      ShadCheckbox(
+                        value: !state.excludedProjects.contains(entry.key),
+                        enabled: !state.isRunning,
+                        onChanged: (_) => controller.toggleProject(entry.key),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('${entry.key}  ·  세션 ${entry.value}개'),
+                    ],
+                  ),
+                ),
+              if (state.activeCount > 0)
+                Text(
+                  '최근 30분 안에 기록된 대화 ${state.activeCount}개는 아직 진행 중일 수 있어 뺐습니다.',
+                  style: theme.textTheme.muted,
+                ),
+              const SizedBox(height: 12),
+              Text(
+                '선택한 세션 ${state.targets.length}개를 정리합니다. 사용자의 Claude Code 사용량(토큰)을 씁니다. '
+                'Claude Code는 brain 명령만 쓸 수 있게 묶어서 실행합니다.',
+                style: theme.textTheme.muted,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  ShadButton(
+                    size: ShadButtonSize.sm,
+                    enabled: !state.isRunning && state.targets.isNotEmpty,
+                    onPressed: controller.run,
+                    child: const Text('동의하고 정리 시작'),
+                  ),
+                  const SizedBox(width: 8),
+                  if (state.isRunning)
+                    ShadButton.outline(
+                      size: ShadButtonSize.sm,
+                      onPressed: controller.stop,
+                      child: const Text('멈추기'),
+                    ),
+                ],
+              ),
+            ],
+            if (state.isRunning || state.total > 0) ...[
+              const SizedBox(height: 12),
+              ShadProgress(
+                value: state.total == 0 ? 0 : state.done / state.total,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                state.isRunning
+                    ? '${state.done}/${state.total} · 정리 중: ${state.current?.project ?? ''} ${state.current?.shortId ?? ''}'
+                    : '${state.done}/${state.total} 끝',
+                style: theme.textTheme.muted,
+              ),
+              if (state.isRunning && state.current != null)
+                Text(
+                  '${state.step} · ${_formatElapsed(state.elapsed)} (긴 대화는 몇 분 걸립니다)',
+                  style: theme.textTheme.muted,
+                ),
+            ],
+            if (state.error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(state.error!),
+              ),
+            for (final line in state.log)
+              Text(line, style: theme.textTheme.muted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatElapsed(Duration d) => d.inMinutes == 0
+    ? '${d.inSeconds}초'
+    : '${d.inMinutes}분 ${d.inSeconds % 60}초';
+
+class _SystemCheckCard extends ConsumerWidget {
+  const _SystemCheckCard();
 
   void _onRecheck(WidgetRef ref) => ref.invalidate(systemCheckProvider);
 
@@ -15,71 +283,51 @@ class ConnectPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = ShadTheme.of(context);
     final check = ref.watch(systemCheckProvider);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
-      children: [
-        Text('연동·설정', style: theme.textTheme.h4),
-        const SizedBox(height: 24),
-        ShadCard(
-          title: const Text('실행 환경 점검'),
-          trailing: ShadButton.outline(
-            size: ShadButtonSize.sm,
-            onPressed: () => _onRecheck(ref),
-            leading: const Icon(LucideIcons.refreshCw, size: 14),
-            child: const Text('다시 점검'),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: check.when(
-              loading: () => const Text('점검 중…'),
-              error: (e, _) => Text('점검 실패: $e'),
-              data: (result) {
-                final sqlite = result.sqlite;
-                final vault = result.vault;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'SQLite ${sqlite.version}',
-                      style: theme.textTheme.small,
+    return ShadCard(
+      title: const Text('실행 환경 점검'),
+      trailing: ShadButton.outline(
+        size: ShadButtonSize.sm,
+        onPressed: () => _onRecheck(ref),
+        leading: const Icon(LucideIcons.refreshCw, size: 14),
+        child: const Text('다시 점검'),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: check.when(
+          loading: () => const Text('점검 중…'),
+          error: (e, _) => Text('점검 실패: $e'),
+          data: (result) {
+            final sqlite = result.sqlite;
+            final vault = result.vault;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SQLite ${sqlite.version}', style: theme.textTheme.small),
+                for (final (label, ok) in sqlite.items)
+                  _CheckRow(label: label, isOk: ok),
+                if (sqlite.error != null) Text(sqlite.error!),
+                const SizedBox(height: 16),
+                Text('지식 폴더 ${vault.path}', style: theme.textTheme.small),
+                for (final (label, ok) in vault.items)
+                  _CheckRow(label: label, isOk: ok),
+                if (vault.error != null) Text(vault.error!),
+                const SizedBox(height: 16),
+                Text('Supabase', style: theme.textTheme.small),
+                switch (result.isSupabaseReachable) {
+                  null => Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '설정 전 — env/supabase.json을 만들고 --dart-define-from-file로 실행',
+                      style: theme.textTheme.muted,
                     ),
-                    for (final (label, ok) in sqlite.items)
-                      _CheckRow(label: label, isOk: ok),
-                    if (sqlite.error != null) Text(sqlite.error!),
-                    const SizedBox(height: 16),
-                    Text('지식 폴더 ${vault.path}', style: theme.textTheme.small),
-                    for (final (label, ok) in vault.items)
-                      _CheckRow(label: label, isOk: ok),
-                    if (vault.error != null) Text(vault.error!),
-                    const SizedBox(height: 16),
-                    Text('Supabase', style: theme.textTheme.small),
-                    switch (result.isSupabaseReachable) {
-                      null => Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          '설정 전 — env/supabase.json을 만들고 '
-                          '--dart-define-from-file로 실행',
-                          style: theme.textTheme.muted,
-                        ),
-                      ),
-                      final ok => _CheckRow(label: '서버 연결', isOk: ok),
-                    },
-                  ],
-                );
-              },
-            ),
-          ),
+                  ),
+                  final ok => _CheckRow(label: '서버 연결', isOk: ok),
+                },
+              ],
+            );
+          },
         ),
-        const SizedBox(height: 16),
-        const ShadCard(
-          title: Text('한글 입력 시험'),
-          description: Text('글자를 조합하는 동안 밑줄이 보이고, 조합이 끝나면 글자가 바르게 남아야 합니다.'),
-          child: Padding(
-            padding: EdgeInsets.only(top: 16),
-            child: ShadInput(placeholder: Text('여기에 한글을 입력해 보세요')),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -103,7 +351,7 @@ class _CheckRow extends StatelessWidget {
             color: isOk ? colors.success : colors.danger,
           ),
           const SizedBox(width: 8),
-          Text(label),
+          Flexible(child: Text(label)),
         ],
       ),
     );
