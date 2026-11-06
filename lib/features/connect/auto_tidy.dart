@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
+import '../../core/session_listing.dart';
 import 'claude_code_providers.dart';
 
 /// 자동 정리 상태 (연동 화면에 보여 준다).
@@ -55,6 +55,22 @@ class AutoTidyController extends Notifier<AutoTidyState> {
   double spentToday(AppConfig c) =>
       c.autoTidySpentDay == _today ? c.autoTidySpentUsd : 0;
 
+  /// 정리할 세션: 저장 안 함 · 끝남(최근 30분 기록 없음) · 사용자 대화 150개 이하, 짧은 것부터.
+  static Future<List<ClaudeSession>> _targets(Vault vault) async {
+    final sessions = await listSessionsInBackground(vault.root, vault.indexPath);
+    final statuses = SessionRegistry(vault).load();
+    return [
+      for (final s in sessions)
+        if (!(statuses[s.sessionId]?.isDone ?? false) &&
+            !PastSessionsState.isActive(s) &&
+            s.userCount <= maxUserMessages)
+          s,
+    ]..sort((a, b) => a.userCount.compareTo(b.userCount));
+  }
+
+  /// 미리 보기: 정리하지 않고 대상 세션만 센다 (비용 없음). 설정 화면에 "정리 대상 N개"로 보인다.
+  Future<List<ClaudeSession>> preview() => _targets(ref.read(vaultProvider));
+
   Future<void> run() async {
     final config = ref.read(appConfigProvider);
     if (!config.isAutoTidyOn || state.isRunning) return;
@@ -66,27 +82,7 @@ class AutoTidyController extends Notifier<AutoTidyState> {
     state = AutoTidyState(isRunning: true, step: '세션 목록 읽는 중', log: state.log);
     final log = <String>[];
     try {
-      final root = vault.root;
-      final indexPath = vault.indexPath;
-      final sessions = await Isolate.run(() {
-        final v = Vault(root);
-        final index = SearchIndex.open(v, path: indexPath);
-        try {
-          return ClaudeSessions(
-            cacheDb: index.db,
-          ).list(vault: v, since: const Duration(days: 90));
-        } finally {
-          index.close();
-        }
-      });
-      final statuses = SessionRegistry(vault).load();
-      final targets = [
-        for (final s in sessions)
-          if (!(statuses[s.sessionId]?.isDone ?? false) &&
-              !PastSessionsState.isActive(s) &&
-              s.userCount <= maxUserMessages)
-            s,
-      ]..sort((a, b) => a.userCount.compareTo(b.userCount));
+      final targets = await _targets(vault);
       for (final session in targets) {
         final now = ref.read(appConfigProvider);
         if (spentToday(now) >= now.autoTidyDailyUsd || !now.isAutoTidyOn) break;

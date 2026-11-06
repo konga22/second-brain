@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/brain_providers.dart';
+import '../../core/session_listing.dart';
 import '../../core/claude_code.dart';
 
 /// Claude Code가 있는지, 플러그인이 깔렸는지.
@@ -119,18 +119,7 @@ class PastSessionsController extends Notifier<PastSessionsState> {
   Future<void> load() async {
     final vault = ref.read(vaultProvider);
     state = state.copyWith(isLoading: true, clearError: true);
-    final root = vault.root;
-    final indexPath = vault.indexPath;
-    final sessions = await Isolate.run(() {
-      final v = Vault(root);
-      final index = SearchIndex.open(v, path: indexPath);
-      try {
-        return ClaudeSessions(cacheDb: index.db)
-            .list(vault: v, since: const Duration(days: 90));
-      } finally {
-        index.close();
-      }
-    });
+    final sessions = await listSessionsInBackground(vault.root, vault.indexPath);
     state = state.copyWith(
       sessions: sessions,
       statuses: SessionRegistry(vault).load(),

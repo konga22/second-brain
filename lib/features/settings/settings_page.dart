@@ -25,6 +25,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   AppConfig get _config => ref.read(appConfigProvider);
   String? _message;
   bool _isWorking = false;
+  Future<List<ClaudeSession>>? _preview;
 
   static const backupRemindDays = 7;
 
@@ -190,6 +191,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     child: Text(tidy.isRunning ? '정리 중…' : '지금 정리'),
                   ),
                 ],
+              ),
+              FutureBuilder(
+                future: _preview ??= ref.read(autoTidyProvider.notifier).preview(),
+                builder: (context, snap) => Text(
+                  snap.hasError
+                      ? '정리 대상을 읽지 못했습니다: ${snap.error}'
+                      : (snap.hasData ? '지금 정리 대상 ${snap.data!.length}개 (끝난 세션 중 저장 안 한 것, 긴 세션 제외)' : '정리 대상 세는 중…'),
+                  style: theme.textTheme.muted.copyWith(fontSize: 12),
+                ),
               ),
               if (tidy.isRunning) Text(tidy.step, style: theme.textTheme.muted),
               for (final line in tidy.log.take(6)) Text(line, style: theme.textTheme.muted.copyWith(fontSize: 12)),
