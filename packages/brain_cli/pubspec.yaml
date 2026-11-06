@@ -1,0 +1,19 @@
+name: brain_cli
+description: 사용자 AI(Claude Code·Codex)가 지식 폴더를 찾고 쓰는 brain 명령.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  args: ^2.7.0
+  brain_core:
+    path: ../brain_core
+
+dev_dependencies:
+  lints: ^6.0.0
+
+executables:
+  brain: brain
