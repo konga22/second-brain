@@ -10,6 +10,7 @@ class FindCommand extends Command<int> {
   FindCommand(this.context) {
     argParser
       ..addFlag('raw', help: '원본(raw/)도 함께 찾는다.', negatable: false)
+      ..addOption('topic', help: '이 주제 폴더(뇌)에서 먼저 찾는다. 없으면 전체에서 찾는다.')
       ..addOption('limit', defaultsTo: '5');
   }
 
@@ -26,11 +27,18 @@ class FindCommand extends Command<int> {
     final query = argResults!.rest.join(' ').trim();
     if (query.isEmpty) usageException('검색어를 주세요.');
     context.index.sync();
-    final hits = context.index.search(
+    final limit = int.tryParse(argResults!['limit'] as String) ?? 5;
+    final topic = argResults!['topic'] as String?;
+    var hits = context.index.search(
       query,
-      limit: int.tryParse(argResults!['limit'] as String) ?? 5,
+      limit: limit,
       includeRaw: argResults!['raw'] as bool,
+      topic: topic,
     );
+    if (topic != null && hits.isEmpty) {
+      stdout.writeln('($topic 폴더에 없어 전체에서 찾음)');
+      hits = context.index.search(query, limit: limit, includeRaw: argResults!['raw'] as bool);
+    }
     if (hits.isEmpty) {
       stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)');
       return 0;

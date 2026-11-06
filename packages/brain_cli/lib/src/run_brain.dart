@@ -9,6 +9,7 @@ import 'commands/hook_command.dart';
 import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
 import 'commands/sessions_command.dart';
+import 'commands/todo_command.dart';
 
 /// brain 명령을 실행하고 종료 코드를 돌려준다 (설계서 5.1).
 Future<int> runBrain(List<String> arguments) async {
@@ -27,6 +28,7 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(IndexCommand(context))
         ..addCommand(LessonCommand(context))
         ..addCommand(UndoCommand(context))
+        ..addCommand(TodoCommand(context))
         ..addCommand(LintCommand(context))
         ..addCommand(BenchCommand(context))
         ..addCommand(_DoctorCommand(context));

@@ -64,6 +64,8 @@ class HookCommand extends Command<int> {
     );
   }
 
+  static final _systemInput = RegExp(r'<task-notification>|^\s*\[SYSTEM NOTIFICATION|^\s*<system-reminder');
+
   // 교정 신호: 사용자가 바로 앞 답을 고치는 말. 기기에서 단어 규칙으로만 1차 감지한다 (설계서 5.4).
   static final _correction = RegExp(
     r'^\s*(아니(야|요|라|지)?(?=[\s.,!?]|$)|아닌데|틀렸|틀린|잘못|다시\s*해|그게\s*아니|그렇게\s*말고|하지\s*말라|하지\s*말랬|왜\s.*(안|말)|no[,.! ]|wrong|that.s not)',
@@ -75,6 +77,8 @@ class HookCommand extends Command<int> {
   void _prompt(Map<String, dynamic> input) {
     final prompt = '${input['prompt'] ?? ''}';
     if (prompt.trim().isEmpty) return;
+    // 백그라운드 작업 알림 같은 시스템 입력은 사용자 요청이 아니라 건너뛴다 (사용기 #13).
+    if (_systemInput.hasMatch(prompt)) return;
     final cwd = input['cwd'] as String? ?? '';
     final lines = <String>[
       for (final lesson in context.lessons.match(prompt))
