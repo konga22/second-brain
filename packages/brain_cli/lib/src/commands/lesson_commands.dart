@@ -12,6 +12,7 @@ class LessonCommand extends Command<int> {
     addSubcommand(_LessonAdd(context));
     addSubcommand(_LessonList(context));
     addSubcommand(_LessonSet(context));
+    addSubcommand(_LessonEdit(context));
     addSubcommand(_LessonEvidence(context));
     addSubcommand(_LessonTests(context));
     addSubcommand(_LessonChecklist(context));
@@ -22,6 +23,7 @@ class LessonCommand extends Command<int> {
     'add',
     'list',
     'set',
+    'edit',
     'evidence',
     'tests',
     'checklist',
@@ -183,6 +185,46 @@ class _LessonSet extends Command<int> {
       stderr.writeln(e.message);
       return 1;
     }
+  }
+}
+
+/// `brain lesson edit <id> [--trigger] [--action] [--reason]`: 규칙 문장 고치기 (다시 교정됐을 때).
+class _LessonEdit extends Command<int> {
+  _LessonEdit(this.context) {
+    argParser
+      ..addOption('trigger', help: '언제')
+      ..addOption('action', help: '무엇을')
+      ..addOption('reason', help: '왜');
+  }
+
+  final BrainContext context;
+
+  @override
+  String get name => 'edit';
+
+  @override
+  String get description => '규칙 문장을 고친다 (회귀 시험을 확인한 뒤에만).';
+
+  @override
+  int run() {
+    if (argResults!.rest.isEmpty) usageException('실수 노트 id를 주세요.');
+    final id = argResults!.rest.first;
+    final lesson = context.lessons.read(id);
+    if (lesson == null) {
+      stderr.writeln('$id 실수 노트가 없습니다.');
+      return 1;
+    }
+    final a = argResults!;
+    context.lessons.save(
+      lesson.copyWith(
+        trigger: a['trigger'] as String?,
+        action: a['action'] as String?,
+        reason: a['reason'] as String?,
+      ),
+      action: 'lesson-edit',
+    );
+    stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}');
+    return 0;
   }
 }
 

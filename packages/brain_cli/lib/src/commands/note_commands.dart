@@ -149,7 +149,8 @@ class AddCommand extends Command<int> {
       ..addOption('topic', help: '주제 폴더 (없으면 첫 태그, 그것도 없으면 미분류)')
       ..addFlag('draft', help: '정리 대기로 저장', negatable: false)
       ..addOption('aliases', help: '다른 표기·다른 이름, 쉼표로 구분 (예: 엑스코드,Xcode)', defaultsTo: '')
-      ..addOption('source-session', help: '근거가 된 Claude Code 세션 id (앞 8자 이상)');
+      ..addOption('source-session', help: '근거가 된 Claude Code 세션 id (앞 8자 이상)')
+      ..addOption('sources', help: '근거 원본 경로, 쉼표로 (예: raw/imports/2026-11-07-조사.md)', defaultsTo: '');
   }
 
   final BrainContext context;
@@ -167,7 +168,10 @@ class AddCommand extends Command<int> {
       usageException('본문을 표준 입력으로 주세요 (예: brain add ... <<\'EOF\').');
     }
     final args = argResults!;
-    final sources = <String>[];
+    final sources = <String>[
+      for (final s in (argResults!['sources'] as String).split(','))
+        if (s.trim().isNotEmpty) s.trim(),
+    ];
     String? sessionId;
     final sessionArg = args['source-session'] as String?;
     if (sessionArg != null) {
