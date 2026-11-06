@@ -1,0 +1,10 @@
+{
+  "name": "second-brain",
+  "displayName": "세컨드 브레인",
+  "version": "0.1.0",
+  "description": "내 지식 폴더를 brain 명령으로 찾고(second-brain), 대화에서 지식을 뽑아 저장한다(brain-save). 우리 서버를 거치지 않는다.",
+  "author": { "name": "김민상", "url": "https://github.com/konga22" },
+  "repository": "https://github.com/konga22/second-brain",
+  "license": "MIT",
+  "keywords": ["second-brain", "notes", "knowledge"]
+}
