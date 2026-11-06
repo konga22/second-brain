@@ -11,6 +11,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:secondbrain/app/router/app_page.dart';
 import 'package:secondbrain/app/second_brain_app.dart';
 import 'package:secondbrain/core/brain_providers.dart';
+import 'package:secondbrain/features/home/structure_list_view.dart';
 
 /// 모든 화면을 돌며 예외 없이 그려지는지 본다. 노트를 하나 골라 오른쪽 패널, ⌘K 명령 창도 연다.
 /// 실제 지식 폴더를 쓰지 않도록 BRAIN_VAULT에 사본을 주고 돌린다.
@@ -58,6 +59,19 @@ void main() {
       container.read(selectedNoteProvider.notifier).select(notes.first.id);
       await settle(tester);
       await shot(tester, '05_note_panel');
+      // 목록에서 고른 노트의 연결 호, 주제를 눌렀을 때 주제 사이 호
+      await tester.tap(find.text('목록').first);
+      await settle(tester);
+      await shot(tester, '06_list_selected');
+      final topicText = find.descendant(
+        of: find.byType(StructureListView),
+        matching: find.text(notes.first.topic),
+      );
+      if (topicText.evaluate().isNotEmpty) {
+        await tester.tap(topicText.first);
+        await settle(tester);
+        await shot(tester, '07_list_topic');
+      }
     }
     for (final page in AppPage.values.where((p) => p != AppPage.home)) {
       router.go(page.path);

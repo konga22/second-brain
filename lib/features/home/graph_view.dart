@@ -20,7 +20,8 @@ class GraphView extends ConsumerStatefulWidget {
 class _GraphViewState extends ConsumerState<GraphView> {
   final _transform = TransformationController();
   bool _isLocal = false;
-  bool _showSuggested = false;
+  /// 추천 연결을 그린다 (기본 켬). 끄면 고른 노드의 연결만 그린다.
+  bool _showSuggested = true;
 
   /// 폴더(뇌) 하나만 보기. null이면 전체.
   String? _topic;
@@ -270,10 +271,10 @@ class _GraphViewState extends ConsumerState<GraphView> {
                       children: [
                         const _Legend(color: Color(0xffffffff), label: '선택한 노트', dot: true),
                         const _Legend(color: Color(0xb3c4b5fd), label: '직접 연결 [[ ]]'),
-                        const _Legend(color: Color(0x80d6d3e8), label: '추천 연결', dashed: true),
+                        const _Legend(color: Color(0xb3d6d3e8), label: '추천 연결 (흐린 선은 다른 주제)', dashed: true),
                         const SizedBox(width: 8),
                         _ModeButton(
-                          label: _showSuggested ? '추천 연결 숨기기' : '추천 연결 모두 보기',
+                          label: _showSuggested ? '추천 연결 숨기기' : '추천 연결 보기',
                           isOn: _showSuggested,
                           onTap: () => setState(() => _showSuggested = !_showSuggested),
                         ),
@@ -391,8 +392,6 @@ class _GraphPainter extends CustomPainter {
   final Set<String> neighbors;
   final double scale;
 
-  static const _accent = Color(0xff8b5cf6);
-
   /// 노드가 이 수 이하면 이름표를 모두 단다 (적을 때는 이름이 보여야 무엇인지 안다).
   static const labelAllLimit = 60;
 
@@ -417,15 +416,27 @@ class _GraphPainter extends CustomPainter {
       _label(canvas, e.key, Offset(c.dx, top - 28), const Color(0x99c4b5fd), 14 / scale.clamp(0.6, 2), bold: true);
     }
 
+    // 연결선: 같은 주제 안은 또렷하게, 주제를 넘는 연결은 흐리게, 고른 노드의 연결은 진한 보라.
+    // 무언가를 골랐으면 나머지 선은 더 흐리게 해서 고른 연결이 눈에 띄게 한다.
+    final hasFocus = focus != null;
     for (final link in links) {
       final a = _at(link.fromId);
       final b = _at(link.toId);
-      final isFocus = focus != null && (link.fromId == focus || link.toId == focus);
+      final isFocus = hasFocus && (link.fromId == focus || link.toId == focus);
+      final isSameTopic = docs[link.fromId]?.topic == docs[link.toId]?.topic;
+      final Color color;
+      if (isFocus) {
+        color = const Color(0xffa78bfa);
+      } else if (!link.isSuggested) {
+        color = Color(hasFocus ? 0x55a78bfa : 0xaaa78bfa);
+      } else if (isSameTopic) {
+        color = Color(hasFocus ? 0x26d6d3e8 : 0x73d6d3e8);
+      } else {
+        color = Color(hasFocus ? 0x14d6d3e8 : 0x3dd6d3e8);
+      }
       final paint = Paint()
-        ..strokeWidth = (isFocus ? 1.6 : 0.9) / scale.clamp(0.5, 3)
-        ..color = isFocus
-            ? _accent.withValues(alpha: 0.9)
-            : (link.isSuggested ? const Color(0x33d6d3e8) : const Color(0x66a78bfa));
+        ..strokeWidth = (isFocus ? 2.0 : (isSameTopic ? 1.2 : 0.9)) / scale.clamp(0.5, 3)
+        ..color = color;
       if (link.isSuggested) {
         _dashed(canvas, a, b, paint, 4 / scale.clamp(0.5, 3));
       } else {
