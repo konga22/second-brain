@@ -16,6 +16,12 @@ md 노트와 SQLite FTS5 색인으로 내 지식을 기기에 쌓고, Claude Cod
 
 ## 실행
 
+앱을 빌드하기 전에 brain CLI를 앱 자산에 넣는다.
+
+```bash
+bash tool/build_brain.sh
+```
+
 ```bash
 flutter run -d macos
 ```
@@ -47,7 +53,7 @@ cd packages/brain_cli && dart run bin/brain.dart doctor
 ```text
 lib/           # Flutter macOS 앱
 packages/      # brain_core (앱·CLI 공통), brain_cli (brain 명령)
-integrations/  # Claude Code·Codex 스킬·에이전트·훅
+integrations/  # Claude Code 플러그인(스킬·훅) 원본, 개발 설치는 bash integrations/claude-code/install.sh
 web/           # 홍보 페이지 (Astro)
 supabase/      # Edge Functions (AI 게이트웨이), DB 마이그레이션
 docs/          # 설계서, 기획안, 주간 보고
