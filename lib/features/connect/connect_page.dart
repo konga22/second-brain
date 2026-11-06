@@ -8,7 +8,7 @@ import '../../core/claude_code.dart';
 import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
 
-/// 연동·설정: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
+/// 연동: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
   const ConnectPage({super.key});
 
@@ -18,7 +18,7 @@ class ConnectPage extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
-        Text('연동·설정', style: theme.textTheme.h4),
+        Text('연동', style: theme.textTheme.h4),
         const SizedBox(height: 24),
         const _ClaudeCodeCard(),
         const SizedBox(height: 16),
@@ -100,7 +100,7 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
     return ShadCard(
       title: const Text('Claude Code'),
       description: const Text(
-        '스킬 2개(찾기·지식 저장)와 훅 2개를 플러그인으로 설치합니다. 우리 서버를 거치지 않습니다.',
+        '스킬 4개(찾기·지식 저장·원본 정리·점검), 검증 에이전트, 훅 3개를 플러그인으로 설치합니다. 우리 서버를 거치지 않습니다.',
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: 16),

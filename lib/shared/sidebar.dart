@@ -1,3 +1,4 @@
+import 'package:brain_core/brain_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../app/router/app_page.dart';
 import '../app/theme/app_colors.dart';
+import '../core/brain_providers.dart';
 import '../features/connect/system_check_provider.dart';
 
 class Sidebar extends ConsumerWidget {
@@ -47,8 +49,103 @@ class Sidebar extends ConsumerWidget {
               isSelected: page == current,
               hasProblem: page == AppPage.connect && hasProblem,
             ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 8, 6),
+            child: Text('주제', style: theme.textTheme.muted.copyWith(fontSize: 11)),
+          ),
+          const Expanded(child: _TopicTree()),
         ],
       ),
+    );
+  }
+}
+
+/// 사이드바 주제·파일 (설계서 3.2): 지식 폴더 구조 그대로. 노트를 고르면 그 폴더가 펼쳐진다.
+class _TopicTree extends ConsumerStatefulWidget {
+  const _TopicTree();
+
+  @override
+  ConsumerState<_TopicTree> createState() => _TopicTreeState();
+}
+
+class _TopicTreeState extends ConsumerState<_TopicTree> {
+  final _open = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final notes = ref.watch(notesProvider);
+    final raw = ref.watch(rawDocsProvider);
+    final selected = ref.watch(selectedNoteProvider);
+    final issues = {
+      for (final i in ref.watch(lintIssuesProvider))
+        if (i.type.name != 'orphan') i.id,
+    };
+    final byTopic = <String, List<IndexedDoc>>{};
+    for (final d in notes) {
+      byTopic.putIfAbsent(d.topic, () => []).add(d);
+    }
+    if (raw.isNotEmpty) byTopic['원본 (raw)'] = raw;
+    final selectedTopic = [
+      for (final e in byTopic.entries)
+        if (e.value.any((d) => d.id == selected)) e.key,
+    ].firstOrNull;
+    final topics = byTopic.keys.where((t) => t != '원본 (raw)').toList()..sort();
+    if (byTopic.containsKey('원본 (raw)')) topics.add('원본 (raw)');
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        for (final topic in topics) ...[
+          GestureDetector(
+            onTap: () => setState(() => _open.contains(topic) ? _open.remove(topic) : _open.add(topic)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    _open.contains(topic) || topic == selectedTopic ? LucideIcons.folderOpen : LucideIcons.folder,
+                    size: 14,
+                    color: colors.textMuted,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(topic, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: colors.textMuted)),
+                  ),
+                  Text('${byTopic[topic]!.length}', style: TextStyle(fontSize: 11, color: colors.textFaint)),
+                ],
+              ),
+            ),
+          ),
+          if (_open.contains(topic) || topic == selectedTopic)
+            for (final doc in byTopic[topic]!)
+              GestureDetector(
+                onTap: () => ref.read(selectedNoteProvider.notifier).select(doc.id),
+                child: Container(
+                  margin: const EdgeInsets.only(left: 18),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: doc.id == selected ? colors.accentSoft : null,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${doc.title}.md',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: doc.id == selected ? colors.accentText : colors.text),
+                        ),
+                      ),
+                      if (issues.contains(doc.id))
+                        Container(width: 5, height: 5, decoration: BoxDecoration(color: colors.warning, shape: BoxShape.circle)),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ],
     );
   }
 }

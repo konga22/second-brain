@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import 'claude_code.dart';
 
@@ -19,34 +23,133 @@ final noteStoreProvider = Provider<NoteStore>(
   (ref) => NoteStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
 );
 
+final lessonStoreProvider = Provider<LessonStore>(
+  (ref) =>
+      LessonStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
+);
+
+final todoStoreProvider = Provider<TodoStore>(
+  (ref) => TodoStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
+);
+
 final claudeCodeProvider = Provider<ClaudeCode>(
   (ref) => ClaudeCode(vault: ref.watch(vaultProvider)),
 );
 
-/// 노트 목록. 지식 폴더를 감시해 사용자 AI·Obsidian이 만든 파일도 바로 반영한다 (설계서 4.2 증분 갱신).
-final notesProvider = StreamProvider<List<IndexedDoc>>((ref) {
-  final vault = ref.watch(vaultProvider);
-  final index = ref.watch(searchIndexProvider);
-  final controller = StreamController<List<IndexedDoc>>();
-  Timer? debounce;
+/// 지식 폴더가 바뀔 때마다 1씩 오르는 번호. 폴더를 감시해 사용자 AI·Obsidian이
+/// 만든 파일도 반영한다 (설계서 4.2 증분 갱신). 앱 안에서 고친 뒤에는 [bumpVault]로 올린다.
+final vaultRevisionProvider = NotifierProvider<VaultRevision, int>(
+  VaultRevision.new,
+);
 
-  void refresh() {
+class VaultRevision extends Notifier<int> {
+  Timer? _debounce;
+
+  @override
+  int build() {
+    final vault = ref.watch(vaultProvider);
+    final index = ref.watch(searchIndexProvider);
     index.sync();
-    if (!controller.isClosed) controller.add(index.notes());
+    final subscription = Directory(vault.root)
+        .watch(recursive: true)
+        .listen((event) {
+          final rel = p.relative(event.path, from: vault.root);
+          // 우리가 남기는 되돌리기 사본·휴지통·충돌 사본은 노트가 아니다.
+          if (!rel.endsWith('.md') || rel.startsWith('_meta')) return;
+          _debounce?.cancel();
+          // 대량 가져오기 때는 이벤트를 모아서 한 번에 처리한다.
+          _debounce = Timer(const Duration(milliseconds: 300), bump);
+        });
+    ref.onDispose(() {
+      _debounce?.cancel();
+      subscription.cancel();
+    });
+    return 0;
   }
 
-  refresh();
-  final subscription = Directory(vault.root)
-      .watch(recursive: true)
-      .listen((event) {
-        if (!event.path.endsWith('.md')) return;
-        debounce?.cancel();
-        debounce = Timer(const Duration(milliseconds: 300), refresh);
-      });
-  ref.onDispose(() {
-    debounce?.cancel();
-    subscription.cancel();
-    controller.close();
-  });
-  return controller.stream;
+  void bump() {
+    try {
+      ref.read(searchIndexProvider).sync();
+    } on Object catch (e) {
+      debugPrint('[색인] 갱신 실패: $e');
+    }
+    state++;
+  }
+}
+
+/// 앱 안에서 노트·실수 노트·할 일을 고친 뒤 화면을 새로 고친다.
+void bumpVault(WidgetRef ref) =>
+    ref.read(vaultRevisionProvider.notifier).bump();
+
+/// 노트 목록. 정리 대기가 먼저, 그다음 최근 수정 순.
+final notesProvider = Provider<List<IndexedDoc>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  return ref.watch(searchIndexProvider).notes();
+});
+
+/// 노트 사이 연결 (거절한 추천은 뺌).
+final linksProvider = Provider<List<NoteLink>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final dismissed = DismissedLinks(ref.watch(vaultProvider)).load();
+  return ref.watch(searchIndexProvider).links(dismissed: dismissed);
+});
+
+final changeHistoryProvider = Provider<List<ChangeEvent>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  return readChangeHistory(ref.watch(vaultProvider));
+});
+
+final lessonsProvider = Provider<List<Lesson>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  return ref.watch(lessonStoreProvider).all();
+});
+
+final lintIssuesProvider = Provider<List<LintIssue>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  return Linter(ref.watch(vaultProvider), ref.watch(searchIndexProvider))
+      .run();
+});
+
+/// 원본(raw/) 문서. 정리 보드의 첫 열.
+final rawDocsProvider = Provider<List<IndexedDoc>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  return ref.watch(searchIndexProvider).docsOf('raw');
+});
+
+/// 오른쪽 패널에 열린 노트 id.
+final selectedNoteProvider = NotifierProvider<SelectedNote, String?>(
+  SelectedNote.new,
+);
+
+class SelectedNote extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? id) => state = id;
+}
+
+/// 그래프 노드 위치. 저장된 위치로 바로 그리고, 새 노드가 있으면 isolate에서 배치한다 (설계서 5.5).
+final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
+  ref,
+) async {
+  final notes = ref.watch(notesProvider);
+  final links = ref.watch(linksProvider);
+  final index = ref.watch(searchIndexProvider);
+  final nodes = [
+    for (final doc in notes)
+      if (!doc.isMerged) GraphNode(doc.id, doc.topic),
+  ];
+  final edges = [
+    for (final link in links)
+      GraphEdge(link.fromId, link.toId, weight: link.isSuggested ? 0.5 : 1),
+  ];
+  final initial = index.graphPositions();
+  if (nodes.every((n) => initial.containsKey(n.id))) {
+    return {for (final n in nodes) n.id: initial[n.id]!};
+  }
+  final positions = await Isolate.run(
+    () => forceLayout(nodes, edges, initial: initial),
+  );
+  index.saveGraphPositions(positions);
+  return positions;
 });
