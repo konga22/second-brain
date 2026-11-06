@@ -20,8 +20,7 @@ class Sidebar extends ConsumerWidget {
     final hasProblem = ref.watch(
       systemCheckProvider.select(
         (check) => switch (check) {
-          AsyncData(value: (final sqlite, final vault)) =>
-            !sqlite.isReady || !vault.isReady,
+          AsyncData(:final value) => value.hasProblem,
           AsyncError() => true,
           _ => false,
         },

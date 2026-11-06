@@ -34,7 +34,8 @@ class ConnectPage extends ConsumerWidget {
               loading: () => const Text('점검 중…'),
               error: (e, _) => Text('점검 실패: $e'),
               data: (result) {
-                final (sqlite, vault) = result;
+                final sqlite = result.sqlite;
+                final vault = result.vault;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -50,6 +51,19 @@ class ConnectPage extends ConsumerWidget {
                     for (final (label, ok) in vault.items)
                       _CheckRow(label: label, isOk: ok),
                     if (vault.error != null) Text(vault.error!),
+                    const SizedBox(height: 16),
+                    Text('Supabase', style: theme.textTheme.small),
+                    switch (result.isSupabaseReachable) {
+                      null => Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '설정 전 — env/supabase.json을 만들고 '
+                          '--dart-define-from-file로 실행',
+                          style: theme.textTheme.muted,
+                        ),
+                      ),
+                      final ok => _CheckRow(label: '서버 연결', isOk: ok),
+                    },
                   ],
                 );
               },

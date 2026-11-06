@@ -21,3 +21,6 @@ build/
 macos/Flutter/ephemeral/
 macos/Pods/
 **/xcuserdata/
+
+# Supabase 프로젝트 주소·공개 키 (예시는 env/supabase.example.json). AI API 키는 여기에도 두지 않는다.
+env/supabase.json
