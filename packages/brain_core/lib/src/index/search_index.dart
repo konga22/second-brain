@@ -182,7 +182,7 @@ class SearchIndex {
   }
 
   /// 색인 표 구조가 바뀌면 올린다. 열 때 낮으면 처음부터 다시 색인한다.
-  static const schemaVersion = 5;
+  static const schemaVersion = 6;
 
   /// 추천 연결 기준: 핵심 단어 5개 중 이만큼 겹치는 노트만 잇는다 (3주차 bench로 조정).
   /// 점수 = 겹친 수 / 핵심 단어 수. 연결 이유를 사람이 읽을 수 있게 하려고 bm25 비율 대신 쓴다.
@@ -283,6 +283,7 @@ class SearchIndex {
     _db.execute('delete from doc_names');
     _db.execute('delete from link_targets');
     _db.execute('delete from suggested_links');
+    _db.execute('delete from graph_pos'); // 배치 규칙이 바뀌었을 수 있어 다시 배치한다
     final result = sync();
     _db.execute("insert into docs_fts(docs_fts) values('optimize')");
     return result;
@@ -576,22 +577,42 @@ class SearchIndex {
     int limit = 5,
     bool includeRaw = false,
     Set<String>? kinds,
+    String? topic,
   }) {
     final strict = toBigramQuery(query);
     if (strict == null) return const [];
     final wanted = kinds ?? {'note', if (includeRaw) 'raw'};
-    final results = _match(strict, limit, wanted);
+    // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다.
+    final prefix = topic == null ? null : 'wiki/$topic/';
+    List<IndexedDoc> match(String q, int n) {
+      final found = _match(q, prefix == null ? n : n * 20, wanted);
+      return prefix == null
+          ? found
+          : found.where((d) => d.path.startsWith(prefix)).take(n).toList();
+    }
+
+    final results = match(strict, limit);
     if (results.length < limit) {
       final relaxed = toRelaxedQuery(query);
       if (relaxed != null) {
         final seen = {for (final d in results) d.id};
-        for (final doc in _match(relaxed, limit, wanted)) {
+        for (final doc in match(relaxed, limit)) {
           if (results.length >= limit) break;
           if (seen.add(doc.id)) results.add(doc);
         }
       }
     }
     return results;
+  }
+
+  /// 주제 폴더 목록 (빈 폴더 포함, 자동 생성 목차·숨김 폴더 제외).
+  List<String> topics() {
+    final dir = Directory(vault.wikiDir);
+    if (!dir.existsSync()) return const [];
+    return [
+      for (final d in dir.listSync().whereType<Directory>())
+        if (!p.basename(d.path).startsWith('.')) toNfc(p.basename(d.path)),
+    ]..sort();
   }
 
   List<IndexedDoc> _match(String match, int limit, Set<String> kinds) => _db

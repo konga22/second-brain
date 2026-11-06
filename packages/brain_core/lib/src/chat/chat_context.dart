@@ -45,19 +45,24 @@ class ChatContext {
   static const maxNotes = 5;
   static const snippetChars = 500;
 
+  /// [topic]이 있으면 그 주제 폴더(뇌)에서 먼저 찾고, 모자란 만큼 전체에서 채운다.
   static ChatContext build(
     Vault vault,
     SearchIndex index,
     String question, {
     List<String> extraQueries = const [],
+    String? topic,
   }) {
     final seen = <String>{};
     final docs = <IndexedDoc>[];
-    for (final query in [question, ...extraQueries]) {
-      for (final doc in index.search(query, limit: maxNotes)) {
-        if (doc.isMerged || !seen.add(doc.id)) continue;
-        docs.add(doc);
+    for (final scope in [?topic, null]) {
+      for (final query in [question, ...extraQueries]) {
+        for (final doc in index.search(query, limit: maxNotes, topic: scope)) {
+          if (doc.isMerged || !seen.add(doc.id)) continue;
+          docs.add(doc);
+        }
       }
+      if (docs.length >= maxNotes) break;
     }
     final notes = [
       for (final doc in docs.take(maxNotes)) ?_read(vault, doc),

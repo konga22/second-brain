@@ -242,6 +242,60 @@ class NoteStore {
     }
   }
 
+  /// 주제 폴더(뇌)를 만든다. 이미 있으면 그대로 둔다. 반환: 폴더 이름.
+  String createTopic(String name) {
+    final topic = topicDirName(name);
+    Directory(p.join(vault.wikiDir, topic)).createSync(recursive: true);
+    appendChangeLog(vault, 'topic-add', topic);
+    return topic;
+  }
+
+  /// 노트를 다른 주제 폴더로 옮긴다. id·제목이 그대로라 `[[링크]]`는 깨지지 않는다.
+  String move(String id, String topic, {String? batch}) {
+    final found = read(id);
+    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final (doc, note, _) = found;
+    final target = topicDirName(topic);
+    if (doc.topic == target) return doc.path;
+    final batchId = batch ?? newBatchId();
+    final from = fileOf(doc);
+    final to = uniqueNotePath(p.join(vault.wikiDir, target), note.title);
+    recordBeforeChange(vault, from.path, batch: batchId);
+    recordBeforeChange(vault, to, batch: batchId);
+    Directory(p.dirname(to)).createSync(recursive: true);
+    from.renameSync(to);
+    final rel = p.relative(to, from: vault.root);
+    appendChangeLog(vault, 'move', '$id ${doc.topic} → $target', batch: batchId);
+    _afterChange();
+    return rel;
+  }
+
+  /// 추천 정리: 연결(직접·추천)의 다수가 다른 주제에 있는 노트를 그 주제로 옮기자고 제안한다.
+  /// 노트를 고치지 않고 제안만 돌려준다. (노트 id, 지금 주제, 제안 주제, 근거 연결 수)
+  List<(String, String, String, int)> suggestMoves({int minLinks = 2}) {
+    index.sync();
+    final topicOf = {for (final d in index.notes()) d.id: d.topic};
+    final votes = <String, Map<String, int>>{};
+    for (final link in index.links()) {
+      for (final (a, b) in [(link.fromId, link.toId), (link.toId, link.fromId)]) {
+        final t = topicOf[b];
+        if (t == null || !topicOf.containsKey(a)) continue;
+        votes.putIfAbsent(a, () => {}).update(t, (n) => n + 1, ifAbsent: () => 1);
+      }
+    }
+    final out = <(String, String, String, int)>[];
+    for (final e in votes.entries) {
+      final current = topicOf[e.key]!;
+      final best = e.value.entries.reduce((a, b) => a.value >= b.value ? a : b);
+      final here = e.value[current] ?? 0;
+      if (best.key != current && best.value >= minLinks && best.value > here) {
+        out.add((e.key, current, best.key, best.value));
+      }
+    }
+    out.sort((a, b) => b.$4.compareTo(a.$4));
+    return out;
+  }
+
   /// 노트를 지운다. 실제로는 `_meta/trash/<묶음>/`으로 옮겨서 `brain undo`로 되살릴 수 있다.
   String delete(String id, {String? batch}) {
     final found = read(id);

@@ -59,7 +59,19 @@ class Vault {
 /// 앱 설정 `~/Library/Application Support/com.konga22.secondbrain/config.json`.
 /// 지식 데이터가 아니라 폴더 위치·마지막 백업 시각 같은 기기 설정만 둔다.
 class AppConfig {
-  const AppConfig({this.vaultPath, this.lastBackupAt, this.isOnboardingOff = false});
+  const AppConfig({
+    this.vaultPath,
+    this.lastBackupAt,
+    this.isOnboardingOff = false,
+    this.uiScale = 1,
+    this.panelWidth = 340,
+    this.isPanelOpen = true,
+  });
+
+  /// 화면 전체 크기 (⌘+ / ⌘-), 오른쪽 노트 패널 너비·열림.
+  final double uiScale;
+  final double panelWidth;
+  final bool isPanelOpen;
 
   final String? vaultPath;
   final DateTime? lastBackupAt;
@@ -84,18 +96,30 @@ class AppConfig {
         vaultPath: json['vault'] as String?,
         lastBackupAt: DateTime.tryParse('${json['lastBackupAt'] ?? ''}'),
         isOnboardingOff: json['onboardingOff'] == true,
+        uiScale: (json['uiScale'] as num?)?.toDouble() ?? 1,
+        panelWidth: (json['panelWidth'] as num?)?.toDouble() ?? 340,
+        isPanelOpen: json['panelOpen'] != false,
       );
     } on FormatException {
       return const AppConfig();
     }
   }
 
-  AppConfig copyWith({String? vaultPath, DateTime? lastBackupAt, bool? isOnboardingOff}) =>
-      AppConfig(
-        vaultPath: vaultPath ?? this.vaultPath,
-        lastBackupAt: lastBackupAt ?? this.lastBackupAt,
-        isOnboardingOff: isOnboardingOff ?? this.isOnboardingOff,
-      );
+  AppConfig copyWith({
+    String? vaultPath,
+    DateTime? lastBackupAt,
+    bool? isOnboardingOff,
+    double? uiScale,
+    double? panelWidth,
+    bool? isPanelOpen,
+  }) => AppConfig(
+    vaultPath: vaultPath ?? this.vaultPath,
+    lastBackupAt: lastBackupAt ?? this.lastBackupAt,
+    isOnboardingOff: isOnboardingOff ?? this.isOnboardingOff,
+    uiScale: uiScale ?? this.uiScale,
+    panelWidth: panelWidth ?? this.panelWidth,
+    isPanelOpen: isPanelOpen ?? this.isPanelOpen,
+  );
 
   void save() => writeFileAtomic(
     path,
@@ -103,6 +127,9 @@ class AppConfig {
       'vault': ?vaultPath,
       if (lastBackupAt != null) 'lastBackupAt': lastBackupAt!.toIso8601String(),
       'onboardingOff': isOnboardingOff,
+      'uiScale': uiScale,
+      'panelWidth': panelWidth,
+      'panelOpen': isPanelOpen,
     }),
   );
 }

@@ -96,6 +96,38 @@ void main() {
     expect(index.search('배포'), isEmpty); // 기본 검색에서는 원본 제외
   });
 
+  test('폴더(뇌): 만들기·옮기기·범위 검색·추천 정리', () {
+    store.createTopic('대학교');
+    expect(index.topics(), contains('대학교'));
+    final (a, _) = store.add(title: '자료구조 스택', summary: '후입선출', body: '스택은 후입선출 자료구조다', tags: ['메모']);
+    store.add(title: '자료구조 큐', summary: '선입선출', body: '큐는 선입선출 자료구조다. [[자료구조 스택]]과 비교', tags: ['대학교']);
+    store.add(title: '자료구조 힙', summary: '우선순위', body: '힙은 우선순위 큐 자료구조다. [[자료구조 스택]]', tags: ['대학교']);
+    expect(store.suggestMoves().map((m) => (m.$1, m.$3)), contains((a, '대학교')));
+    store.move(a, '대학교');
+    expect(index.byId(a)!.topic, '대학교');
+    expect(index.deadLinks(), isEmpty);
+    store.add(title: '회사 스택 규칙', summary: '회사', body: '회사에서 쓰는 기술 스택', tags: ['회사']);
+    expect(index.search('스택', topic: '대학교').every((d) => d.topic == '대학교'), isTrue);
+    final scoped = ChatContext.build(vault, index, '스택', topic: '회사');
+    expect(scoped.notes.first.title, '회사 스택 규칙'); // 그 뇌에서 먼저
+    expect(scoped.notes.length, greaterThan(1)); // 모자라면 전체에서 채움
+  });
+
+  test('할 일 추천: 추천 칸에 넣고, 받으면 확정 목록으로', () {
+    final todos = TodoStore(vault, index);
+    todos.add('보고서 쓰기');
+    expect(todos.suggest('발표 자료 만들기', source: 'n_0001'), isTrue);
+    expect(todos.suggest('발표 자료 만들기'), isFalse); // 중복
+    expect(todos.list().map((t) => t.text), ['보고서 쓰기']);
+    final s = todos.suggestions().single;
+    expect((s.text, s.noteId), ('발표 자료 만들기', 'n_0001'));
+    todos.accept(s);
+    expect(todos.suggestions(), isEmpty);
+    expect(todos.list().map((t) => t.text), ['보고서 쓰기', '발표 자료 만들기']);
+    todos.add('세 번째');
+    expect(todos.list().last.text, '세 번째');
+  });
+
   test('force 배치: 연결된 노드는 가깝고, 같은 입력이면 같은 결과', () {
     final nodes = [
       for (var i = 0; i < 30; i++) GraphNode('n$i', i < 15 ? 'a' : 'b'),

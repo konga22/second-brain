@@ -73,7 +73,7 @@ Map<String, Point<double>> forceLayout(
   const repulsion = 2400.0;
   const springLength = 70.0;
   const springK = 0.04;
-  const groupK = 0.012;
+  const groupK = 0.03; // 같은 주제끼리 또렷이 모이게 (11/07 사용자 의견: 뒤죽박죽)
   var temperature = spread * 0.1 + 20;
   final dx = List<double>.filled(nodes.length, 0);
   final dy = List<double>.filled(nodes.length, 0);
