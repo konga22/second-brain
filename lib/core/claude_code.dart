@@ -206,9 +206,11 @@ class ClaudeCode {
   /// 사용자의 Claude Code를 화면 없이 실행해 세션 하나를 `brain-save`로 정리한다.
   ///
   /// 허용 도구는 `brain` 명령뿐이고, 지식 폴더에서 돌려 이 실행 자체는 세션 목록에서 빠진다.
+  /// 긴 세션은 몇 분 걸리므로 진행 중인 단계를 [onStep]으로 알린다 (stream-json 출력).
   Future<HeadlessResult> saveSession(
     ClaudeSession session, {
     void Function(Process)? onStart,
+    void Function(String step)? onStep,
   }) async {
     final claude = await findExecutable();
     if (claude == null) {
@@ -227,33 +229,95 @@ class ClaudeCode {
         'Bash(brain *),Skill(second-brain:brain-save)',
         '--no-session-persistence',
         '--output-format',
-        'json',
+        'stream-json',
+        '--verbose',
       ],
       workingDirectory: vault.root,
       environment: _environment,
       includeParentEnvironment: false,
     );
+    // 입력 파이프를 닫지 않으면 claude -p가 표준 입력을 기다리며 멈출 수 있다.
+    await process.stdin.close();
     onStart?.call(process);
-    final out = process.stdout.transform(utf8.decoder).join();
     final err = process.stderr.transform(utf8.decoder).join();
+    final progress = _StepReader(onStep);
+    Map<String, dynamic>? result;
+    await for (final line
+        in process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+      final Object? event;
+      try {
+        event = jsonDecode(line);
+      } on FormatException {
+        continue;
+      }
+      if (event is! Map<String, dynamic>) continue;
+      if (event['type'] == 'result') {
+        result = event;
+      } else {
+        progress.read(event);
+      }
+    }
     final code = await process.exitCode;
-    final stdoutText = await out;
-    try {
-      final json = jsonDecode(stdoutText) as Map<String, dynamic>;
-      final isError = json['is_error'] == true || code != 0;
-      return HeadlessResult(
-        ok: !isError,
-        message: '${json['result'] ?? ''}'.trim(),
-        costUsd: (json['total_cost_usd'] as num?)?.toDouble(),
-      );
-    } on FormatException {
+    if (result == null) {
+      final message = (await err).trim();
       return HeadlessResult(
         ok: false,
-        message: (await err).trim().isEmpty
-            ? '실행 실패 (종료 코드 $code)'
-            : (await err).trim(),
+        message: message.isEmpty ? '실행 실패 (종료 코드 $code)' : message,
       );
     }
+    return HeadlessResult(
+      ok: result['is_error'] != true && code == 0,
+      message: '${result['result'] ?? ''}'.trim(),
+      costUsd: (result['total_cost_usd'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// stream-json 이벤트에서 사용자에게 보여 줄 진행 단계를 뽑는다.
+class _StepReader {
+  _StepReader(this.onStep);
+
+  final void Function(String step)? onStep;
+  int? _totalChars;
+
+  static final _from = RegExp(r'--from\s+(\d+)');
+  static final _total = RegExp(r'전체 (\d+)자');
+  static final _title = RegExp(r'--title\s+"([^"]*)"');
+
+  void read(Map<String, dynamic> event) {
+    final message = event['message'];
+    if (message is! Map) return;
+    final content = message['content'];
+    if (content is! List) return;
+    for (final block in content.whereType<Map>()) {
+      if (block['type'] == 'tool_result') {
+        final total = _total.firstMatch('${block['content']}');
+        if (total != null) _totalChars = int.parse(total.group(1)!);
+      } else if (block['type'] == 'tool_use') {
+        final step = _describe(block);
+        if (step != null) onStep?.call(step);
+      }
+    }
+  }
+
+  String? _describe(Map block) {
+    if (block['name'] == 'Skill') return '정리 규칙(brain-save) 읽는 중';
+    if (block['name'] != 'Bash') return null;
+    final command = '${(block['input'] as Map?)?['command'] ?? ''}'.trim();
+    if (command.startsWith('brain sessions show')) {
+      final from = int.tryParse(_from.firstMatch(command)?.group(1) ?? '') ?? 0;
+      final total = _totalChars;
+      return total == null ? '대화 읽는 중' : '대화 읽는 중 ($from / $total자)';
+    }
+    if (command.startsWith('brain find')) return '같은 노트가 있는지 찾는 중';
+    if (command.startsWith('brain add')) {
+      final title = _title.firstMatch(command)?.group(1);
+      return title == null ? '노트 저장 중' : '노트 저장: $title';
+    }
+    if (command.startsWith('brain sessions mark')) return '저장할 것 없음으로 표시';
+    return '명령 실행: ${command.split('\n').first}';
   }
 }
 

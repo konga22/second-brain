@@ -208,6 +208,11 @@ class _PastSessionsCard extends ConsumerWidget {
                     ],
                   ),
                 ),
+              if (state.activeCount > 0)
+                Text(
+                  '최근 30분 안에 기록된 대화 ${state.activeCount}개는 아직 진행 중일 수 있어 뺐습니다.',
+                  style: theme.textTheme.muted,
+                ),
               const SizedBox(height: 12),
               Text(
                 '선택한 세션 ${state.targets.length}개를 정리합니다. 사용자의 Claude Code 사용량(토큰)을 씁니다. '
@@ -245,6 +250,11 @@ class _PastSessionsCard extends ConsumerWidget {
                     : '${state.done}/${state.total} 끝',
                 style: theme.textTheme.muted,
               ),
+              if (state.isRunning && state.current != null)
+                Text(
+                  '${state.step} · ${_formatElapsed(state.elapsed)} (긴 대화는 몇 분 걸립니다)',
+                  style: theme.textTheme.muted,
+                ),
             ],
             if (state.error != null)
               Padding(
@@ -259,6 +269,10 @@ class _PastSessionsCard extends ConsumerWidget {
     );
   }
 }
+
+String _formatElapsed(Duration d) => d.inMinutes == 0
+    ? '${d.inSeconds}초'
+    : '${d.inMinutes}분 ${d.inSeconds % 60}초';
 
 class _SystemCheckCard extends ConsumerWidget {
   const _SystemCheckCard();
