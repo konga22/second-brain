@@ -20,6 +20,12 @@ md 노트와 SQLite FTS5 색인으로 내 지식을 기기에 쌓고, Claude Cod
 flutter run -d macos
 ```
 
+Supabase까지 붙여 실행하려면 `env/supabase.example.json`을 `env/supabase.json`으로 복사해 프로젝트 주소와 공개 키를 넣고 아래처럼 실행한다. `env/supabase.json`은 저장소에 올리지 않는다.
+
+```bash
+flutter run -d macos --dart-define-from-file=env/supabase.json
+```
+
 ```bash
 flutter test
 ```
