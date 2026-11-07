@@ -26,7 +26,8 @@ class FindCommand extends Command<int> {
   int run() {
     final query = argResults!.rest.join(' ').trim();
     if (query.isEmpty) usageException('검색어를 주세요.');
-    context.index.sync();
+    // 폴더 시각만 보고 바뀐 게 있을 때만 전체 동기화 (노트 1만 개 find 50ms 목표, 설계서 5.8)
+    context.index.syncIfStale();
     final limit = int.tryParse(argResults!['limit'] as String) ?? 5;
     final topic = argResults!['topic'] as String?;
     var hits = context.index.search(

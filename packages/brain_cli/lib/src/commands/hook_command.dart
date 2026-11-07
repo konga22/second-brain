@@ -96,7 +96,7 @@ class HookCommand extends Command<int> {
   /// 요청과 관련된 노트 최대 3개. 요청의 단어 머리가 제목·요약·태그에 2개 이상 들어 있어야
   /// 후보로 본다 (단어 하나만 맞는 약한 후보로 토큰을 쓰지 않게).
   static List<IndexedDoc> relatedNotes(SearchIndex index, String prompt) {
-    index.sync();
+    index.syncIfStale();
     final heads = LessonStore.wordHeads(prompt)
         .where((h) => !_buildWords.contains(h))
         .toList();

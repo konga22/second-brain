@@ -165,6 +165,10 @@ class SearchIndex {
         x real not null,
         y real not null
       );
+      create table if not exists index_meta (
+        key text primary key,
+        value integer not null
+      );
       create table if not exists suggested_links (
         from_rowid integer not null,
         to_rowid integer not null,
@@ -198,8 +202,43 @@ class SearchIndex {
 
   void close() => _db.close();
 
+  /// 빠른 동기화: 폴더 수정 시각만 보고 바뀐 게 있을 때만 [sync]한다 (`brain find`·훅용).
+  ///
+  /// 노트 1만 개에서 [sync]는 파일 1만 개의 수정 시각을 읽어 140ms쯤 걸린다 (설계서 5.8 `find` 50ms 목표).
+  /// 파일을 더하거나 지우거나 이름을 바꾸거나 원자적으로 쓰면(임시 파일 → 이름 바꾸기, `brain add`·앱) 그
+  /// 폴더 수정 시각이 바뀌므로 폴더 몇십 개만 보면 된다. 제자리에서 고친 파일은 폴더 시각이 안 바뀌므로
+  /// [fullEvery]가 지나면 한 번은 전체를 본다 (앱이 켜져 있으면 폴더 감시로 바로 반영된다).
+  SyncResult syncIfStale({Duration fullEvery = const Duration(minutes: 10)}) {
+    final last = _meta('synced_at');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (last == null || now - last > fullEvery.inMilliseconds) return sync();
+    final dirs = {
+      vault.wikiDir,
+      p.join(vault.root, 'raw'),
+      vault.lessonsDir,
+      // 폴더 이름은 SQL에서 뽑는다 (경로 1만 개를 Dart로 옮겨 자르는 것보다 빠름): 마지막 '/'까지 남기기
+      for (final row in _db.select(
+        "select distinct rtrim(path, replace(path, '/', '')) as dir from docs",
+      ))
+        p.join(vault.root, row['dir'] as String),
+    };
+    for (final dir in dirs) {
+      final stat = FileStat.statSync(dir);
+      if (stat.type == FileSystemEntityType.notFound) continue;
+      // 1초 여유: 파일 시스템 시각 단위와 동기화 도중 바뀐 것까지 잡는다.
+      if (stat.modified.millisecondsSinceEpoch >= last - 1000) return sync();
+    }
+    return const SyncResult(added: 0, updated: 0, removed: 0);
+  }
+
+  int? _meta(String key) {
+    final rows = _db.select('select value from index_meta where key = ?', [key]);
+    return rows.isEmpty ? null : rows.first['value'] as int;
+  }
+
   /// 바뀐 md 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
   SyncResult sync() {
+    final startedAt = DateTime.now().millisecondsSinceEpoch;
     final existing = {
       for (final row in _db.select(
         'select rowid, path, mtime, size, hash from docs',
@@ -265,9 +304,20 @@ class SearchIndex {
         );
         old == null ? added++ : updated++;
       }
-      for (final rowid in changed) {
-        _suggestFor(rowid);
+      // 노트가 많이 바뀌면(처음 색인·대량 가져오기) 조각별 문서 수를 한 번에 읽어 둔다.
+      // 노트마다 조각 수백 개를 하나씩 물으면 1만 개에 200초가 넘게 걸렸다 (11/07 측정).
+      if (changed.length >= 50) _loadVocab();
+      try {
+        for (final rowid in changed) {
+          _suggestFor(rowid);
+        }
+      } finally {
+        _vocab = null;
       }
+      _db.execute(
+        'insert or replace into index_meta(key, value) values (?, ?)',
+        ['synced_at', startedAt],
+      );
       _db.execute('commit');
       return SyncResult(added: added, updated: updated, removed: removed);
     } catch (_) {
@@ -444,18 +494,24 @@ class SearchIndex {
       counts.update(gram, (n) => n + 1, ifAbsent: () => 1);
     }
     if (counts.isEmpty) return const [];
-    final total =
+    final vocab = _vocab;
+    final total = vocab?.total ??
         (_db.select("select count(*) as n from docs where kind = 'note'").first['n']
                 as int)
             .clamp(1, 1 << 30);
-    _ensureVocab();
+    if (vocab == null) _ensureVocab();
     final scored = <(String, double)>[];
     for (final entry in counts.entries) {
-      final df = _db.select(
-        'select doc from docs_vocab where term = ?',
-        [entry.key],
-      );
-      final n = df.isEmpty ? 1 : (df.first['doc'] as int);
+      final int n;
+      if (vocab != null) {
+        n = vocab.df[entry.key] ?? 1;
+      } else {
+        final df = _db.select(
+          'select doc from docs_vocab where term = ?',
+          [entry.key],
+        );
+        n = df.isEmpty ? 1 : (df.first['doc'] as int);
+      }
       if (n >= total && total > 3) continue; // 모든 노트에 나오는 조각은 의미 없음
       scored.add((entry.key, entry.value * log((total + 1) / n)));
     }
@@ -464,6 +520,21 @@ class SearchIndex {
   }
 
   var _hasVocab = false;
+
+  /// 대량 색인 동안만 쓰는 조각별 문서 수.
+  ({Map<String, int> df, int total})? _vocab;
+
+  void _loadVocab() {
+    _ensureVocab();
+    _vocab = (
+      df: {
+        for (final row in _db.select('select term, doc from docs_vocab'))
+          row['term'] as String: row['doc'] as int,
+      },
+      total: (_db.select("select count(*) as n from docs where kind = 'note'").first['n'] as int)
+          .clamp(1, 1 << 30),
+    );
+  }
 
   void _ensureVocab() {
     if (_hasVocab) return;

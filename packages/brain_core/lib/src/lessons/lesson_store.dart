@@ -104,7 +104,8 @@ class LessonStore {
   }
 
   List<Lesson> all({LessonStatus? status}) {
-    index.sync();
+    // 훅이 요청마다 부르므로 빠른 동기화 (노트 1만 개에서 전체 동기화 140ms, 훅 목표 100ms)
+    index.syncIfStale();
     return [
       for (final doc in index.docsOf('lesson'))
         if (status == null || doc.statusText == status.value)
