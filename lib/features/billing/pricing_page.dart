@@ -93,12 +93,12 @@ class _PricingPageState extends ConsumerState<PricingPage> {
             column('무료', '0원', [
               '노트 200개·실수 노트 20개 (가안, 기기 안 저장이라 넘어도 막지 않고 안내만)',
               'Claude Code 연동 (경로 A, 서버를 안 거쳐 횟수 무제한)',
-              '앱 안 AI 질문 월 50회',
+              'AI 크레딧 월 60 (앱 안 AI 질문 약 23회)',
             ]),
             column(
               'Pro',
-              '월 9,900원 (가안)',
-              ['무료의 모든 기능', '앱 안 AI 질문 월 1,000회', '검증 하루 200회', '가져온 대화 자동 묶음 이름'],
+              '월 12,900원 (가안)',
+              ['무료의 모든 기능', 'AI 크레딧 월 3,000 (질문 약 1,160회)', '답을 고치면 실수 노트로 검증', '가져온 대화 자동 묶음 이름'],
               highlight: true,
               action: ShadButton(
                 enabled: user != null && !(plan?.isPro ?? false) && !_isWorking,
@@ -110,7 +110,7 @@ class _PricingPageState extends ConsumerState<PricingPage> {
         ),
         if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
         const SizedBox(height: 16),
-        Text('요금 수치는 가안입니다(설계서 미결정 5). 실제 결제는 하지 않습니다.', style: theme.textTheme.muted),
+        Text('요금 수치는 가안입니다(설계서 미결정 5). AI 크레딧은 쓴 토큰만큼 줄어듭니다(1크레딧 = AI 원가 1원). 실제 결제는 하지 않습니다.', style: theme.textTheme.muted),
       ],
     );
   }
