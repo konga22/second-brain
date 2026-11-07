@@ -61,11 +61,26 @@ void main() {
       double p90(List<double> v) => v.isEmpty ? 0 : v[(v.length * 0.9).floor().clamp(0, v.length - 1)];
       final janky = timings.where((t) => ms(t.totalSpan) > 16.7).length;
       final worst = build.isEmpty ? 0 : build.last;
+      // 타이머 안에서 화면 스레드를 막는 일(색인 동기화 등)은 빌드 시간에 안 잡히고 다음 프레임 시작을 늦춘다.
+      final lag = timings.isEmpty ? 0 : timings.map((t) => ms(t.vsyncOverhead)).reduce((a, b) => a > b ? a : b);
       debugPrint(
         '[성능] $name: 프레임 ${timings.length}개, 빌드 평균 ${avg(build).toStringAsFixed(1)}ms·p90 ${p90(build).toStringAsFixed(1)}ms, '
-        '그리기 평균 ${avg(raster).toStringAsFixed(1)}ms·p90 ${p90(raster).toStringAsFixed(1)}ms, 16.7ms 넘은 프레임 $janky개, 가장 긴 빌드 ${worst.toStringAsFixed(0)}ms'
+        '그리기 평균 ${avg(raster).toStringAsFixed(1)}ms·p90 ${p90(raster).toStringAsFixed(1)}ms, 16.7ms 넘은 프레임 $janky개, 가장 긴 빌드 ${worst.toStringAsFixed(0)}ms, 가장 긴 프레임 시작 지연 ${lag.toStringAsFixed(0)}ms'
         '${count == null ? '' : ', 다시 그림 ${count() - before}번'} (${watch.elapsedMilliseconds}ms)',
       );
+    }
+
+    // 앱 밖에서 노트 1개가 생길 때(자동 저장·Obsidian) 화면이 멈추는 정도: 폴더 감시 → 색인 → 목록·연결 → 그래프
+    final vaultRoot = Platform.environment['BRAIN_VAULT'];
+    if (vaultRoot != null && Platform.environment['PERF_SKIP_EXTERNAL'] != '1') {
+      final file = File('$vaultRoot/wiki/성능 시험/외부에서 생긴 노트.md');
+      await measure('앱 밖에서 노트 1개 생김 (2.5초 지켜봄)', () async {
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('---\nid: n_99999\ntitle: "외부에서 생긴 노트"\nsummary: "성능 시험용"\n---\n\n결제 웹훅 재시도 시험 노트\n');
+        await settle(tester, 2500);
+      });
+      file.parent.deleteSync(recursive: true);
+      await settle(tester, 1500);
     }
 
     final graph = find.byType(GraphView);
@@ -109,9 +124,14 @@ void main() {
         await settle(tester, 200);
         timings.clear();
         SchedulerBinding.instance.addTimingsCallback(onTimings);
+        final paintsBefore = graphPaintCount;
         await tester.tap(find.text(menu).first);
         await settle(tester, 300);
         SchedulerBinding.instance.removeTimingsCallback(onTimings);
+        if (menu == '홈') {
+          final slow = timings.where((t) => t.buildDuration.inMilliseconds > 50).map((t) => t.buildDuration.inMilliseconds).toList();
+          debugPrint('[성능] 홈 $round바퀴: 그래프 그림 ${graphPaintCount - paintsBefore}번, 50ms 넘은 프레임 $slow');
+        }
         worst[menu]!.add(timings.isEmpty ? 0 : timings.map((t) => t.buildDuration.inMicroseconds / 1000).reduce((a, b) => a > b ? a : b));
       }
     }
