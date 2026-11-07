@@ -63,13 +63,20 @@ Map<String, Point<double>> forceLayout(
       ys[i] = c.y + (random.nextDouble() - 0.5) * 80;
     }
   }
-  // 대부분 자리가 있으면 새 노드만 맞추면 되므로 적게 돈다.
-  final steps = known > nodes.length * 0.8 ? min(iterations, 60) : iterations;
   final links = [
     for (final e in edges)
       if (index[e.from] != null && index[e.to] != null && e.from != e.to)
         (index[e.from]!, index[e.to]!, e.weight),
   ];
+  // 새 노드가 조금이면(노트 몇 개 추가) 기존 노드는 그 자리에 두고 새 노드만 자리를 잡는다.
+  // 전체를 다시 돌리면 노드 1만 개에서 2.4초 걸리고 기존 노드도 조금씩 움직여 화면이 흔들린다 (11/07 측정).
+  final fresh = [for (final (i, n) in nodes.indexed) if (!initial.containsKey(n.id)) i];
+  if (known > 0 && fresh.length <= max(50, nodes.length ~/ 20)) {
+    _placeNew(nodes, fresh, xs, ys, links, random);
+    return {for (final (i, n) in nodes.indexed) n.id: Point(xs[i], ys[i])};
+  }
+  // 대부분 자리가 있으면 새 노드만 맞추면 되므로 적게 돈다.
+  final steps = known > nodes.length * 0.8 ? min(iterations, 60) : iterations;
   const repulsion = 2400.0;
   const springLength = 70.0;
   const springK = 0.04;
@@ -114,6 +121,97 @@ Map<String, Point<double>> forceLayout(
   return {
     for (final (i, n) in nodes.indexed) n.id: Point(xs[i], ys[i]),
   };
+}
+
+/// 새 노드만 자리 잡기: 이웃(연결된 기존 노드)의 가운데, 없으면 같은 주제 노드들의 가운데 근처에 두고,
+/// 기존 노드는 고정한 채 새 노드에만 힘을 준다 (밀어내기는 기존 노드 사분 트리를 한 번만 만들어 쓴다).
+void _placeNew(
+  List<GraphNode> nodes,
+  List<int> fresh,
+  List<double> xs,
+  List<double> ys,
+  List<(int, int, double)> links,
+  Random random,
+) {
+  final isFresh = List<bool>.filled(nodes.length, false);
+  for (final i in fresh) {
+    isFresh[i] = true;
+  }
+  // 주제별 실제 가운데 (기존 배치 기준)
+  final sum = <String, (double, double, int)>{};
+  var allX = 0.0, allY = 0.0, allN = 0;
+  for (var i = 0; i < nodes.length; i++) {
+    if (isFresh[i]) continue;
+    final (sx, sy, n) = sum[nodes[i].group] ?? (0.0, 0.0, 0);
+    sum[nodes[i].group] = (sx + xs[i], sy + ys[i], n + 1);
+    allX += xs[i];
+    allY += ys[i];
+    allN++;
+  }
+  Point<double> center(String group) {
+    final g = sum[group];
+    return g == null ? Point(allX / allN, allY / allN) : Point(g.$1 / g.$3, g.$2 / g.$3);
+  }
+
+  final neighbors = <int, List<int>>{};
+  for (final (a, b, _) in links) {
+    if (isFresh[a]) neighbors.putIfAbsent(a, () => []).add(b);
+    if (isFresh[b]) neighbors.putIfAbsent(b, () => []).add(a);
+  }
+  for (final i in fresh) {
+    final known = [for (final j in neighbors[i] ?? const <int>[]) if (!isFresh[j]) j];
+    final Point<double> c = known.isEmpty
+        ? center(nodes[i].group)
+        : Point(
+            known.map((j) => xs[j]).reduce((a, b) => a + b) / known.length,
+            known.map((j) => ys[j]).reduce((a, b) => a + b) / known.length,
+          );
+    xs[i] = c.x + (random.nextDouble() - 0.5) * 60;
+    ys[i] = c.y + (random.nextDouble() - 0.5) * 60;
+  }
+  // 기존 노드만으로 사분 트리를 만든다 (기존 노드는 움직이지 않으므로 한 번이면 된다).
+  final fixedX = <double>[], fixedY = <double>[];
+  for (var i = 0; i < nodes.length; i++) {
+    if (!isFresh[i]) {
+      fixedX.add(xs[i]);
+      fixedY.add(ys[i]);
+    }
+  }
+  final tree = _QuadTree.build(fixedX, fixedY);
+  const repulsion = 2400.0, springLength = 70.0, springK = 0.04, groupK = 0.03;
+  var temperature = 40.0;
+  for (var step = 0; step < 80; step++) {
+    for (final i in fresh) {
+      // -1: 트리 안의 어떤 노드와도 같은 번호가 아니므로 자기 자신을 빼는 처리가 필요 없다
+      var (fx, fy) = tree.force(-1, xs[i], ys[i], 0.8, repulsion);
+      for (final j in fresh) {
+        if (j == i) continue;
+        final ddx = xs[i] - xs[j], ddy = ys[i] - ys[j];
+        final d2 = ddx * ddx + ddy * ddy + 0.01;
+        final f = repulsion / d2, d = sqrt(d2);
+        fx += f * ddx / d;
+        fy += f * ddy / d;
+      }
+      for (final j in neighbors[i] ?? const <int>[]) {
+        final ddx = xs[j] - xs[i], ddy = ys[j] - ys[i];
+        final d = sqrt(ddx * ddx + ddy * ddy) + 0.01;
+        final f = springK * (d - springLength);
+        fx += f * ddx / d;
+        fy += f * ddy / d;
+      }
+      final c = center(nodes[i].group);
+      fx += (c.x - xs[i]) * groupK;
+      fy += (c.y - ys[i]) * groupK;
+      final len = sqrt(fx * fx + fy * fy);
+      if (len > temperature) {
+        fx *= temperature / len;
+        fy *= temperature / len;
+      }
+      xs[i] += fx;
+      ys[i] += fy;
+    }
+    temperature *= 0.96;
+  }
 }
 
 /// Barnes–Hut 사분 트리. 칸의 크기/거리 < θ 이면 칸 안 노드를 질량 중심 하나로 본다.

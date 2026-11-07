@@ -154,14 +154,32 @@ void main() {
     final cached = forceLayout(nodes, edges, initial: positions);
     final cachedMs = watch.elapsedMilliseconds;
     watch.reset();
+    // 새 노트 1개(기존 n5와 연결)를 더한다: 기존 노드는 그대로, 새 노드만 n5 근처에.
     final withNew = forceLayout(
-      [...nodes, const GraphNode('new', 'g1')],
-      edges,
+      [...nodes, const GraphNode('new', 'g5')], // n5와 같은 주제
+      [...edges, const GraphEdge('new', 'n5')],
       initial: positions,
     );
-    print('1만 노드 배치: 처음 ${full}ms, 저장된 위치 그대로 ${cachedMs}ms, 새 노드 1개 ${watch.elapsedMilliseconds}ms');
+    final newMs = watch.elapsedMilliseconds;
+    watch.reset();
+    // 새 노트 10개를 한꺼번에 (자동 저장·가져오기)
+    final withTen = forceLayout(
+      [...nodes, for (var i = 0; i < 10; i++) GraphNode('new$i', 'g${i % 3}')],
+      [...edges, for (var i = 0; i < 10; i++) GraphEdge('new$i', 'n${i * 7}')],
+      initial: positions,
+    );
+    final tenMs = watch.elapsedMilliseconds;
+    print('1만 노드 배치: 처음 ${full}ms, 저장된 위치 그대로 ${cachedMs}ms, 새 노드 1개 ${newMs}ms, 새 노드 10개 ${tenMs}ms');
     expect(cached['n5'], positions['n5']);
     expect(withNew, hasLength(10001));
+    expect(withTen, hasLength(10010));
+    // 기존 노드는 움직이지 않는다 (화면이 흔들리지 않게)
+    expect(withNew['n123'], positions['n123']);
+    expect(withTen['n9999'], positions['n9999']);
+    // 새 노드는 연결된 노드 근처에 (그래프 폭에 비해 가깝게)
+    final d = withNew['new']!.distanceTo(positions['n5']!);
+    expect(d, lessThan(400), reason: '연결된 n5와 $d 떨어짐');
+    expect(newMs, lessThan(500), reason: '새 노드 1개를 더하는 데 전체 배치(2.4초)를 다시 하지 않는다');
     expect(positions, hasLength(10000));
   }, timeout: const Timeout(Duration(minutes: 3)));
 }
