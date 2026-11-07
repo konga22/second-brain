@@ -243,16 +243,11 @@ class _GraphViewState extends ConsumerState<GraphView> {
                           },
                           // 끌기·확대 때 InteractiveViewer는 변환만 바꾼다. 경계로 감싸 그림을 다시 그리지 않고
                           // 이미 그린 층을 옮기게 한다 (11/07 랙 측정: 끌기 40프레임에 37번 다시 그림).
-                          // 두 층: 바탕(모든 노드·연결)은 데이터·확대 단계가 바뀔 때만 그리고 경계로 감싸 끌기·확대 때
-                          // 다시 그리지 않는다. 마우스 올림·선택은 위 층만 다시 그린다 (11/07 노트 1만 개 측정:
-                          // 마우스를 올릴 때마다 바탕까지 다시 그려 1.4초씩 멈췄다).
+                          // 바탕(모든 노드·연결)은 데이터·확대 단계가 바뀔 때만 그린다. 마우스 올림·선택은 그래프 밖
+                          // 위 층(_FocusPainter)이 그린다 (11/07 노트 1만 개 측정: 마우스를 올릴 때마다 바탕까지 다시 그려 1.4초씩 멈췄다).
                           child: RepaintBoundary(
                             child: SizedBox.fromSize(
                               size: bounds.size,
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: RepaintBoundary(
                                       child: CustomPaint(
                                         isComplex: true,
                                         painter: _GraphPainter(
@@ -273,27 +268,41 @@ class _GraphViewState extends ConsumerState<GraphView> {
                                           scale: _lastScale,
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _FocusPainter(
-                                        origin: bounds.topLeft,
-                                        positions: positions,
-                                        links: focusLinks,
-                                        degree: degree,
-                                        docs: docs,
-                                        focus: focus,
-                                        selected: selected,
-                                        neighbors: neighbors,
-                                        scale: _lastScale,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
                           ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 고른 노드를 돋보이게 하는 막: 그래프 그림이 아니라 **보이는 영역 전체**를 덮는다.
+                  // 그림 크기로 그리면 축소했을 때 그림보다 넓은 영역에서 막이 네모로 드러난다 (11/07 사용자 지적).
+                  // 켜고 끌 때 0.15초 동안 서서히 바뀌게 해 깜빡이지 않게 한다.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: focus == null ? 0 : 1,
+                        duration: const Duration(milliseconds: 150),
+                        curve: Curves.easeOut,
+                        child: const ColoredBox(color: Color(0x660d0b18)),
+                      ),
+                    ),
+                  ),
+                  // 위 층: 고른 노드·연결·이웃. 그래프와 같은 변환(_transform)을 적용해 그리고,
+                  // 끌기·확대 때는 이 층만(노드 몇 개) 다시 그린다.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _FocusPainter(
+                          transform: _transform,
+                          origin: bounds.topLeft,
+                          positions: positions,
+                          links: focusLinks,
+                          degree: degree,
+                          docs: docs,
+                          focus: focus,
+                          selected: selected,
+                          neighbors: neighbors,
+                          scale: _lastScale,
                         ),
                       ),
                     ),
@@ -573,10 +582,11 @@ class _GraphPainter extends CustomPainter {
   bool shouldRepaint(_GraphPainter old) => old.signature != signature;
 }
 
-/// 위 층: 고른 노드(마우스를 올린 노드)와 그 연결·이웃만. 나머지는 반투명 막으로 흐리게 한다.
-/// 바탕을 다시 그리지 않으므로 노드가 많아도 가볍다.
+/// 위 층: 고른 노드(마우스를 올린 노드)와 그 연결·이웃만. 그래프 밖(보이는 영역)에 놓고 그래프와 같은 변환을
+/// 적용해 그린다. 바탕을 다시 그리지 않으므로 노드가 많아도 가볍다.
 class _FocusPainter extends CustomPainter {
   _FocusPainter({
+    required this.transform,
     required this.origin,
     required this.positions,
     required this.links,
@@ -586,8 +596,10 @@ class _FocusPainter extends CustomPainter {
     required this.selected,
     required this.neighbors,
     required this.scale,
-  });
+  }) : super(repaint: transform);
 
+  /// 그래프 끌기·확대 변환. 이 값이 바뀌면 다시 그린다.
+  final TransformationController transform;
   final Offset origin;
   final Map<String, Point<double>> positions;
   final List<NoteLink> links;
@@ -607,7 +619,8 @@ class _FocusPainter extends CustomPainter {
       return Offset(p.x, p.y) - origin;
     }
 
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0x8c0d0b18));
+    canvas.save();
+    canvas.transform(transform.value.storage);
     final edgePaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2 / scale.clamp(0.5, 3)
@@ -643,6 +656,7 @@ class _FocusPainter extends CustomPainter {
         shadow: true,
       );
     }
+    canvas.restore();
   }
 
   @override
