@@ -37,23 +37,38 @@ class AppShell extends ConsumerWidget {
     final selected = ref.watch(selectedNoteProvider);
     // 패널을 닫아 둔 상태에서 노트를 고르면 연다.
     ref.listen(selectedNoteProvider, (previous, next) {
-      if (next != null && next != previous && !ref.read(appConfigProvider).isPanelOpen) {
+      if (next != null &&
+          next != previous &&
+          !ref.read(appConfigProvider).isPanelOpen) {
         configNotifier.update((c) => c.copyWith(isPanelOpen: true));
       }
     });
     final isWide = MediaQuery.sizeOf(context).width >= _rightPanelMinWindow;
     final showRight = config.isPanelOpen && (isWide || selected != null);
-    void togglePanel() => configNotifier.update((c) => c.copyWith(isPanelOpen: !c.isPanelOpen));
+    void togglePanel() =>
+        configNotifier.update((c) => c.copyWith(isPanelOpen: !c.isPanelOpen));
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () => showCommandPalette(context),
-        const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => showNoteEditor(context),
-        const SingleActivator(LogicalKeyboardKey.comma, meta: true): () => context.go(AppPage.settings.path),
-        const SingleActivator(LogicalKeyboardKey.backslash, meta: true): togglePanel,
-        const SingleActivator(LogicalKeyboardKey.equal, meta: true): () => configNotifier.zoom(1),
-        const SingleActivator(LogicalKeyboardKey.equal, meta: true, shift: true): () => configNotifier.zoom(1),
-        const SingleActivator(LogicalKeyboardKey.minus, meta: true): () => configNotifier.zoom(-1),
-        const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () => configNotifier.zoom(0),
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () =>
+            showCommandPalette(context),
+        const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () =>
+            showNoteEditor(context),
+        const SingleActivator(LogicalKeyboardKey.comma, meta: true): () =>
+            context.go(AppPage.settings.path),
+        const SingleActivator(LogicalKeyboardKey.backslash, meta: true):
+            togglePanel,
+        const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
+            configNotifier.zoom(1),
+        const SingleActivator(
+          LogicalKeyboardKey.equal,
+          meta: true,
+          shift: true,
+        ): () =>
+            configNotifier.zoom(1),
+        const SingleActivator(LogicalKeyboardKey.minus, meta: true): () =>
+            configNotifier.zoom(-1),
+        const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () =>
+            configNotifier.zoom(0),
       },
       child: Focus(
         autofocus: true,
@@ -76,7 +91,10 @@ class AppShell extends ConsumerWidget {
                           child: ShadIconButton.ghost(
                             width: 30,
                             height: 30,
-                            icon: const Icon(LucideIcons.panelRightOpen, size: 16),
+                            icon: const Icon(
+                              LucideIcons.panelRightOpen,
+                              size: 16,
+                            ),
                             onPressed: togglePanel,
                           ),
                         ),
@@ -90,14 +108,29 @@ class AppShell extends ConsumerWidget {
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onHorizontalDragUpdate: (d) => configNotifier.update(
-                      (c) => c.copyWith(panelWidth: (c.panelWidth - d.delta.dx).clamp(minPanel, maxPanel)),
+                      (c) => c.copyWith(
+                        panelWidth: (c.panelWidth - d.delta.dx).clamp(
+                          minPanel,
+                          maxPanel,
+                        ),
+                      ),
                       save: false,
                     ),
-                    onHorizontalDragEnd: (_) => ref.read(appConfigProvider).save(),
-                    child: Container(width: 5, color: colors.border.withValues(alpha: 0.6)),
+                    onHorizontalDragEnd: (_) =>
+                        ref.read(appConfigProvider).save(),
+                    child: Container(
+                      width: 5,
+                      color: colors.border.withValues(alpha: 0.6),
+                    ),
                   ),
                 ),
-                NotePanel(width: config.panelWidth, onClose: togglePanel),
+                // 패널은 창 폭의 35%를 넘지 않는다 (가운데 화면이 너무 좁아지지 않게).
+                NotePanel(
+                  width: config.panelWidth
+                      .clamp(minPanel, MediaQuery.sizeOf(context).width * 0.35)
+                      .toDouble(),
+                  onClose: togglePanel,
+                ),
               ],
             ],
           ),

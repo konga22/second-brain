@@ -88,7 +88,10 @@ class _ImportPageState extends ConsumerState<ImportPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     for (final kind in ImportKind.values)
                       Padding(
@@ -99,7 +102,6 @@ class _ImportPageState extends ConsumerState<ImportPage> {
                           child: Text('${kind.label} (raw/${kind.folder})'),
                         ),
                       ),
-                    const Spacer(),
                     ShadButton(
                       size: ShadButtonSize.sm,
                       enabled: !_isWorking,

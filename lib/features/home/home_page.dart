@@ -36,27 +36,45 @@ class _HomePageState extends State<HomePage> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 32, 16, 10),
+          // 좁은 창·큰 화면 배율에서도 넘치지 않게: 보기 버튼은 가로로 밀어 보고, 단축키 안내는 자리가 없으면 줄인다.
           child: Row(
             children: [
-              for (final mode in HomeMode.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: mode == _mode
-                      ? ShadButton.secondary(
-                          size: ShadButtonSize.sm,
-                          leading: Icon(mode.icon, size: 14),
-                          onPressed: () {},
-                          child: Text(mode.label),
-                        )
-                      : ShadButton.ghost(
-                          size: ShadButtonSize.sm,
-                          leading: Icon(mode.icon, size: 14),
-                          onPressed: () => setState(() => _mode = mode),
-                          child: Text(mode.label),
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final mode in HomeMode.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: mode == _mode
+                              ? ShadButton.secondary(
+                                  size: ShadButtonSize.sm,
+                                  leading: Icon(mode.icon, size: 14),
+                                  onPressed: () {},
+                                  child: Text(mode.label),
+                                )
+                              : ShadButton.ghost(
+                                  size: ShadButtonSize.sm,
+                                  leading: Icon(mode.icon, size: 14),
+                                  onPressed: () => setState(() => _mode = mode),
+                                  child: Text(mode.label),
+                                ),
                         ),
+                    ],
+                  ),
                 ),
-              const Spacer(),
-              Text('⌘K 찾기 · ⌘N 새 노트', style: ShadTheme.of(context).textTheme.muted),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  '⌘K 찾기 · ⌘N 새 노트',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: ShadTheme.of(context).textTheme.muted,
+                ),
+              ),
             ],
           ),
         ),

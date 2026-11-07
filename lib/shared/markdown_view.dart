@@ -21,7 +21,11 @@ class MarkdownView extends StatelessWidget {
       final line = lines[i];
       if (line.trimLeft().startsWith('```')) {
         final code = <String>[];
-        for (i++; i < lines.length && !lines[i].trimLeft().startsWith('```'); i++) {
+        for (
+          i++;
+          i < lines.length && !lines[i].trimLeft().startsWith('```');
+          i++
+        ) {
           code.add(lines[i]);
         }
         blocks.add(
@@ -29,8 +33,18 @@ class MarkdownView extends StatelessWidget {
             width: double.infinity,
             margin: const EdgeInsets.symmetric(vertical: 6),
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: colors.surfaceRaised, borderRadius: BorderRadius.circular(6)),
-            child: Text(code.join('\n'), style: base.copyWith(fontFamily: 'Menlo', fontSize: 12, height: 1.5)),
+            decoration: BoxDecoration(
+              color: colors.surfaceRaised,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              code.join('\n'),
+              style: base.copyWith(
+                fontFamily: 'Menlo',
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
           ),
         );
         continue;
@@ -45,7 +59,14 @@ class MarkdownView extends StatelessWidget {
         blocks.add(
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 2),
-            child: _inline(heading.group(2)!, base.copyWith(fontSize: level <= 2 ? 16 : 14, fontWeight: FontWeight.w700), colors),
+            child: _inline(
+              heading.group(2)!,
+              base.copyWith(
+                fontSize: level <= 2 ? 16 : 14,
+                fontWeight: FontWeight.w700,
+              ),
+              colors,
+            ),
           ),
         );
         continue;
@@ -60,7 +81,13 @@ class MarkdownView extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(width: 16, child: Text(marker.endsWith('.') ? marker : '•', style: base.copyWith(color: colors.textMuted))),
+                SizedBox(
+                  width: 16,
+                  child: Text(
+                    marker.endsWith('.') ? marker : '•',
+                    style: base.copyWith(color: colors.textMuted),
+                  ),
+                ),
                 Expanded(child: _inline(bullet.group(3)!, base, colors)),
               ],
             ),
@@ -70,7 +97,10 @@ class MarkdownView extends StatelessWidget {
       }
       blocks.add(_inline(line, base, colors));
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: blocks,
+    );
   }
 
   Widget _inline(String text, TextStyle style, AppColors colors) {
@@ -78,10 +108,14 @@ class MarkdownView extends StatelessWidget {
     final pattern = RegExp(r'\[\[([^\[\]\n]+?)\]\]|\*\*(.+?)\*\*|`([^`]+)`');
     var last = 0;
     for (final m in pattern.allMatches(text)) {
-      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+      if (m.start > last) {
+        spans.add(TextSpan(text: text.substring(last, m.start)));
+      }
       if (m.group(1) != null) {
         final target = m.group(1)!.split('|').first.split('#').first.trim();
-        final label = m.group(1)!.contains('|') ? m.group(1)!.split('|').last : m.group(1)!;
+        final label = m.group(1)!.contains('|')
+            ? m.group(1)!.split('|').last
+            : m.group(1)!;
         spans.add(
           WidgetSpan(
             alignment: PlaceholderAlignment.baseline,
@@ -90,18 +124,30 @@ class MarkdownView extends StatelessWidget {
               cursor: SystemMouseCursors.click,
               child: GestureDetector(
                 onTap: () => onLink(target),
-                child: Text('[[$label]]', style: style.copyWith(color: colors.accentText)),
+                child: Text(
+                  '[[$label]]',
+                  style: style.copyWith(color: colors.accentText),
+                ),
               ),
             ),
           ),
         );
       } else if (m.group(2) != null) {
-        spans.add(TextSpan(text: m.group(2), style: const TextStyle(fontWeight: FontWeight.w700)));
+        spans.add(
+          TextSpan(
+            text: m.group(2),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        );
       } else {
         spans.add(
           TextSpan(
             text: m.group(3),
-            style: TextStyle(fontFamily: 'Menlo', fontSize: 12, backgroundColor: colors.surfaceRaised),
+            style: TextStyle(
+              fontFamily: 'Menlo',
+              fontSize: 12,
+              backgroundColor: colors.surfaceRaised,
+            ),
           ),
         );
       }

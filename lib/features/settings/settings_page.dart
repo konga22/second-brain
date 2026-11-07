@@ -167,7 +167,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
             if (config.isAutoTidyOn) ...[
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 4,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text('하루 상한', style: theme.textTheme.muted),
                   const SizedBox(width: 8),
@@ -183,7 +186,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                   const SizedBox(width: 8),
                   Text('오늘 ${spent.toStringAsFixed(2)}달러 씀', style: theme.textTheme.muted),
-                  const Spacer(),
                   ShadButton.outline(
                     size: ShadButtonSize.sm,
                     enabled: !tidy.isRunning,
@@ -241,7 +243,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     child: Text(warning, style: TextStyle(color: colors.warning, fontSize: 12)),
                   ),
                 const SizedBox(height: 10),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
                     ShadButton.outline(
                       size: ShadButtonSize.sm,

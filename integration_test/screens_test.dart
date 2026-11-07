@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:secondbrain/app/router/app_page.dart';
 import 'package:secondbrain/app/second_brain_app.dart';
+import 'package:secondbrain/core/app_config_provider.dart';
 import 'package:secondbrain/core/brain_providers.dart';
 import 'package:secondbrain/features/home/structure_list_view.dart';
 
@@ -47,6 +48,14 @@ void main() {
     await settle(tester, 3000);
     final container = ProviderScope.containerOf(tester.element(find.byType(SecondBrainApp)));
     final router = GoRouter.of(tester.element(find.byType(Navigator).first));
+    // --dart-define=ZOOM=1.6 이면 그 화면 배율로 모든 화면을 돈다 (넘침 찾기). 끝나면 되돌린다.
+    final zoom = double.tryParse(const String.fromEnvironment('ZOOM')) ?? 0;
+    final originalScale = container.read(appConfigProvider).uiScale;
+    if (zoom > 0) {
+      // 파일에는 저장하지 않는다 (사용자 설정을 건드리지 않게).
+      container.read(appConfigProvider.notifier).update((c) => c.copyWith(uiScale: zoom), save: false);
+      await settle(tester);
+    }
 
     await shot(tester, '01_home_graph');
     for (final (i, label) in ['목록', '타임라인', '정리 보드'].indexed) {
@@ -86,6 +95,7 @@ void main() {
     await settle(tester);
     await shot(tester, '20_command_palette');
     expect(find.text('노트 찾기, 화면 이동, 새 노트…'), findsOneWidget);
+    container.read(appConfigProvider.notifier).update((c) => c.copyWith(uiScale: originalScale), save: false);
     tester.view.resetPhysicalSize();
   });
 }

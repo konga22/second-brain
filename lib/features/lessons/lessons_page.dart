@@ -5,6 +5,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
+import '../../shared/page_header.dart';
 
 /// AI가 배운 것 (설계서 3절 `/lessons`, 5.4): 실수 노트·교정 diff·회귀 시험·검사 기준.
 /// 승인 대기 규칙은 여기서 승인해야 훅이 대화에 넣는다.
@@ -40,10 +41,9 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
-        Row(
-          children: [
-            Text('AI가 배운 것', style: theme.textTheme.h4),
-            const Spacer(),
+        PageHeader(
+          title: 'AI가 배운 것',
+          actions: [
             ShadButton(
               size: ShadButtonSize.sm,
               leading: const Icon(LucideIcons.plus, size: 14),
@@ -58,7 +58,8 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
           style: theme.textTheme.muted,
         ),
         const SizedBox(height: 16),
-        Row(
+        Wrap(
+          runSpacing: 4,
           children: [
             for (final status in LessonStatus.values)
               Padding(

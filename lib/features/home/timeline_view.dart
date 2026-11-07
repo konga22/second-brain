@@ -58,14 +58,15 @@ class TimelineView extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.end,
+          runSpacing: 10,
           children: [
             _Stat(label: '이번 주 새 노트', value: week.where((e) => e.action == 'add').length),
             _Stat(label: '고침', value: week.where((e) => {'update', 'write', 'rename'}.contains(e.action)).length),
             _Stat(label: '정리됨', value: week.where((e) => e.action == 'status' && e.detail.contains(' active')).length),
             _Stat(label: '실수 노트', value: week.where((e) => e.action == 'lesson-add').length),
-            const Spacer(),
+            const SizedBox(width: 24),
             for (final day in days)
               Padding(
                 padding: const EdgeInsets.only(left: 6),
@@ -125,9 +126,14 @@ class TimelineView extends ConsumerWidget {
                       },
                     ),
                   ),
-                  Text(
-                    e.batch.startsWith('s_') ? '세션 ${e.batch.substring(2)}' : '',
-                    style: theme.textTheme.muted.copyWith(fontSize: 11),
+                  Flexible(
+                    flex: 0,
+                    child: Text(
+                      e.batch.startsWith('s_') ? '세션 ${e.batch.substring(2)}' : '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.muted.copyWith(fontSize: 11),
+                    ),
                   ),
                 ],
               ),

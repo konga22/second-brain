@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
+import '../../shared/page_header.dart';
 
 /// 할 일 (설계서 3절 `/todos`): `todos.md` 체크리스트.
 /// 추천은 두 길로 들어온다: ① AI(사용자의 Claude Code)가 노트·대화를 보고 넣은 추천
@@ -121,12 +122,10 @@ class _TodosPageState extends ConsumerState<TodosPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
-        Row(
-          children: [
-            Text('할 일', style: theme.textTheme.h4),
-            const SizedBox(width: 12),
-            Text('남은 ${open.length} · 끝 ${done.length}', style: theme.textTheme.muted),
-            const Spacer(),
+        PageHeader(
+          title: '할 일',
+          subtitle: '남은 ${open.length} · 끝 ${done.length}',
+          actions: [
             if (_isSuggesting)
               ShadButton.outline(size: ShadButtonSize.sm, onPressed: _onStop, child: const Text('멈추기'))
             else
@@ -224,7 +223,7 @@ class _TodosPageState extends ConsumerState<TodosPage> {
                   Icon(LucideIcons.fileSearch, size: 13, color: colors.textFaint),
                   const SizedBox(width: 8),
                   Expanded(child: Text(todo.text, style: const TextStyle(fontSize: 12))),
-                  sourceChip(todo.noteId),
+                  Flexible(flex: 0, child: sourceChip(todo.noteId)),
                   const SizedBox(width: 6),
                   ShadButton.ghost(
                     size: ShadButtonSize.sm,

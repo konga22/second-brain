@@ -123,7 +123,9 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
                 isOk: s.isInstalled && s.isEnabled,
               ),
               const SizedBox(height: 12),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
                 children: [
                   ShadButton(
                     size: ShadButtonSize.sm,

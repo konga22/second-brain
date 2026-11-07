@@ -33,8 +33,15 @@ class Sidebar extends ConsumerWidget {
       ),
     );
     final notes = ref.watch(notesProvider);
-    final pendingLessons = ref.watch(lessonsProvider).where((l) => l.status == LessonStatus.pending).length;
-    final openTodos = ref.watch(todoStoreProvider).list().where((t) => !t.isDone).length;
+    final pendingLessons = ref
+        .watch(lessonsProvider)
+        .where((l) => l.status == LessonStatus.pending)
+        .length;
+    final openTodos = ref
+        .watch(todoStoreProvider)
+        .list()
+        .where((t) => !t.isDone)
+        .length;
     final counts = {
       AppPage.notes: '${notes.length}',
       if (pendingLessons > 0) AppPage.lessons: '$pendingLessons',
@@ -71,8 +78,16 @@ class Sidebar extends ConsumerWidget {
                 children: [
                   Icon(LucideIcons.search, size: 14, color: colors.textFaint),
                   const SizedBox(width: 8),
-                  Expanded(child: Text('찾기·명령', style: TextStyle(fontSize: 13, color: colors.textFaint))),
-                  Text('⌘K', style: TextStyle(fontSize: 11, color: colors.textFaint)),
+                  Expanded(
+                    child: Text(
+                      '찾기·명령',
+                      style: TextStyle(fontSize: 13, color: colors.textFaint),
+                    ),
+                  ),
+                  Text(
+                    '⌘K',
+                    style: TextStyle(fontSize: 11, color: colors.textFaint),
+                  ),
                 ],
               ),
             ),
@@ -86,11 +101,17 @@ class Sidebar extends ConsumerWidget {
             ),
           const SizedBox(height: 12),
           const Expanded(child: _TopicTree()),
-          Container(height: 1, color: colors.border, margin: const EdgeInsets.symmetric(vertical: 6)),
+          Container(
+            height: 1,
+            color: colors.border,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+          ),
           _StatusLine(
             color: claude == null
                 ? colors.textFaint
-                : (claude.isInstalled && claude.isEnabled ? colors.success : colors.warning),
+                : (claude.isInstalled && claude.isEnabled
+                      ? colors.success
+                      : colors.warning),
             text: claude == null
                 ? 'Claude Code 확인 중'
                 : (claude.isInstalled ? 'Claude Code 연결됨' : 'Claude Code 연동 전'),
@@ -121,9 +142,19 @@ class _StatusLine extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     child: Row(
       children: [
-        Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
         const SizedBox(width: 8),
-        Text(text, style: TextStyle(fontSize: 12, color: AppColors.of(context).textMuted)),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            color: AppColors.of(context).textMuted,
+          ),
+        ),
       ],
     ),
   );
@@ -165,11 +196,26 @@ class _SidebarItem extends StatelessWidget {
               children: [
                 Icon(page.icon, size: 16, color: color),
                 const SizedBox(width: 10),
-                Expanded(child: Text(page.label, style: TextStyle(fontSize: 14, color: color))),
+                Expanded(
+                  child: Text(
+                    page.label,
+                    style: TextStyle(fontSize: 14, color: color),
+                  ),
+                ),
                 if (hasProblem)
-                  Container(width: 6, height: 6, decoration: BoxDecoration(color: colors.warning, shape: BoxShape.circle))
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: colors.warning,
+                      shape: BoxShape.circle,
+                    ),
+                  )
                 else if (count != null)
-                  Text(count!, style: TextStyle(fontSize: 11, color: colors.textFaint)),
+                  Text(
+                    count!,
+                    style: TextStyle(fontSize: 11, color: colors.textFaint),
+                  ),
               ],
             ),
           ),
@@ -195,8 +241,9 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
   final _open = <String>{};
   String? _dropHover;
 
-  void _onToggle(String topic) =>
-      setState(() => _open.contains(topic) ? _open.remove(topic) : _open.add(topic));
+  void _onToggle(String topic) => setState(
+    () => _open.contains(topic) ? _open.remove(topic) : _open.add(topic),
+  );
 
   void _onMove(String noteId, String topic) {
     try {
@@ -204,7 +251,8 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
       _open.add(topic);
       bumpVault(ref);
     } on NoteStoreException catch (e) {
-      ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text(e.message)));
+      ShadToaster.maybeOf(context)
+          ?.show(ShadToast.destructive(description: Text(e.message)));
     }
   }
 
@@ -214,10 +262,18 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
       context: context,
       builder: (context) => ShadDialog(
         title: const Text('폴더 추가'),
-        description: const Text('주제 폴더는 하나의 "뇌"입니다. 노트를 끌어다 놓아 정리하고, AI 질문에서 이 폴더 지식으로만 답하게 할 수 있습니다.'),
+        description: const Text(
+          '주제 폴더는 하나의 "뇌"입니다. 노트를 끌어다 놓아 정리하고, AI 질문에서 이 폴더 지식으로만 답하게 할 수 있습니다.',
+        ),
         actions: [
-          ShadButton.outline(onPressed: () => Navigator.of(context).pop(), child: const Text('취소')),
-          ShadButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('만들기')),
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('취소'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('만들기'),
+          ),
         ],
         child: ShadInput(
           controller: controller,
@@ -242,7 +298,8 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
       context: context,
       builder: (context) => _SuggestDialog(
         moves: [
-          for (final (id, from, to, count) in moves) (id, index.byId(id)?.title ?? id, from, to, count),
+          for (final (id, from, to, count) in moves)
+            (id, index.byId(id)?.title ?? id, from, to, count),
         ],
         onMove: (id, to) => _onMove(id, to),
       ),
@@ -288,13 +345,27 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
         Row(
           children: [
             const SizedBox(width: 8),
-            Expanded(child: Text('주제·파일', style: TextStyle(fontSize: 11, color: colors.textFaint))),
-            _MiniButton(icon: LucideIcons.wandSparkles, tooltip: '추천 정리', onTap: _onSuggest),
-            _MiniButton(icon: LucideIcons.folderPlus, tooltip: '폴더 추가', onTap: _onAddTopic),
+            Expanded(
+              child: Text(
+                '주제·파일',
+                style: TextStyle(fontSize: 11, color: colors.textFaint),
+              ),
+            ),
+            _MiniButton(
+              icon: LucideIcons.wandSparkles,
+              tooltip: '추천 정리',
+              onTap: _onSuggest,
+            ),
+            _MiniButton(
+              icon: LucideIcons.folderPlus,
+              tooltip: '폴더 추가',
+              onTap: _onAddTopic,
+            ),
             _MiniButton(
               icon: LucideIcons.folderOpen,
               tooltip: 'Finder에서 열기',
-              onTap: () => Process.run('open', [ref.read(vaultProvider).wikiDir]),
+              onTap: () =>
+                  Process.run('open', [ref.read(vaultProvider).wikiDir]),
             ),
           ],
         ),
@@ -320,20 +391,35 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                     return GestureDetector(
                       onTap: () => _onToggle(topic),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: _dropHover == topic ? colors.accentSoft : null,
-                          border: _dropHover == topic ? Border.all(color: colors.accent) : null,
+                          border: _dropHover == topic
+                              ? Border.all(color: colors.accent)
+                              : null,
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: Row(
                           children: [
-                            Icon(isOpen ? LucideIcons.chevronDown : LucideIcons.chevronRight, size: 12, color: colors.textFaint),
+                            Icon(
+                              isOpen
+                                  ? LucideIcons.chevronDown
+                                  : LucideIcons.chevronRight,
+                              size: 12,
+                              color: colors.textFaint,
+                            ),
                             const SizedBox(width: 4),
                             Icon(
-                              isOpen ? LucideIcons.folderOpen : LucideIcons.folder,
+                              isOpen
+                                  ? LucideIcons.folderOpen
+                                  : LucideIcons.folder,
                               size: 14,
-                              color: isActive ? colors.accentText : colors.textMuted,
+                              color: isActive
+                                  ? colors.accentText
+                                  : colors.textMuted,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
@@ -343,8 +429,12 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isActive ? colors.accentText : colors.textMuted,
-                                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                                  color: isActive
+                                      ? colors.accentText
+                                      : colors.textMuted,
+                                  fontWeight: isActive
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
                                 ),
                               ),
                             ),
@@ -353,9 +443,18 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                                 width: 6,
                                 height: 6,
                                 margin: const EdgeInsets.only(right: 6),
-                                decoration: BoxDecoration(color: colors.accent, shape: BoxShape.circle),
+                                decoration: BoxDecoration(
+                                  color: colors.accent,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
-                            Text('${byTopic[topic]!.length}', style: TextStyle(fontSize: 11, color: colors.textFaint)),
+                            Text(
+                              '${byTopic[topic]!.length}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: colors.textFaint,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -369,7 +468,9 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                       isSelected: doc.id == selected,
                       hasIssue: issues.contains(doc.id),
                       isDraggable: topic != rawTopic,
-                      onTap: () => ref.read(selectedNoteProvider.notifier).select(doc.id),
+                      onTap: () => ref
+                          .read(selectedNoteProvider.notifier)
+                          .select(doc.id),
                     ),
               ],
             ],
@@ -414,11 +515,21 @@ class _FileRow extends StatelessWidget {
                 '${doc.title}.md',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: isSelected ? colors.accentText : colors.text),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isSelected ? colors.accentText : colors.text,
+                ),
               ),
             ),
             if (hasIssue)
-              Container(width: 5, height: 5, decoration: BoxDecoration(color: colors.warning, shape: BoxShape.circle)),
+              Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: colors.warning,
+                  shape: BoxShape.circle,
+                ),
+              ),
           ],
         ),
       ),
@@ -434,7 +545,14 @@ class _FileRow extends StatelessWidget {
           border: Border.all(color: colors.accent),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Text(doc.title, style: TextStyle(fontSize: 12, color: colors.text, decoration: TextDecoration.none)),
+        child: Text(
+          doc.title,
+          style: TextStyle(
+            fontSize: 12,
+            color: colors.text,
+            decoration: TextDecoration.none,
+          ),
+        ),
       ),
       childWhenDragging: Opacity(opacity: 0.4, child: row),
       child: row,
@@ -443,7 +561,11 @@ class _FileRow extends StatelessWidget {
 }
 
 class _MiniButton extends StatelessWidget {
-  const _MiniButton({required this.icon, required this.tooltip, required this.onTap});
+  const _MiniButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String tooltip;
@@ -478,12 +600,22 @@ class _SuggestDialogState extends State<_SuggestDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final left = [for (final m in widget.moves) if (!_done.contains(m.$1)) m];
+    final left = [
+      for (final m in widget.moves)
+        if (!_done.contains(m.$1)) m,
+    ];
     return ShadDialog(
       title: const Text('추천 정리'),
-      description: const Text('연결된 노트의 다수가 다른 폴더에 있으면 그 폴더로 옮기자고 제안합니다. 옮겨도 [[링크]]는 그대로이고, brain undo로 되돌릴 수 있습니다.'),
+      description: const Text(
+        '연결된 노트의 다수가 다른 폴더에 있으면 그 폴더로 옮기자고 제안합니다. 옮겨도 [[링크]]는 그대로이고, brain undo로 되돌릴 수 있습니다.',
+      ),
       constraints: const BoxConstraints(maxWidth: 620),
-      actions: [ShadButton.outline(onPressed: () => Navigator.of(context).pop(), child: const Text('닫기'))],
+      actions: [
+        ShadButton.outline(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('닫기'),
+        ),
+      ],
       child: left.isEmpty
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -504,7 +636,10 @@ class _SuggestDialogState extends State<_SuggestDialog> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(title, style: theme.textTheme.small),
-                                Text('$from → $to (연결 $count개가 $to에 있음)', style: theme.textTheme.muted),
+                                Text(
+                                  '$from → $to (연결 $count개가 $to에 있음)',
+                                  style: theme.textTheme.muted,
+                                ),
                               ],
                             ),
                           ),

@@ -60,7 +60,8 @@ class _CommandPaletteState extends ConsumerState<_CommandPalette> {
       _Command(
         q.isEmpty ? '새 노트' : '새 노트: "$q"',
         LucideIcons.plus,
-        (context, ref) => showNoteEditor(context, initialTitle: q.isEmpty ? null : q),
+        (context, ref) =>
+            showNoteEditor(context, initialTitle: q.isEmpty ? null : q),
         hint: '⌘N',
       ),
       ...pages,
@@ -121,14 +122,21 @@ class _CommandPaletteState extends ConsumerState<_CommandPalette> {
                     GestureDetector(
                       onTap: () => _run(command),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: i == cursor ? colors.accentSoft : null,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           children: [
-                            Icon(command.icon, size: 14, color: colors.textMuted),
+                            Icon(
+                              command.icon,
+                              size: 14,
+                              color: colors.textMuted,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(

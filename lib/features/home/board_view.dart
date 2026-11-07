@@ -103,14 +103,17 @@ class _Column extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Text(title, style: theme.textTheme.small),
-                const SizedBox(width: 6),
-                Text('${cards.length}', style: theme.textTheme.muted),
-              ],
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: title, style: theme.textTheme.small),
+                  TextSpan(text: '  ${cards.length}', style: theme.textTheme.muted),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            Text(hint, style: theme.textTheme.muted.copyWith(fontSize: 11)),
+            Text(hint, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.muted.copyWith(fontSize: 11)),
             const SizedBox(height: 8),
             Expanded(
               child: cards.isEmpty

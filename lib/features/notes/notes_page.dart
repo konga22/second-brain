@@ -6,6 +6,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
 import 'note_editor_dialog.dart';
+import '../../shared/page_header.dart';
 
 /// 노트 표 화면 (설계서 3절 `/notes`). 홈 보기와 별개. 정리 대기가 먼저 나온다.
 class NotesPage extends ConsumerStatefulWidget {
@@ -52,15 +53,10 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
-        Row(
-          children: [
-            Text('노트', style: theme.textTheme.h4),
-            const SizedBox(width: 12),
-            Text(
-              '전체 ${all.length} · 정리 대기 ${drafts.length}',
-              style: theme.textTheme.muted,
-            ),
-            const Spacer(),
+        PageHeader(
+          title: '노트',
+          subtitle: '전체 ${all.length} · 정리 대기 ${drafts.length}',
+          actions: [
             ShadButton(
               size: ShadButtonSize.sm,
               leading: const Icon(LucideIcons.plus, size: 14),
@@ -70,23 +66,25 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           ],
         ),
         const SizedBox(height: 16),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Expanded(
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 220, maxWidth: 520),
               child: ShadInput(
                 placeholder: const Text('찾기 (띄어쓰기·조사 상관없음)'),
                 leading: const Icon(LucideIcons.search, size: 14),
                 onChanged: (value) => setState(() => _query = value),
               ),
             ),
-            const SizedBox(width: 8),
             ShadButton.outline(
               size: ShadButtonSize.sm,
               onPressed: () => setState(() => _isDraftOnly = !_isDraftOnly),
               child: Text(_isDraftOnly ? '전체 보기' : '정리 대기만'),
             ),
             if (drafts.isNotEmpty) ...[
-              const SizedBox(width: 8),
               ShadButton.secondary(
                 size: ShadButtonSize.sm,
                 onPressed: () => _onConfirmAll(drafts),
@@ -169,7 +167,14 @@ class _NoteRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Text('${doc.id} · ${doc.topic}', style: theme.textTheme.muted),
+            Flexible(
+              child: Text(
+                '${doc.id} · ${doc.topic}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.muted,
+              ),
+            ),
             if (doc.isDraft) ...[
               const SizedBox(width: 12),
               ShadButton.outline(
