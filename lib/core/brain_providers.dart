@@ -106,9 +106,29 @@ final lessonsProvider = Provider<List<Lesson>>((ref) {
 
 final lintIssuesProvider = Provider<List<LintIssue>>((ref) {
   ref.watch(vaultRevisionProvider);
-  return Linter(ref.watch(vaultProvider), ref.watch(searchIndexProvider))
-      .run();
+  return Linter(ref.watch(vaultProvider), ref.watch(searchIndexProvider)).run();
 });
+
+/// 할 일 화면에 보일 것. 노트 파일을 모두 읽어 후보를 찾으므로 지식 폴더가 바뀔 때만 한 번 계산한다
+/// (11/07 랙 측정: 화면을 그릴 때마다 계산해 할 일 화면 이동이 가장 느렸음).
+final todoViewProvider =
+    Provider<
+      ({
+        List<Todo> todos,
+        List<Todo> suggestions,
+        List<Todo> candidates,
+        List<Todo> fromNotes,
+      })
+    >((ref) {
+      ref.watch(vaultRevisionProvider);
+      final store = ref.watch(todoStoreProvider);
+      return (
+        todos: store.list(),
+        suggestions: store.suggestions(),
+        candidates: store.candidatesFromNotes(),
+        fromNotes: store.fromNotes(),
+      );
+    });
 
 /// 원본(raw/) 문서. 정리 보드의 첫 열.
 final rawDocsProvider = Provider<List<IndexedDoc>>((ref) {

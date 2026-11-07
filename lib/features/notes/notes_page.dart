@@ -21,7 +21,9 @@ class _NotesPageState extends ConsumerState<NotesPage> {
   String _query = '';
 
   void _onConfirm(IndexedDoc doc) {
-    ref.read(noteStoreProvider).setStatus(doc.id, NoteStatus.active, batch: newBatchId());
+    ref
+        .read(noteStoreProvider)
+        .setStatus(doc.id, NoteStatus.active, batch: newBatchId());
     bumpVault(ref);
   }
 
@@ -50,70 +52,77 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     } else {
       shown = _isDraftOnly ? drafts : all;
     }
-    return ListView(
+    final head = <Widget>[
+      PageHeader(
+        title: '노트',
+        subtitle: '전체 ${all.length} · 정리 대기 ${drafts.length}',
+        actions: [
+          ShadButton(
+            size: ShadButtonSize.sm,
+            leading: const Icon(LucideIcons.plus, size: 14),
+            onPressed: () => showNoteEditor(context),
+            child: const Text('새 노트 ⌘N'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 220, maxWidth: 520),
+            child: ShadInput(
+              placeholder: const Text('찾기 (띄어쓰기·조사 상관없음)'),
+              leading: const Icon(LucideIcons.search, size: 14),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+          ),
+          ShadButton.outline(
+            size: ShadButtonSize.sm,
+            onPressed: () => setState(() => _isDraftOnly = !_isDraftOnly),
+            child: Text(_isDraftOnly ? '전체 보기' : '정리 대기만'),
+          ),
+          if (drafts.isNotEmpty) ...[
+            ShadButton.secondary(
+              size: ShadButtonSize.sm,
+              onPressed: () => _onConfirmAll(drafts),
+              child: Text('대기 ${drafts.length}개 모두 확인'),
+            ),
+          ],
+        ],
+      ),
+      const SizedBox(height: 16),
+      if (shown.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 40),
+          child: Center(
+            child: Text(
+              all.isEmpty
+                  ? '아직 노트가 없습니다. [새 노트]를 누르거나, Claude Code에서 "지식 저장해 줘"라고 하거나, 연동·설정에서 지난 대화를 정리하세요.'
+                  : (_query.isEmpty
+                        ? '정리 대기 노트가 없습니다.'
+                        : '찾은 노트가 없습니다. 검색어를 바꿔 보세요.'),
+              style: theme.textTheme.muted,
+            ),
+          ),
+        ),
+    ];
+    // 노트 줄은 보이는 것만 만든다 (노트가 늘어도 화면 이동이 느려지지 않게, 11/07 랙 측정).
+    return ListView.builder(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
-      children: [
-        PageHeader(
-          title: '노트',
-          subtitle: '전체 ${all.length} · 정리 대기 ${drafts.length}',
-          actions: [
-            ShadButton(
-              size: ShadButtonSize.sm,
-              leading: const Icon(LucideIcons.plus, size: 14),
-              onPressed: () => showNoteEditor(context),
-              child: const Text('새 노트 ⌘N'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 220, maxWidth: 520),
-              child: ShadInput(
-                placeholder: const Text('찾기 (띄어쓰기·조사 상관없음)'),
-                leading: const Icon(LucideIcons.search, size: 14),
-                onChanged: (value) => setState(() => _query = value),
-              ),
-            ),
-            ShadButton.outline(
-              size: ShadButtonSize.sm,
-              onPressed: () => setState(() => _isDraftOnly = !_isDraftOnly),
-              child: Text(_isDraftOnly ? '전체 보기' : '정리 대기만'),
-            ),
-            if (drafts.isNotEmpty) ...[
-              ShadButton.secondary(
-                size: ShadButtonSize.sm,
-                onPressed: () => _onConfirmAll(drafts),
-                child: Text('대기 ${drafts.length}개 모두 확인'),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (shown.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 40),
-            child: Center(
-              child: Text(
-                all.isEmpty
-                    ? '아직 노트가 없습니다. [새 노트]를 누르거나, Claude Code에서 "지식 저장해 줘"라고 하거나, 연동·설정에서 지난 대화를 정리하세요.'
-                    : (_query.isEmpty ? '정리 대기 노트가 없습니다.' : '찾은 노트가 없습니다. 검색어를 바꿔 보세요.'),
-                style: theme.textTheme.muted,
-              ),
-            ),
-          ),
-        for (final doc in shown)
-          _NoteRow(
-            doc: doc,
-            isSelected: doc.id == selected,
-            onOpen: () => ref.read(selectedNoteProvider.notifier).select(doc.id),
-            onConfirm: () => _onConfirm(doc),
-          ),
-      ],
+      itemCount: head.length + shown.length,
+      itemBuilder: (context, i) {
+        if (i < head.length) return head[i];
+        final doc = shown[i - head.length];
+        return _NoteRow(
+          doc: doc,
+          isSelected: doc.id == selected,
+          onOpen: () => ref.read(selectedNoteProvider.notifier).select(doc.id),
+          onConfirm: () => _onConfirm(doc),
+        );
+      },
     );
   }
 }
