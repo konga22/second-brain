@@ -13,6 +13,9 @@ import '../../core/brain_providers.dart';
 @visibleForTesting
 int graphFitCount = 0;
 
+/// 성능 시험용: 그래프를 실제로 그린 횟수 (painter.paint).
+int graphPaintCount = 0;
+
 /// 뇌 그래프 (설계서 3.3·5.5). 어두운 배경 + 빛나는 노드, 추천 연결은 점선.
 class GraphView extends ConsumerStatefulWidget {
   const GraphView({super.key});
@@ -241,9 +244,23 @@ class _GraphViewState extends ConsumerState<GraphView> {
                             final hit = _hit(details.localPosition + bounds.topLeft, positions, scale);
                             ref.read(selectedNoteProvider.notifier).select(hit);
                           },
-                          child: CustomPaint(
+                          // 끌기·확대 때 InteractiveViewer는 변환만 바꾼다. 경계로 감싸 그림을 다시 그리지 않고
+                          // 이미 그린 층을 옮기게 한다 (11/07 랙 측정: 끌기 40프레임에 37번 다시 그림).
+                          child: RepaintBoundary(
+                            child: CustomPaint(
                             size: bounds.size,
                             painter: _GraphPainter(
+                              signature: Object.hash(
+                                identityHashCode(allPositions),
+                                identityHashCode(allLinks),
+                                identityHashCode(notes),
+                                isLocal,
+                                _topic,
+                                _showSuggested,
+                                focus,
+                                selected,
+                                _transform.value.getMaxScaleOnAxis(),
+                              ),
                               origin: bounds.topLeft,
                               positions: positions,
                               links: drawn,
@@ -253,6 +270,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
                               selected: selected,
                               neighbors: neighbors,
                               scale: _transform.value.getMaxScaleOnAxis(),
+                            ),
                             ),
                           ),
                         ),
@@ -398,6 +416,7 @@ class _ModeButton extends StatelessWidget {
 
 class _GraphPainter extends CustomPainter {
   _GraphPainter({
+    required this.signature,
     required this.origin,
     required this.positions,
     required this.links,
@@ -409,6 +428,8 @@ class _GraphPainter extends CustomPainter {
     required this.scale,
   });
 
+  /// 그림에 영향을 주는 입력을 묶은 값. 같으면 다시 그리지 않는다 (지도·목록은 빌드마다 새로 만들어져 비교할 수 없음).
+  final int signature;
   final Offset origin;
   final Map<String, Point<double>> positions;
   final List<NoteLink> links;
@@ -429,6 +450,7 @@ class _GraphPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    graphPaintCount++;
     // 주제 이름: 주제 노드들의 가운데에 흐리게.
     final groups = <String, List<Offset>>{};
     for (final id in positions.keys) {
@@ -481,12 +503,12 @@ class _GraphPainter extends CustomPainter {
       final color = isSelected || id == focus
           ? const Color(0xffffffff)
           : (isHot ? const Color(0xffc4b5fd) : const Color(0xffe4e1f5));
+      // 빛 번짐: 블러 필터 대신 방사형 그라데이션 (노드마다 블러를 거는 것보다 훨씬 가볍다)
+      final glow = color.withValues(alpha: isHot || isSelected ? 0.28 : 0.12);
       canvas.drawCircle(
         c,
         r * 2.4,
-        Paint()
-          ..color = color.withValues(alpha: isHot || isSelected ? 0.28 : 0.12)
-          ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 6),
+        Paint()..shader = ui.Gradient.radial(c, r * 2.4, [glow, glow.withValues(alpha: 0)]),
       );
       canvas.drawCircle(c, r, Paint()..color = color.withValues(alpha: isDraft ? 0.55 : 0.95));
       if (isDraft) {
@@ -524,8 +546,23 @@ class _GraphPainter extends CustomPainter {
     }
   }
 
+  /// 이름표 글자 배치 캐시. 같은 글자·크기·색이면 다시 배치하지 않는다 (배치가 그리기에서 가장 무거움).
+  static final _labels = <(String, double, Color, bool, bool), TextPainter>{};
+
   void _label(Canvas canvas, String text, Offset center, Color color, double fontSize, {bool bold = false, bool shadow = false}) {
-    final painter = TextPainter(
+    final key = (text, (fontSize * 10).roundToDouble() / 10, color, bold, shadow);
+    if (_labels.length > 600) {
+      for (final p in _labels.values) {
+        p.dispose();
+      }
+      _labels.clear();
+    }
+    final painter = _labels[key] ??= _layoutLabel(key.$1, key.$2, color, bold, shadow);
+    painter.paint(canvas, center - Offset(painter.width / 2, painter.height / 2));
+  }
+
+  static TextPainter _layoutLabel(String text, double fontSize, Color color, bool bold, bool shadow) {
+    return TextPainter(
       text: TextSpan(
         text: text,
         style: TextStyle(
@@ -538,14 +575,8 @@ class _GraphPainter extends CustomPainter {
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    painter.paint(canvas, center - Offset(painter.width / 2, painter.height / 2));
   }
 
   @override
-  bool shouldRepaint(_GraphPainter old) =>
-      old.positions != positions ||
-      old.links != links ||
-      old.focus != focus ||
-      old.selected != selected ||
-      old.scale != scale;
+  bool shouldRepaint(_GraphPainter old) => old.signature != signature;
 }
