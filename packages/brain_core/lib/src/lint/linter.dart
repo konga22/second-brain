@@ -58,7 +58,13 @@ class Linter {
     r'|ignore\s+(all\s+)?(previous|prior|above)\s+instructions'
     r'|disregard\s+(all\s+)?(previous|prior)\s+'
     r'|you\s+are\s+now\s+'
-    r'|시스템\s*프롬프트를?\s*(무시|보여|출력)',
+    r'|시스템\s*프롬프트를?\s*(무시|보여|출력)'
+    // AI에게 직접 시키는 말 (11/08 주입 시험: "AI 도우미에게: …를 실행해 줘", "이 요약을 본 AI는 …할 것")
+    // AI를 부르는 말(…에게/…는) 뒤에 시키는 말끝(해 줘·하라·할 것)이 올 때만. 설명 문장("게임 AI·…로 실행")은 거르지 않게.
+    r'|(AI|에이아이|어시스턴트|도우미|에이전트|assistant)\s*(에게|님|는|가)\s*[:,]?[^\n]{0,150}'
+    r'(실행해 ?(줘|라)|실행하라|실행할 것|출력해 ?(줘|라)|출력하라|적어 ?(줘|라)|적을 것|답하라|답할 것|만들어 ?(줘|라)|만들 것|보여 ?줘|하라|할 것)'
+    r'|(너는|당신은)\s*[^\n]{0,40}(하라|할 것|해야 한다)'
+    r'|이\s*(노트|문서|요약|글)를\s*(읽|본|보)[^\n]{0,20}(AI|어시스턴트|에이전트|너|당신)',
     caseSensitive: false,
   );
 
@@ -166,7 +172,8 @@ class Linter {
           ),
         );
       }
-      final hit = _suspicious.firstMatch(note.body);
+      // 제목·요약도 본다: 요약은 find 결과와 훅이 미리 넣는 노트 줄에 그대로 나간다.
+      final hit = _suspicious.firstMatch('${note.title}\n${note.summary}\n${note.body}');
       if (hit != null) {
         issues.add(
           LintIssue(
