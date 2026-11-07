@@ -95,7 +95,10 @@ class AppConfig {
   /// SessionStart 온보딩 요약 끄기 (설계서 5.2 "설정에서 끌 수 있다").
   final bool isOnboardingOff;
 
-  static String get path => p.join(
+  /// 시험은 `BRAIN_CONFIG`로 따로 된 설정 파일을 써서 사용자 설정을 건드리지 않는다.
+  static String get path =>
+      Platform.environment['BRAIN_CONFIG'] ??
+      p.join(
     Platform.environment['HOME'] ?? '.',
     'Library',
     'Application Support',
