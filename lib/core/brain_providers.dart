@@ -25,8 +25,12 @@ final noteStoreProvider = Provider<NoteStore>(
 );
 
 final lessonStoreProvider = Provider<LessonStore>(
-  (ref) =>
-      LessonStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
+  // 앱은 폴더 감시·시작 동기화로 색인을 맞추므로 읽을 때마다 다시 맞추지 않는다.
+  (ref) => LessonStore(
+    ref.watch(vaultProvider),
+    ref.watch(searchIndexProvider),
+    syncOnRead: false,
+  ),
 );
 
 final todoStoreProvider = Provider<TodoStore>(

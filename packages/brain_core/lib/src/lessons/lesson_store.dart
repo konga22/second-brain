@@ -12,10 +12,14 @@ import 'lesson.dart';
 
 /// 실수 노트·회귀 시험·검증 기준 읽기·쓰기 (설계서 5.4).
 class LessonStore {
-  LessonStore(this.vault, this.index);
+  LessonStore(this.vault, this.index, {this.syncOnRead = true});
 
   final Vault vault;
   final SearchIndex index;
+
+  /// 읽기([all]) 전에 색인을 맞출지. CLI·훅은 켜고, 폴더 감시로 색인을 따로 맞추는 앱은 끈다
+  /// (11/07 노트 1만 개 앱 시작: 여기서 전체 동기화가 화면 스레드에서 돌아 345ms).
+  final bool syncOnRead;
 
   /// 질문당 넣는 규칙 최대 개수.
   static const maxPerPrompt = 3;
@@ -105,7 +109,7 @@ class LessonStore {
 
   List<Lesson> all({LessonStatus? status}) {
     // 훅이 요청마다 부르므로 빠른 동기화 (노트 1만 개에서 전체 동기화 140ms, 훅 목표 100ms)
-    index.syncIfStale();
+    if (syncOnRead) index.syncIfStale();
     return [
       for (final doc in index.docsOf('lesson'))
         if (status == null || doc.statusText == status.value)
