@@ -30,8 +30,16 @@ void main() {
     expect(Platform.environment['BRAIN_CONFIG'], isNotNull, reason: '사용자 설정 보호');
     tester.view.physicalSize = const Size(1600, 1000) * tester.view.devicePixelRatio;
     addTearDown(tester.view.resetPhysicalSize);
+    final start = Stopwatch()..start();
     await tester.pumpWidget(const ProviderScope(child: SecondBrainApp()));
-    await settle(tester, 3000);
+    // 그래프 첫 표시: 배치가 끝나 '그래프 배치 중…'이 사라질 때까지 (설계서 5.8 목표 1초, 저장된 위치 사용 시)
+    while (start.elapsed < const Duration(seconds: 90)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.pump();
+      if (find.byType(GraphView).evaluate().isNotEmpty && find.text('그래프 배치 중…').evaluate().isEmpty) break;
+    }
+    debugPrint('[성능] 앱 시작 → 그래프 첫 표시 ${start.elapsedMilliseconds}ms (노트 ${find.byType(GraphView).evaluate().isEmpty ? '?' : 'OK'})');
+    await settle(tester, 1500);
 
     final timings = <ui.FrameTiming>[];
     void onTimings(List<ui.FrameTiming> t) => timings.addAll(t);

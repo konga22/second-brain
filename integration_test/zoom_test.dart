@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -40,7 +41,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: SecondBrainApp()));
     await settle(tester, 3000);
     final container = ProviderScope.containerOf(tester.element(find.byType(SecondBrainApp)));
-    final original = container.read(appConfigProvider).uiScale;
+    const original = 1.0;
     expect(find.byType(GraphView), findsOneWidget);
     final fitsBefore = graphFitCount;
     expect(fitsBefore, greaterThan(0), reason: '처음 한 번은 맞춘다');
@@ -62,6 +63,12 @@ void main() {
         .transform
         .getMaxScaleOnAxis();
 
+    // 시험용 설정은 앞 시험이 남긴 배율로 시작할 수 있어 1.0에서 시작한다.
+    container.read(appConfigProvider.notifier).update((c) => c.copyWith(uiScale: 1.0));
+    await settle(tester, 600);
+    // 디버그 빌드는 프레임이 가끔 100ms를 넘어 180ms 애니메이션이 한두 프레임에 끝날 수 있다.
+    // 애니메이션을 5배 느리게 돌려 기계 속도와 관계없이 중간 프레임을 본다.
+    timeDilation = 5;
     final center0 = worldCenter();
     for (final (key, up) in [
       (LogicalKeyboardKey.equal, true),
@@ -73,7 +80,7 @@ void main() {
       await cmd(tester, key);
       // 16ms마다 배율을 재서 한 번에 뛰지 않고 한 방향으로만 부드럽게 바뀌는지 본다.
       final samples = <double>[appScale()];
-      for (var i = 0; i < 20; i++) {
+      for (var i = 0; i < 70; i++) {
         await tester.pump(const Duration(milliseconds: 16));
         samples.add(appScale());
       }
@@ -89,6 +96,7 @@ void main() {
       expect(drift, lessThan(1.0), reason: '그래프 가운데가 그대로여야 한다 (움직임 $drift)');
       await settle(tester, 200);
     }
+    timeDilation = 1; // 시험 본문 안에서 되돌려야 한다 (끝난 뒤 검사가 먼저 돈다)
     debugPrint('[시험] 배율 ${container.read(appConfigProvider).uiScale}, 맞추기 $fitsBefore → $graphFitCount');
     final after = container.read(appConfigProvider).uiScale;
     // 사용자 설정을 원래 값으로 되돌린다 (⌘±는 설정 파일에 저장하므로).
