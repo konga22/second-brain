@@ -183,22 +183,19 @@ class _GraphViewState extends ConsumerState<GraphView> {
             degree.update(l.fromId, (n) => n + 1, ifAbsent: () => 1);
             degree.update(l.toId, (n) => n + 1, ifAbsent: () => 1);
           }
-          // 추천 연결(점선)은 노드를 골랐을 때 그 노드 것만, 또는 [추천 연결]을 켰을 때만 그린다.
-          final focusForEdges = _hovered ?? selected;
+          // 바탕 그림: 확정 연결 + [추천 연결]을 켰을 때 추천 연결. 고른 노드의 연결은 위 층(_FocusPainter)이 그린다.
           final drawn = [
             for (final l in links)
-              if (!l.isSuggested ||
-                  _showSuggested ||
-                  l.fromId == focusForEdges ||
-                  l.toId == focusForEdges)
-                l,
+              if (!l.isSuggested || _showSuggested) l,
           ];
           final focus = _hovered ?? selected;
-          final neighbors = <String>{
-            if (focus != null) ...[
+          final focusLinks = [
+            if (focus != null)
               for (final l in links)
-                if (l.fromId == focus) l.toId else if (l.toId == focus) l.fromId,
-            ],
+                if (l.fromId == focus || l.toId == focus) l,
+          ];
+          final neighbors = <String>{
+            for (final l in focusLinks) l.fromId == focus ? l.toId : l.fromId,
           };
           final xs = positions.values.map((p) => p.x);
           final ys = positions.values.map((p) => p.y);
@@ -246,31 +243,55 @@ class _GraphViewState extends ConsumerState<GraphView> {
                           },
                           // 끌기·확대 때 InteractiveViewer는 변환만 바꾼다. 경계로 감싸 그림을 다시 그리지 않고
                           // 이미 그린 층을 옮기게 한다 (11/07 랙 측정: 끌기 40프레임에 37번 다시 그림).
+                          // 두 층: 바탕(모든 노드·연결)은 데이터·확대 단계가 바뀔 때만 그리고 경계로 감싸 끌기·확대 때
+                          // 다시 그리지 않는다. 마우스 올림·선택은 위 층만 다시 그린다 (11/07 노트 1만 개 측정:
+                          // 마우스를 올릴 때마다 바탕까지 다시 그려 1.4초씩 멈췄다).
                           child: RepaintBoundary(
-                            child: CustomPaint(
-                            size: bounds.size,
-                            painter: _GraphPainter(
-                              signature: Object.hash(
-                                identityHashCode(allPositions),
-                                identityHashCode(allLinks),
-                                identityHashCode(notes),
-                                isLocal,
-                                _topic,
-                                _showSuggested,
-                                focus,
-                                selected,
-                                _transform.value.getMaxScaleOnAxis(),
+                            child: SizedBox.fromSize(
+                              size: bounds.size,
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: RepaintBoundary(
+                                      child: CustomPaint(
+                                        isComplex: true,
+                                        painter: _GraphPainter(
+                                          signature: Object.hash(
+                                            identityHashCode(allPositions),
+                                            identityHashCode(allLinks),
+                                            identityHashCode(notes),
+                                            isLocal ? selected : null,
+                                            _topic,
+                                            _showSuggested,
+                                            _lastScale,
+                                          ),
+                                          origin: bounds.topLeft,
+                                          positions: positions,
+                                          links: drawn,
+                                          degree: degree,
+                                          docs: docs,
+                                          scale: _lastScale,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _FocusPainter(
+                                        origin: bounds.topLeft,
+                                        positions: positions,
+                                        links: focusLinks,
+                                        degree: degree,
+                                        docs: docs,
+                                        focus: focus,
+                                        selected: selected,
+                                        neighbors: neighbors,
+                                        scale: _lastScale,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              origin: bounds.topLeft,
-                              positions: positions,
-                              links: drawn,
-                              degree: degree,
-                              docs: docs,
-                              focus: focus,
-                              selected: selected,
-                              neighbors: neighbors,
-                              scale: _transform.value.getMaxScaleOnAxis(),
-                            ),
                             ),
                           ),
                         ),
@@ -414,9 +435,148 @@ class _ModeButton extends StatelessWidget {
   }
 }
 
+/// 바탕 그림: 모든 노드·연결·이름표. 데이터·확대 단계가 바뀔 때만 다시 그린다.
+///
+/// 노드가 많을 때(1만 개) 한 번 그리는 시간을 줄이려고 (11/07 측정 1.4초):
+/// - 연결선은 모양(색·굵기·점선)별로 Path 하나에 모아 한 번에 그린다
+/// - [manyNodes]를 넘으면 노드 빛 번짐·점선을 빼고, 이름표는 연결 많은 노드 [labelCap]개만
 class _GraphPainter extends CustomPainter {
   _GraphPainter({
     required this.signature,
+    required this.origin,
+    required this.positions,
+    required this.links,
+    required this.degree,
+    required this.docs,
+    required this.scale,
+  });
+
+  /// 그림에 영향을 주는 입력을 묶은 값. 같으면 다시 그리지 않는다 (지도·목록은 빌드마다 새로 만들어져 비교할 수 없음).
+  final int signature;
+  final Offset origin;
+  final Map<String, Point<double>> positions;
+  final List<NoteLink> links;
+  final Map<String, int> degree;
+  final Map<String, IndexedDoc> docs;
+  final double scale;
+
+  /// 노드가 이 수 이하면 이름표를 모두 단다 (적을 때는 이름이 보여야 무엇인지 안다).
+  static const labelAllLimit = 60;
+
+  /// 이보다 많으면 가벼운 그리기로 바꾼다.
+  static const manyNodes = 1000;
+
+  /// 노드가 많을 때 이름표를 다는 최대 개수 (연결 많은 순).
+  static const labelCap = 150;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    graphPaintCount++;
+    final many = positions.length > manyNodes;
+    Offset at(String id) {
+      final p = positions[id]!;
+      return Offset(p.x, p.y) - origin;
+    }
+
+    // 주제 이름: 주제 노드들 위쪽 끝에 흐리게.
+    final groups = <String, List<Offset>>{};
+    for (final id in positions.keys) {
+      groups.putIfAbsent(docs[id]?.topic ?? '', () => []).add(at(id));
+    }
+    for (final e in groups.entries) {
+      if (e.value.length < 2) continue;
+      final c = e.value.reduce((a, b) => a + b) / e.value.length.toDouble();
+      final top = e.value.map((o) => o.dy).reduce(min);
+      _paintLabel(canvas, e.key, Offset(c.dx, top - 28), const Color(0x99c4b5fd), 14 / scale.clamp(0.6, 2), bold: true);
+    }
+
+    // 연결선: 같은 주제 안은 또렷하게, 주제를 넘는 연결은 흐리게. 모양별로 모아 한 번에 그린다.
+    final paths = <(int, double, bool), Path>{};
+    for (final link in links) {
+      final a = at(link.fromId);
+      final b = at(link.toId);
+      final isSameTopic = docs[link.fromId]?.topic == docs[link.toId]?.topic;
+      final color = !link.isSuggested ? 0xaaa78bfa : (isSameTopic ? 0x73d6d3e8 : 0x3dd6d3e8);
+      final width = (isSameTopic ? 1.2 : 0.9) / scale.clamp(0.5, 3);
+      final dashed = link.isSuggested && !many;
+      final path = paths.putIfAbsent((color, width, dashed), Path.new);
+      if (dashed) {
+        _addDashes(path, a, b, 4 / scale.clamp(0.5, 3));
+      } else {
+        path
+          ..moveTo(a.dx, a.dy)
+          ..lineTo(b.dx, b.dy);
+      }
+    }
+    for (final e in paths.entries) {
+      canvas.drawPath(
+        e.value,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = e.key.$2
+          ..color = Color(e.key.$1),
+      );
+    }
+
+    // 노드: 빛 번짐(적을 때만) → 원 → 정리 대기 테두리. 원은 진하기별로 모아 그린다.
+    final solid = Path();
+    final faint = Path();
+    final drafts = Path();
+    for (final id in positions.keys) {
+      final c = at(id);
+      final r = _radius(degree[id] ?? 0);
+      final isDraft = docs[id]?.isDraft ?? false;
+      if (!many) {
+        const glow = Color(0x1fe4e1f5);
+        canvas.drawCircle(
+          c,
+          r * 2.4,
+          Paint()..shader = ui.Gradient.radial(c, r * 2.4, [glow, glow.withValues(alpha: 0)]),
+        );
+      }
+      (isDraft ? faint : solid).addOval(Rect.fromCircle(center: c, radius: r));
+      if (isDraft) drafts.addOval(Rect.fromCircle(center: c, radius: r + 2));
+    }
+    canvas.drawPath(solid, Paint()..color = const Color(0xf2e4e1f5));
+    canvas.drawPath(faint, Paint()..color = const Color(0x8ce4e1f5));
+    canvas.drawPath(
+      drafts,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1 / scale.clamp(0.5, 3)
+        ..color = const Color(0x99f59e0b),
+    );
+
+    // 이름표: 적으면 모두, 보통은 허브(확정 연결 2개 이상)·확대 시 전부, 많으면 연결 많은 순 [labelCap]개.
+    final Iterable<String> labeled;
+    if (positions.length <= labelAllLimit) {
+      labeled = positions.keys;
+    } else if (!many) {
+      labeled = positions.keys.where((id) => (degree[id] ?? 0) >= 2 || scale > 1.4);
+    } else {
+      labeled = (positions.keys.toList()..sort((a, b) => (degree[b] ?? 0).compareTo(degree[a] ?? 0))).take(labelCap);
+    }
+    for (final id in labeled) {
+      final c = at(id);
+      _paintLabel(
+        canvas,
+        shortTitle(docs[id]?.title ?? id),
+        c + Offset(0, _radius(degree[id] ?? 0) + 10),
+        const Color(0xddeae7f7),
+        12 / scale.clamp(0.6, 2.5),
+        shadow: true,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GraphPainter old) => old.signature != signature;
+}
+
+/// 위 층: 고른 노드(마우스를 올린 노드)와 그 연결·이웃만. 나머지는 반투명 막으로 흐리게 한다.
+/// 바탕을 다시 그리지 않으므로 노드가 많아도 가볍다.
+class _FocusPainter extends CustomPainter {
+  _FocusPainter({
     required this.origin,
     required this.positions,
     required this.links,
@@ -428,8 +588,6 @@ class _GraphPainter extends CustomPainter {
     required this.scale,
   });
 
-  /// 그림에 영향을 주는 입력을 묶은 값. 같으면 다시 그리지 않는다 (지도·목록은 빌드마다 새로 만들어져 비교할 수 없음).
-  final int signature;
   final Offset origin;
   final Map<String, Point<double>> positions;
   final List<NoteLink> links;
@@ -440,143 +598,96 @@ class _GraphPainter extends CustomPainter {
   final Set<String> neighbors;
   final double scale;
 
-  /// 노드가 이 수 이하면 이름표를 모두 단다 (적을 때는 이름이 보여야 무엇인지 안다).
-  static const labelAllLimit = 60;
-
-  Offset _at(String id) {
-    final p = positions[id]!;
-    return Offset(p.x, p.y) - origin;
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
-    graphPaintCount++;
-    // 주제 이름: 주제 노드들의 가운데에 흐리게.
-    final groups = <String, List<Offset>>{};
-    for (final id in positions.keys) {
-      final topic = docs[id]?.topic ?? '';
-      groups.putIfAbsent(topic, () => []).add(_at(id));
-    }
-    for (final e in groups.entries) {
-      if (e.value.length < 2) continue;
-      final c = e.value.reduce((a, b) => a + b) / e.value.length.toDouble();
-      // 주제 이름은 그 주제 노드들 위쪽 끝에
-      final top = e.value.map((o) => o.dy).reduce(min);
-      _label(canvas, e.key, Offset(c.dx, top - 28), const Color(0x99c4b5fd), 14 / scale.clamp(0.6, 2), bold: true);
+    final focus = this.focus;
+    if (focus == null || !positions.containsKey(focus)) return;
+    Offset at(String id) {
+      final p = positions[id]!;
+      return Offset(p.x, p.y) - origin;
     }
 
-    // 연결선: 같은 주제 안은 또렷하게, 주제를 넘는 연결은 흐리게, 고른 노드의 연결은 진한 보라.
-    // 무언가를 골랐으면 나머지 선은 더 흐리게 해서 고른 연결이 눈에 띄게 한다.
-    final hasFocus = focus != null;
+    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0x8c0d0b18));
+    final edgePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2 / scale.clamp(0.5, 3)
+      ..color = const Color(0xffa78bfa);
     for (final link in links) {
-      final a = _at(link.fromId);
-      final b = _at(link.toId);
-      final isFocus = hasFocus && (link.fromId == focus || link.toId == focus);
-      final isSameTopic = docs[link.fromId]?.topic == docs[link.toId]?.topic;
-      final Color color;
-      if (isFocus) {
-        color = const Color(0xffa78bfa);
-      } else if (!link.isSuggested) {
-        color = Color(hasFocus ? 0x55a78bfa : 0xaaa78bfa);
-      } else if (isSameTopic) {
-        color = Color(hasFocus ? 0x26d6d3e8 : 0x73d6d3e8);
-      } else {
-        color = Color(hasFocus ? 0x14d6d3e8 : 0x3dd6d3e8);
-      }
-      final paint = Paint()
-        ..strokeWidth = (isFocus ? 2.0 : (isSameTopic ? 1.2 : 0.9)) / scale.clamp(0.5, 3)
-        ..color = color;
+      if (!positions.containsKey(link.fromId) || !positions.containsKey(link.toId)) continue;
+      final path = Path();
       if (link.isSuggested) {
-        _dashed(canvas, a, b, paint, 4 / scale.clamp(0.5, 3));
+        _addDashes(path, at(link.fromId), at(link.toId), 4 / scale.clamp(0.5, 3));
       } else {
-        canvas.drawLine(a, b, paint);
+        final a = at(link.fromId), b = at(link.toId);
+        path
+          ..moveTo(a.dx, a.dy)
+          ..lineTo(b.dx, b.dy);
       }
+      canvas.drawPath(path, edgePaint);
     }
-
-    for (final id in positions.keys) {
-      final c = _at(id);
-      final d = degree[id] ?? 0;
-      final r = (4.5 + sqrt(d) * 2.6).clamp(4.5, 14.0);
-      final isSelected = id == selected;
-      final isHot = id == focus || neighbors.contains(id);
-      final isDraft = docs[id]?.isDraft ?? false;
-      final color = isSelected || id == focus
-          ? const Color(0xffffffff)
-          : (isHot ? const Color(0xffc4b5fd) : const Color(0xffe4e1f5));
-      // 빛 번짐: 블러 필터 대신 방사형 그라데이션 (노드마다 블러를 거는 것보다 훨씬 가볍다)
-      final glow = color.withValues(alpha: isHot || isSelected ? 0.28 : 0.12);
-      canvas.drawCircle(
-        c,
-        r * 2.4,
-        Paint()..shader = ui.Gradient.radial(c, r * 2.4, [glow, glow.withValues(alpha: 0)]),
+    for (final id in {...neighbors, focus, ?selected}) {
+      if (!positions.containsKey(id)) continue;
+      final c = at(id);
+      final r = _radius(degree[id] ?? 0);
+      final isMain = id == focus || id == selected;
+      final color = isMain ? const Color(0xffffffff) : const Color(0xffc4b5fd);
+      final glow = color.withValues(alpha: 0.3);
+      canvas.drawCircle(c, r * 2.4, Paint()..shader = ui.Gradient.radial(c, r * 2.4, [glow, glow.withValues(alpha: 0)]));
+      canvas.drawCircle(c, r, Paint()..color = color);
+      _paintLabel(
+        canvas,
+        shortTitle(docs[id]?.title ?? id),
+        c + Offset(0, r + 10),
+        const Color(0xffffffff),
+        12 / scale.clamp(0.6, 2.5),
+        shadow: true,
       );
-      canvas.drawCircle(c, r, Paint()..color = color.withValues(alpha: isDraft ? 0.55 : 0.95));
-      if (isDraft) {
-        canvas.drawCircle(
-          c,
-          r + 2,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1 / scale.clamp(0.5, 3)
-            ..color = const Color(0x99f59e0b),
-        );
-      }
-      // 이름표는 고른 노드·이웃·허브(확정 연결 2개 이상)에만, 확대하면 전부. 길면 10자로 줄인다.
-      final showLabel = positions.length <= labelAllLimit || id == focus || isSelected || neighbors.contains(id) || d >= 2 || scale > 1.4;
-      if (showLabel) {
-        final title = shortTitle(docs[id]?.title ?? id);
-        _label(
-          canvas,
-          title,
-          c + Offset(0, r + 10),
-          isHot || isSelected ? const Color(0xffffffff) : const Color(0xddeae7f7),
-          12 / scale.clamp(0.6, 2.5),
-          shadow: true,
-        );
-      }
     }
-  }
-
-  void _dashed(Canvas canvas, Offset a, Offset b, Paint paint, double dash) {
-    final total = (b - a).distance;
-    if (total == 0) return;
-    final dir = (b - a) / total;
-    for (var t = 0.0; t < total; t += dash * 2) {
-      canvas.drawLine(a + dir * t, a + dir * min(t + dash, total), paint);
-    }
-  }
-
-  /// 이름표 글자 배치 캐시. 같은 글자·크기·색이면 다시 배치하지 않는다 (배치가 그리기에서 가장 무거움).
-  static final _labels = <(String, double, Color, bool, bool), TextPainter>{};
-
-  void _label(Canvas canvas, String text, Offset center, Color color, double fontSize, {bool bold = false, bool shadow = false}) {
-    final key = (text, (fontSize * 10).roundToDouble() / 10, color, bold, shadow);
-    if (_labels.length > 600) {
-      for (final p in _labels.values) {
-        p.dispose();
-      }
-      _labels.clear();
-    }
-    final painter = _labels[key] ??= _layoutLabel(key.$1, key.$2, color, bold, shadow);
-    painter.paint(canvas, center - Offset(painter.width / 2, painter.height / 2));
-  }
-
-  static TextPainter _layoutLabel(String text, double fontSize, Color color, bool bold, bool shadow) {
-    return TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontFamily: 'Pretendard',
-          fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-          shadows: shadow ? const [Shadow(color: Color(0xcc000000), blurRadius: 4)] : null,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
   }
 
   @override
-  bool shouldRepaint(_GraphPainter old) => old.signature != signature;
+  bool shouldRepaint(_FocusPainter old) =>
+      old.focus != focus || old.selected != selected || old.scale != scale || old.positions != positions;
+}
+
+double _radius(int degree) => (4.5 + sqrt(degree) * 2.6).clamp(4.5, 14.0);
+
+void _addDashes(Path path, Offset a, Offset b, double dash) {
+  final total = (b - a).distance;
+  if (total == 0) return;
+  final dir = (b - a) / total;
+  for (var t = 0.0; t < total; t += dash * 2) {
+    final s = a + dir * t;
+    final e = a + dir * min(t + dash, total);
+    path
+      ..moveTo(s.dx, s.dy)
+      ..lineTo(e.dx, e.dy);
+  }
+}
+
+/// 이름표 글자 배치 캐시. 같은 글자·크기·색이면 다시 배치하지 않는다 (배치가 그리기에서 가장 무거움).
+final _labels = <(String, double, Color, bool, bool), TextPainter>{};
+
+void _paintLabel(Canvas canvas, String text, Offset center, Color color, double fontSize, {bool bold = false, bool shadow = false}) {
+  final key = (text, (fontSize * 10).roundToDouble() / 10, color, bold, shadow);
+  if (_labels.length > 600) {
+    for (final p in _labels.values) {
+      p.dispose();
+    }
+    _labels.clear();
+  }
+  final painter = _labels[key] ??= TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(
+        color: color,
+        fontSize: key.$2,
+        fontFamily: 'Pretendard',
+        fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+        shadows: shadow ? const [Shadow(color: Color(0xcc000000), blurRadius: 4)] : null,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  painter.paint(canvas, center - Offset(painter.width / 2, painter.height / 2));
 }
