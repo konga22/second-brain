@@ -9,6 +9,10 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
 
+/// 그래프 맞추기 횟수 (시험용: 화면 배율을 바꿔도 다시 맞추지 않는지 본다).
+@visibleForTesting
+int graphFitCount = 0;
+
 /// 뇌 그래프 (설계서 3.3·5.5). 어두운 배경 + 빛나는 노드, 추천 연결은 점선.
 class GraphView extends ConsumerStatefulWidget {
   const GraphView({super.key});
@@ -27,6 +31,9 @@ class _GraphViewState extends ConsumerState<GraphView> {
   String? _topic;
   String? _fittedKey;
   String? _hovered;
+
+  /// 지난번 그린 영역 크기. 화면 배율·창·패널 크기가 바뀌면 그만큼 옮겨 가운데를 지킨다.
+  Size? _lastViewport;
 
   double _lastScale = 1;
 
@@ -67,6 +74,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
   }
 
   void _fit(Rect bounds, Size viewport) {
+    graphFitCount++;
     final scale = min(
       viewport.width / max(bounds.width, 1),
       viewport.height / max(bounds.height, 1),
@@ -76,6 +84,19 @@ class _GraphViewState extends ConsumerState<GraphView> {
     _transform.value = Matrix4.identity()
       ..translateByDouble(dx, dy, 0, 1)
       ..scaleByDouble(scale, scale, 1, 1);
+  }
+
+  /// 영역 크기가 바뀌면 보던 가운데가 그대로 가운데에 오게 옮긴다 (다시 맞추지 않음).
+  /// 같은 프레임 안에서 옮겨야 한 프레임 늦게 따라가며 튀지 않는다. 옮기기만 하고 확대 비율은
+  /// 그대로라 [_transform] 리스너의 setState(확대 비율이 바뀔 때만)는 불리지 않는다.
+  void _keepCenter(Size viewport) {
+    final last = _lastViewport;
+    if (last == null || last == viewport) return;
+    final dx = (viewport.width - last.width) / 2;
+    final dy = (viewport.height - last.height) / 2;
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(dx, dy, 0, 1)
+      ..multiply(_transform.value);
   }
 
   /// 가운데를 기준으로 확대·축소.
@@ -187,11 +208,17 @@ class _GraphViewState extends ConsumerState<GraphView> {
           return LayoutBuilder(
             builder: (context, constraints) {
               final viewport = constraints.biggest;
-              final fitKey = '${isLocal ? selected : 'all'}:$_topic:${positions.length}:${viewport.width.round()}';
+              // 맞추기는 보는 대상(전체·주변·폴더·노드 수)이 바뀔 때만 한다. 영역 크기는 넣지 않는다:
+              // 화면 배율(⌘±)·창 크기가 바뀔 때마다 다시 맞추면, 앱 전체가 커진 직후 그래프가 다시
+              // 줄어들어 덜덜 떨린다 (11/07 사용자 지적, 실수 노트). 크기가 바뀌면 [맞추기]로.
+              final fitKey = '${isLocal ? selected : 'all'}:$_topic:${positions.length}';
               if (_fittedKey != fitKey) {
                 _fittedKey = fitKey;
                 WidgetsBinding.instance.addPostFrameCallback((_) => _fit(Offset.zero & bounds.size, viewport));
+              } else {
+                _keepCenter(viewport);
               }
+              _lastViewport = viewport;
               return Stack(
                 children: [
                   Positioned.fill(
