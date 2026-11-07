@@ -78,12 +78,15 @@ void main() {
     await brain(['hook', 'prompt'], stdin: jsonEncode({'prompt': text, 'cwd': '/tmp/x', 'session_id': 's1'})),
   );
 
-  test('세션 시작 안내: 700자 이하 (설계서 목표 150토큰 — 줄이기 전)', () async {
+  test('세션 시작 안내: 세 줄 350자 이하 (v1.3.9, 677 → 약 250토큰)', () async {
     final text = context(
       await brain(['hook', 'session-start'], stdin: jsonEncode({'cwd': '/tmp/x', 'session_id': 's1'})),
     );
     print('[토큰] 세션 시작 ${text.length}자');
-    expect(text.length, lessThanOrEqualTo(700));
+    expect(text.length, lessThanOrEqualTo(350));
+    expect(text, contains('· 주제:'));
+    expect(text, contains('· 자동 저장(켜짐)'));
+    expect(text, isNot(contains('자주 받은 교정')));
   });
 
   test(
@@ -94,7 +97,6 @@ void main() {
       );
       expect(await start('aaaa'), await start('bbbb'));
     },
-    skip: '최적화 P1 적용 전: 안내에 세션 id가 들어 있다 (docs/토큰분석.md)',
   );
 
   test('관계없는 요청은 0자 (설계서 5.1)', () async {

@@ -47,28 +47,23 @@ class HookCommand extends Command<int> {
     return 0;
   }
 
-  /// 세션 시작: 온보딩 요약(`_profile.md`)과, 대화 중 자동 저장이 켜져 있으면 그 안내 한 줄.
-  /// 둘 다 꺼져 있으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
+  /// 세션 시작 안내 (설계서 5.2 v1.3.9): 사람이 읽어도 알 수 있는 세 줄 — 주제·찾기·자동 저장.
+  /// **세션마다 같은 글이어야 한다**: 세션 id·노트 수처럼 바뀌는 값을 넣으면 Claude Code가 지난 세션 캐시를
+  /// 못 써 세션마다 약 1.35만 토큰을 다시 캐시에 쓴다(토큰분석 2절). 자주 받은 교정은 요청마다 맞는 것만
+  /// 붙으므로 넣지 않는다. 둘 다 꺼져 있으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
   void _sessionStart(Map<String, dynamic> input) {
     final config = AppConfig.load();
     final cwd = input['cwd'] as String? ?? '';
-    final sessionId = input['session_id'] as String?;
-    final parts = <String>[];
+    if (cwd.isNotEmpty && context.vault.contains(cwd)) return;
+    final lines = <String>[];
     if (!config.isOnboardingOff) {
-      final profile = File(context.vault.profilePath);
-      if (profile.existsSync()) {
-        final text = clip(profile.readAsStringSync(), 600);
-        if (text.isNotEmpty) {
-          parts.add('사용자의 세컨드 브레인 요약 (brain find로 더 찾을 수 있음): $text');
-        }
-      }
+      final topics = profileTopics(context.vault);
+      if (topics.isNotEmpty) lines.add('· 주제: ${topics.join(', ')}');
+      lines.add('· 찾기: 지난 결정·설정·해결 방법은 추측하지 말고 brain find로 찾고, 답에 근거 노트 id를 적는다.');
     }
-    if (!config.isAutoCaptureOff &&
-        sessionId != null &&
-        !(cwd.isNotEmpty && context.vault.contains(cwd))) {
-      parts.add(autoCaptureNote(sessionId));
-    }
-    if (parts.isEmpty) return;
+    if (!config.isAutoCaptureOff) lines.add(autoCaptureLine);
+    if (lines.isEmpty) return;
+    final parts = ['[세컨드 브레인] 사용자의 개인 지식 폴더 안내 (자동)', ...lines];
     stdout.write(
       jsonEncode({
         'hookSpecificOutput': {
@@ -79,11 +74,23 @@ class HookCommand extends Command<int> {
     );
   }
 
-  /// 대화 중 자동 저장 안내 (설계서 5.6 "대화 중 자동 저장", 2026-11-07 사용자 요청).
-  static String autoCaptureNote(String sessionId) =>
-      '세컨드 브레인 자동 저장이 켜져 있다. 이 대화에서 오래 쓸 지식(결정과 이유, 문제→원인→해결, 사용자 선호·작업 규칙, 자주 쓸 설정·명령, 쓸 만한 도구·레포·참고 자료)이 '
-      '확정되면 사용자에게 묻지 말고 그때 brain-save 스킬 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄만 덧붙인다. '
-      '세션 id는 $sessionId 이다(brain add --source-session). 잡담·추측·한 번 쓰고 마는 내용·비밀값은 저장하지 않고, 같은 지식은 brain find로 확인해 다시 넣지 않는다. 한 세션에 많아도 5개.';
+  /// 대화 중 자동 저장 안내 (설계서 5.6). 세션 id는 넣지 않는다 — brain add가 CLAUDE_CODE_SESSION_ID로 연결한다.
+  static const autoCaptureLine =
+      '· 자동 저장(켜짐): 오래 쓸 지식(결정과 이유, 문제와 해결, 작업 규칙, 쓸 만한 도구)이 확정되면 묻지 말고 '
+      'brain-save 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄을 붙인다. '
+      '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지.';
+
+  /// `_profile.md`의 "주요 주제: A(3), B(2)" 줄에서 이름만 (노트 수는 자주 바뀌어 빼고 순서만 쓴다).
+  static List<String> profileTopics(Vault vault) {
+    final file = File(vault.profilePath);
+    if (!file.existsSync()) return const [];
+    final line = file.readAsLinesSync().firstWhere((l) => l.contains('주요 주제:'), orElse: () => '');
+    if (line.isEmpty) return const [];
+    return [
+      for (final part in line.split('주요 주제:').last.split(','))
+        if (part.replaceAll(RegExp(r'\(\d+\)'), '').trim() case final name when name.isNotEmpty) name,
+    ];
+  }
 
   static final _systemInput = RegExp(r'<task-notification>|\[SYSTEM NOTIFICATION|^\s*<system-reminder|\[Subagent hand-back\]|<agent-message ');
 

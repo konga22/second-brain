@@ -232,6 +232,19 @@ class AddCommand extends Command<int> {
       }
       sessionId = session.sessionId;
       sources.add(archiveSession(context.vault, context.sessions, session));
+    } else {
+      // 세션을 안 주면 지금 대화 세션을 연결한다. Claude Code가 Bash 도구에 CLAUDE_CODE_SESSION_ID를 넣어 준다.
+      // 그래서 세션 시작 안내에 세션 id를 적지 않아도 된다(안내가 세션마다 같아 캐시가 깨지지 않음, 설계서 v1.3.9).
+      final current = Platform.environment['CLAUDE_CODE_SESSION_ID'];
+      if (current != null && current.isNotEmpty) {
+        final session = context.sessions.find(current, vault: context.vault);
+        if (session != null) {
+          sessionId = session.sessionId;
+          sources.add(archiveSession(context.vault, context.sessions, session));
+        } else {
+          stderr.writeln('지금 세션 기록($current)을 찾지 못해 세션 연결 없이 저장합니다.');
+        }
+      }
     }
     try {
       final (id, path) = context.notes.add(
