@@ -136,7 +136,24 @@ class HookCommand extends Command<int> {
     // 만들기·구현 요청이면 관련 지식을 먼저 검토하고 도입을 제안하게 한다 (11/07 사용자 요청).
     final isBuild = _buildIntent.hasMatch(prompt) && !context.vault.contains(cwd);
     final related = isBuild ? relatedNotes(context.index, prompt) : const <IndexedDoc>[];
-    if (lines.isEmpty && !isCorrection && !isBuild) return;
+    // R2: 만들기 요청이 아니어도 질문과 확실히 맞는 노트가 있으면 미리 넣는다. 맞으면 AI가 찾기 턴을 쓰지 않는다
+    // (턴 하나가 맥락 약 3만 토큰, 토큰분석 6.2). 지식 폴더 안 세션·교정 신호일 때는 넣지 않는다.
+    final mode = RetrievalMode.current;
+    final known = !isBuild && !isCorrection && mode != RetrievalMode.base && !context.vault.contains(cwd)
+        ? relatedNotes(context.index, prompt)
+        : const <IndexedDoc>[];
+    final knownLines = <String>[];
+    for (final doc in known) {
+      if (mode == RetrievalMode.rg) {
+        final body = noteBody(context.vault, doc);
+        knownLines.add('- ${doc.id} ${doc.title} — ${clip(doc.summary, 60)} (본문 ${body.length}자)');
+        final line = bestLine(body, prompt, ignore: _buildWords);
+        if (line != null) knownLines.add('  ↳ $line');
+      } else {
+        knownLines.add('- ${doc.id} ${doc.title} — ${clip(doc.summary, 60)}');
+      }
+    }
+    if (lines.isEmpty && !isCorrection && !isBuild && knownLines.isEmpty) return;
     final text = [
       if (lines.isNotEmpty) ...['사용자의 실수 노트 (이번 요청에 적용):', ...lines],
       if (isBuild) ...[
@@ -144,6 +161,10 @@ class HookCommand extends Command<int> {
             '다른 표현으로도 2~3번 찾고, 쓸 만한 게 있으면 먼저 "세컨드 브레인에 ○○가 있다 → 도입하면 장점 / 안 하면 예상 결과 / 추천"으로 제안한 뒤 진행한다.',
         if (related.isNotEmpty) '관련 지식 후보:',
         for (final doc in related) '- ${doc.id} ${doc.title} — ${clip(doc.summary, 50)}',
+      ],
+      if (knownLines.isNotEmpty) ...[
+        '세컨드 브레인에 이 요청과 맞는 노트가 있다 (이것으로 답이 되면 다시 찾지 않아도 된다. 모자라면 brain show <id>):',
+        ...knownLines,
       ],
       if (isCorrection)
         '사용자가 앞 답을 고치는 것 같다면, 고친 내용을 반영하고 일반 규칙이 될 만하면 '

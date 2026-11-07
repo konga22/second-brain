@@ -11,7 +11,12 @@ class FindCommand extends Command<int> {
     argParser
       ..addFlag('raw', help: '원본(raw/)도 함께 찾는다.', negatable: false)
       ..addOption('topic', help: '이 주제 폴더(뇌)에서 먼저 찾는다. 없으면 전체에서 찾는다.')
-      ..addOption('limit', defaultsTo: '5');
+      ..addOption('limit', defaultsTo: '5')
+      ..addFlag(
+        'brief',
+        help: '짧게: id와 제목만, 약하게 맞은 것은 (약) 표시 (토큰 약 1/3, docs/토큰분석.md 6절).',
+        negatable: false,
+      );
   }
 
   final BrainContext context;
@@ -42,6 +47,50 @@ class FindCommand extends Command<int> {
     }
     if (hits.isEmpty) {
       stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)');
+      return 0;
+    }
+    final mode = RetrievalMode.current;
+    if (mode != RetrievalMode.base) {
+      // R1: 질문 단어가 본문까지 2개 이상 맞는 노트만 남긴다. 약한 후보는 (약) 표시를 해도 AI가 근거로 써서
+      // (토큰분석 6.2) 숨긴다. 제목·요약만 보면 다른 표현(저장 공간 ↔ 디스크)에서 정답까지 숨겨져 본문도 본다.
+      final strong = [for (final d in hits) if (isRelevantMatch(query, d, noteBody(context.vault, d))) d];
+      if (strong.isEmpty) {
+        stdout.writeln('확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. 다른 말로 다시 찾을 수 있음)');
+        return 0;
+      }
+      if (mode == RetrievalMode.r) {
+        for (final doc in strong) {
+          final summary = doc.summary.isEmpty ? '' : ' — ${doc.summary}';
+          stdout.writeln('${doc.id}  ${doc.isDraft ? '[초안] ' : ''}${doc.title}$summary  ${doc.folder}');
+        }
+        return 0;
+      }
+      // RG: aider 저장소 지도처럼 글자 예산(600자) 안에 순위대로 채운다. 위 2개는 요약 + 질문에 맞는 본문 한 줄
+      // (serena·context7: 필요한 부분만), 나머지는 제목만. 줄마다 본문 길이(claude-mem: 열면 얼마인지)를 붙인다.
+      var used = 0;
+      for (final (i, doc) in strong.indexed) {
+        final body = noteBody(context.vault, doc);
+        final size = '(본문 ${body.length}자)';
+        final lines = <String>[
+          i < 2 ? '${doc.id} ${doc.title} — ${doc.summary} $size' : '${doc.id} ${doc.title} $size',
+        ];
+        final line = i < 2 ? bestLine(body, query) : null;
+        if (line != null) lines.add('  ↳ $line');
+        final chunk = lines.join('\n');
+        if (used > 0 && used + chunk.length > 600) break;
+        stdout.writeln(chunk);
+        used += chunk.length;
+      }
+      return 0;
+    }
+    // 짧게(--brief, 실험 중에는 BRAIN_FIND_BRIEF=1로도): id와 제목만. 질문과 확실히 맞지 않는 줄은 (약).
+    final brief = argResults!['brief'] as bool || Platform.environment['BRAIN_FIND_BRIEF'] == '1';
+    if (brief) {
+      final strong = {for (final d in hits) if (isStrongMatch(query, d)) d.id};
+      if (strong.isEmpty) stdout.writeln('확실한 노트 없음 (약한 후보):');
+      for (final doc in hits) {
+        stdout.writeln('${doc.id} ${doc.isDraft ? '[초안] ' : ''}${doc.title}${strong.contains(doc.id) ? '' : ' (약)'}');
+      }
       return 0;
     }
     for (final doc in hits) {

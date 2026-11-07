@@ -6,6 +6,8 @@ export 'src/chat/chat_context.dart';
 export 'src/graph/force_layout.dart';
 export 'src/imports/text_import.dart';
 export 'src/index/bigram.dart';
+export 'src/index/match_strength.dart';
+export 'src/index/retrieval.dart';
 export 'src/index/search_index.dart';
 export 'src/index/sqlite_support.dart';
 export 'src/links/dismissed_links.dart';
