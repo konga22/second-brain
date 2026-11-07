@@ -22,6 +22,21 @@ Future<int> syncIndexInBackground(String vaultRoot, String indexPath) =>
       }
     });
 
+/// 노트 목록과 연결 (그래프·목록·노트 패널이 쓴다). 노트 1만 개에서 목록 54ms + 연결 100ms라
+/// 지식 폴더가 바뀔 때마다 화면 스레드에서 하면 멈칫한다 (11/07 측정).
+Future<({List<IndexedDoc> notes, List<NoteLink> links})> vaultViewInBackground(
+  String vaultRoot,
+  String indexPath,
+) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath);
+  try {
+    return (notes: index.notes(), links: index.links(dismissed: DismissedLinks(vault).load()));
+  } finally {
+    index.close();
+  }
+});
+
 /// 지식 폴더 점검 (죽은 링크·고아·중복·신선도·형식·길이·의심 지시문).
 Future<List<LintIssue>> lintInBackground(String vaultRoot, String indexPath) =>
     Isolate.run(() {
