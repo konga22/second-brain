@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -11,6 +12,9 @@ import 'graph_view.dart' show shortTitle;
 
 /// 구조 목록 (설계서 3.3, 시안 v8 S11): 그래프를 주제 → 노트 → 연결 순서로 펼친 3칸 표.
 /// | 주제 (노트 수·허브·↔ 이어진 주제) | 노트 (연결 많은 순, 같은 주제 안 연결은 들여쓰기) | 다른 주제·그 밖의 연결 (칩) |
+/// 성능 시험용: 구조 목록 전체를 다시 만든 횟수.
+int structureListBuildCount = 0;
+
 class StructureListView extends ConsumerStatefulWidget {
   const StructureListView({super.key});
 
@@ -27,7 +31,10 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
   final _scroll = ScrollController();
   final _rowKeys = <String, GlobalKey>{};
   final _topicKeys = <String, GlobalKey>{};
-  Map<String, Rect> _rects = const {};
+
+  /// 줄 위치. 스크롤할 때마다 바뀌므로 setState 대신 이 값만 바꿔 호(arc)만 다시 그린다
+  /// (11/07 랙 측정: 스크롤 40프레임에 목록 전체를 36번 다시 만듦).
+  final _rects = ValueNotifier<Map<String, Rect>>(const {});
 
   @override
   void initState() {
@@ -38,6 +45,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
   @override
   void dispose() {
     _scroll.dispose();
+    _rects.dispose();
     super.dispose();
   }
 
@@ -58,7 +66,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
 
     _rowKeys.forEach((id, key) => add('n:$id', key));
     _topicKeys.forEach((topic, key) => add('t:$topic', key));
-    if (!_sameRects(rects, _rects)) setState(() => _rects = rects);
+    if (!_sameRects(rects, _rects.value)) _rects.value = rects;
   }
 
   static bool _sameRects(Map<String, Rect> a, Map<String, Rect> b) {
@@ -74,6 +82,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
 
   @override
   Widget build(BuildContext context) {
+    structureListBuildCount++;
     final theme = ShadTheme.of(context);
     final colors = AppColors.of(context);
     final notes = ref.watch(notesProvider).where((d) => !d.isMerged).toList();
@@ -561,9 +570,9 @@ class _ArcPainter extends CustomPainter {
     required this.accent,
     required this.faint,
     required this.surface,
-  });
+  }) : super(repaint: rects);
 
-  final Map<String, Rect> rects;
+  final ValueListenable<Map<String, Rect>> rects;
   final String? selected;
   final List<(String, bool)> neighbors;
   final String? focusedTopic;
@@ -574,6 +583,7 @@ class _ArcPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final rects = this.rects.value;
     final from = rects['n:$selected'];
     if (from != null) {
       final x = from.right;
@@ -654,7 +664,6 @@ class _ArcPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ArcPainter old) =>
-      old.rects != rects ||
       old.selected != selected ||
       old.focusedTopic != focusedTopic ||
       old.neighbors != neighbors;
