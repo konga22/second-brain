@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import 'background_tasks.dart';
 import 'claude_code.dart';
 
 /// 앱 전체가 쓰는 지식 폴더·색인·Claude Code 연동.
@@ -48,8 +49,20 @@ class VaultRevision extends Notifier<int> {
   @override
   int build() {
     final vault = ref.watch(vaultProvider);
-    final index = ref.watch(searchIndexProvider);
-    index.sync();
+    ref.watch(searchIndexProvider);
+    // 시작 때 동기화는 백그라운드에서 한다. 처음 색인(노트 1만 개 30초)에도 화면이 멈추지 않고,
+    // 그동안은 지난 색인으로 보이다가 끝나면 번호를 올려 새로 그린다 (사이드바에 "색인 중" 표시).
+    Future(() async {
+      ref.read(indexingProvider.notifier).set(true);
+      try {
+        final changed = await syncIndexInBackground(vault.root, vault.indexPath);
+        if (changed > 0 && ref.mounted) state++;
+      } on Object catch (e) {
+        debugPrint('[색인] 시작 동기화 실패: $e');
+      } finally {
+        if (ref.mounted) ref.read(indexingProvider.notifier).set(false);
+      }
+    });
     final subscription = Directory(vault.root)
         .watch(recursive: true)
         .listen((event) {
@@ -75,6 +88,16 @@ class VaultRevision extends Notifier<int> {
     }
     state++;
   }
+}
+
+/// 시작 색인이 도는 중인가 (사이드바 상태 줄에 보인다).
+final indexingProvider = NotifierProvider<Indexing, bool>(Indexing.new);
+
+class Indexing extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
 }
 
 /// 앱 안에서 노트·실수 노트·할 일을 고친 뒤 화면을 새로 고친다.
@@ -104,31 +127,28 @@ final lessonsProvider = Provider<List<Lesson>>((ref) {
   return ref.watch(lessonStoreProvider).all();
 });
 
-final lintIssuesProvider = Provider<List<LintIssue>>((ref) {
+/// 지식 폴더 점검 결과. 노트 1만 개에서 2초쯤 걸려 백그라운드에서 계산하고, 다시 계산하는 동안은
+/// 앞 결과를 그대로 보여 준다 (`.value`).
+final lintIssuesProvider = FutureProvider<List<LintIssue>>((ref) {
   ref.watch(vaultRevisionProvider);
-  return Linter(ref.watch(vaultProvider), ref.watch(searchIndexProvider)).run();
+  final vault = ref.watch(vaultProvider);
+  return lintInBackground(vault.root, vault.indexPath);
 });
 
-/// 할 일 화면에 보일 것. 노트 파일을 모두 읽어 후보를 찾으므로 지식 폴더가 바뀔 때만 한 번 계산한다
-/// (11/07 랙 측정: 화면을 그릴 때마다 계산해 할 일 화면 이동이 가장 느렸음).
-final todoViewProvider =
-    Provider<
-      ({
-        List<Todo> todos,
-        List<Todo> suggestions,
-        List<Todo> candidates,
-        List<Todo> fromNotes,
-      })
-    >((ref) {
-      ref.watch(vaultRevisionProvider);
-      final store = ref.watch(todoStoreProvider);
-      return (
-        todos: store.list(),
-        suggestions: store.suggestions(),
-        candidates: store.candidatesFromNotes(),
-        fromNotes: store.fromNotes(),
-      );
-    });
+/// 할 일 화면: 할 일 목록·AI 추천(자기 파일만 읽어 가벼움).
+final todoViewProvider = Provider<({List<Todo> todos, List<Todo> suggestions})>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final store = ref.watch(todoStoreProvider);
+  return (todos: store.list(), suggestions: store.suggestions());
+});
+
+/// 할 일 화면: 노트 본문을 모두 읽어 찾은 후보·체크 상자. 노트 1만 개에서 1초가 넘어 백그라운드에서 계산한다
+/// (11/07 측정: 화면을 그릴 때마다 계산해 할 일 화면 이동이 가장 느렸음).
+final noteTodosProvider = FutureProvider<({List<Todo> candidates, List<Todo> fromNotes})>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final vault = ref.watch(vaultProvider);
+  return noteTodosInBackground(vault.root, vault.indexPath);
+});
 
 /// 원본(raw/) 문서. 정리 보드의 첫 열.
 final rawDocsProvider = Provider<List<IndexedDoc>>((ref) {

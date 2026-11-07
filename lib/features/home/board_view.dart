@@ -14,7 +14,7 @@ class BoardView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final notes = ref.watch(notesProvider);
     final raw = ref.watch(rawDocsProvider);
-    final issues = ref.watch(lintIssuesProvider);
+    final issues = ref.watch(lintIssuesProvider).value ?? const <LintIssue>[];
     final byId = {for (final d in notes) d.id: d};
     final issueByNote = <String, List<LintIssue>>{};
     for (final i in issues) {

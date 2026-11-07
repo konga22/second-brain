@@ -119,7 +119,8 @@ class Sidebar extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
             child: Text(
-              '${vault.root.replaceFirst(Platform.environment['HOME'] ?? '~', '~')} · 노트 ${notes.length}개',
+              '${vault.root.replaceFirst(Platform.environment['HOME'] ?? '~', '~')} · 노트 ${notes.length}개'
+              '${ref.watch(indexingProvider) ? ' · 색인 중…' : ''}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11, color: colors.textFaint),
@@ -314,7 +315,7 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
     final selected = ref.watch(selectedNoteProvider);
     ref.watch(vaultRevisionProvider);
     final issues = {
-      for (final i in ref.watch(lintIssuesProvider))
+      for (final i in ref.watch(lintIssuesProvider).value ?? const <LintIssue>[])
         if (i.type != LintType.orphan) i.id,
     };
     final byTopic = <String, List<IndexedDoc>>{

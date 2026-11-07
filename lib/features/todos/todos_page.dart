@@ -105,7 +105,10 @@ class _TodosPageState extends ConsumerState<TodosPage> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final colors = AppColors.of(context);
-    final (:todos, :suggestions, :candidates, :fromNotes) = ref.watch(todoViewProvider);
+    final (:todos, :suggestions) = ref.watch(todoViewProvider);
+    final noteTodos = ref.watch(noteTodosProvider).value;
+    final candidates = noteTodos?.candidates ?? const <Todo>[];
+    final fromNotes = noteTodos?.fromNotes ?? const <Todo>[];
     final open = todos.where((t) => !t.isDone).toList();
     final done = todos.where((t) => t.isDone).toList();
     Widget sourceChip(String? id) => id == null
