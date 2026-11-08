@@ -47,10 +47,11 @@ class HookCommand extends Command<int> {
     return 0;
   }
 
-  /// 세션 시작 안내 (설계서 5.2 v1.3.9): 사람이 읽어도 알 수 있는 세 줄 — 주제·찾기·자동 저장.
+  /// 세션 시작 안내 (설계서 5.2 v1.3.9·v1.3.16): 사람이 읽어도 알 수 있는 세 줄 — 주제·찾기·자동 저장 —
+  /// 과 지킬 규칙(적용 중 실수 노트) 목록.
   /// **세션마다 같은 글이어야 한다**: 세션 id·노트 수처럼 바뀌는 값을 넣으면 Claude Code가 지난 세션 캐시를
-  /// 못 써 세션마다 약 1.35만 토큰을 다시 캐시에 쓴다(토큰분석 2절). 자주 받은 교정은 요청마다 맞는 것만
-  /// 붙으므로 넣지 않는다. 둘 다 꺼져 있으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
+  /// 못 써 세션마다 약 1.35만 토큰을 다시 캐시에 쓴다(토큰분석 2절). 규칙 목록은 규칙이 바뀔 때만 바뀐다.
+  /// 모두 꺼져 있고 실수 노트도 없으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
   void _sessionStart(Map<String, dynamic> input) {
     final config = AppConfig.load();
     final cwd = input['cwd'] as String? ?? '';
@@ -59,9 +60,10 @@ class HookCommand extends Command<int> {
     if (!config.isOnboardingOff) {
       final topics = profileTopics(context.vault);
       if (topics.isNotEmpty) lines.add('· 주제: ${topics.join(', ')}');
-      lines.add('· 찾기: 지난 결정·설정·해결 방법은 추측하지 말고 brain find로 찾고, 답에 근거 노트 id를 적는다.');
+      lines.add(findLine);
     }
     if (!config.isAutoCaptureOff) lines.add(autoCaptureLine);
+    lines.addAll(lessonLines(context.lessons));
     if (lines.isEmpty) return;
     final parts = ['[세컨드 브레인] 사용자의 개인 지식 폴더 안내 (자동)', ...lines];
     stdout.write(
@@ -72,6 +74,30 @@ class HookCommand extends Command<int> {
         },
       }),
     );
+  }
+
+  /// 찾기 줄. `brain` 명령을 `| head`·`;`로 이으면 허용 목록(`Bash(brain *)`) 밖이라 거부된다
+  /// (사용가치분석 8절 ②: 실제 Claude Code 48번 중 10번, 실패 1번). 출력은 이미 짧다.
+  static const findLine =
+      '· 찾기: 지난 결정·설정·해결 방법은 추측하지 말고 brain find로 찾고, 답에 근거 노트 id를 적는다. '
+      'brain 명령은 |·;·&&로 잇지 말고 하나씩 부른다(출력이 이미 짧다).';
+
+  /// 세션 시작 목록에 넣는 실수 노트 최대 개수 (설계서 5.4 안전장치).
+  static const maxSessionLessons = 30;
+
+  /// 지킬 규칙 목록 (설계서 5.2·5.4 v1.3.16). 요청마다 trigger를 맞추기만 하면 사용자가 규칙과 다른 말로
+  /// 요청할 때 규칙이 안 붙었다(사용가치분석 4절: 6개 상황 중 2개). 실수 노트는 수십 개라 늘 넣어도 작다.
+  /// id 순서로 최대 [maxSessionLessons]개, 행동은 120자에서 자른다. 적용 중 규칙이 없으면 빈 목록 (0자).
+  static List<String> lessonLines(LessonStore store) {
+    final active = store.all(status: LessonStatus.active)..sort((a, b) => a.id.compareTo(b.id));
+    if (active.isEmpty) return const [];
+    final rest = active.length - maxSessionLessons;
+    return [
+      '· 지킬 규칙(사용자가 고쳐 준 실수 — 해당하는 작업이면 계획에 넣고 따른다):',
+      for (final lesson in active.take(maxSessionLessons))
+        '  - ${lesson.id} ${clip(lesson.trigger, 60)} → ${clip(lesson.action, 120)}',
+      if (rest > 0) '  (그 밖 $rest개는 해당 요청 때 붙는다)',
+    ];
   }
 
   /// 대화 중 자동 저장 안내 (설계서 5.6). 세션 id는 넣지 않는다 — brain add가 CLAUDE_CODE_SESSION_ID로 연결한다.

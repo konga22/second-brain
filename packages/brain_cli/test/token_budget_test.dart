@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:brain_cli/src/commands/hook_command.dart';
 import 'package:brain_core/brain_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -78,15 +79,54 @@ void main() {
     await brain(['hook', 'prompt'], stdin: jsonEncode({'prompt': text, 'cwd': '/tmp/x', 'session_id': 's1'})),
   );
 
-  test('세션 시작 안내: 세 줄 350자 이하 (v1.3.9, 677 → 약 250토큰)', () async {
+  test('세션 시작 안내: 세 줄 400자 이하 + 지킬 규칙 한 줄씩 (v1.3.9·v1.3.16)', () async {
     final text = context(
       await brain(['hook', 'session-start'], stdin: jsonEncode({'cwd': '/tmp/x', 'session_id': 's1'})),
     );
-    print('[토큰] 세션 시작 ${text.length}자');
-    expect(text.length, lessThanOrEqualTo(350));
-    expect(text, contains('· 주제:'));
-    expect(text, contains('· 자동 저장(켜짐)'));
+    final base = text.split('\n· 지킬 규칙').first;
+    final rules = text.split('\n').where((l) => l.startsWith('  - L-')).toList();
+    print('[토큰] 세션 시작 ${text.length}자 (세 줄 ${base.length}자 + 규칙 ${rules.length}줄)');
+    expect(base.length, lessThanOrEqualTo(400));
+    expect(base, contains('· 주제:'));
+    expect(base, contains('· 자동 저장(켜짐)'));
+    // 사용가치분석 8절 ②: brain 명령을 이어 붙이면 허용 목록 밖이라 거부된다
+    expect(base, contains('하나씩 부른다'));
+    // 사용가치분석 8절 ①: 적용 중 실수 노트 5개가 모두 한 줄씩 (요청 말과 상관없이 늘 보이게)
+    expect(text, contains('· 지킬 규칙'));
+    expect(rules, hasLength(5));
+    for (final line in rules) {
+      expect(line.runes.length, lessThanOrEqualTo(200));
+    }
     expect(text, isNot(contains('자주 받은 교정')));
+  });
+
+  test('지킬 규칙 목록: 최대 30개, 나머지는 한 줄로 (설계서 5.4 안전장치)', () {
+    final dir = Directory.systemTemp.createTempSync('lesson_lines_');
+    final vault = Vault(p.join(dir.path, 'vault'))..ensure();
+    final index = SearchIndex.open(vault);
+    try {
+      final store = LessonStore(vault, index);
+      expect(HookCommand.lessonLines(store), isEmpty); // 실수 노트가 없으면 0자
+      for (var i = 0; i < 32; i++) {
+        store.add(
+          trigger: '배포할 때 $i',
+          action: '${'아주 긴 행동 설명 ' * 20}$i',
+          reason: '시험',
+          status: LessonStatus.active,
+        );
+      }
+      store.add(trigger: '승인 대기 규칙', action: '목록에 안 나와야 한다', reason: '시험');
+      final lines = HookCommand.lessonLines(store);
+      expect(lines.where((l) => l.startsWith('  - L-')), hasLength(HookCommand.maxSessionLessons));
+      expect(lines.last, '  (그 밖 2개는 해당 요청 때 붙는다)');
+      expect(lines.join('\n'), isNot(contains('승인 대기 규칙')));
+      expect(lines.firstWhere((l) => l.startsWith('  - L-')), contains('…'));
+    } finally {
+      index.close();
+      dir.deleteSync(recursive: true);
+      final cache = Directory(p.dirname(vault.indexPath));
+      if (cache.existsSync()) cache.deleteSync(recursive: true);
+    }
   });
 
   test(
