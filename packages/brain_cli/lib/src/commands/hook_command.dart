@@ -77,7 +77,7 @@ class HookCommand extends Command<int> {
   }
 
   /// 찾기 줄. `brain` 명령을 `| head`·`;`로 이으면 허용 목록(`Bash(brain *)`) 밖이라 거부된다
-  /// (사용가치분석 8절 ②: 실제 Claude Code 48번 중 10번, 실패 1번). 출력은 이미 짧다.
+  /// (사용가치분석 8절 ②: 실제 Claude Code 54번 중 12번(brain 호출 26번 중 16번), 실패 1번). 출력은 이미 짧다.
   static const findLine =
       '· 찾기: 지난 결정·설정·해결 방법은 추측하지 말고 brain find로 찾고, 답에 근거 노트 id를 적는다. '
       'brain 명령은 |·;·&&로 잇지 말고 하나씩 부른다(출력이 이미 짧다).';
