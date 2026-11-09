@@ -219,8 +219,35 @@ class SelectedNote extends Notifier<String?> {
   @override
   String? build() => null;
 
-  void select(String? id) => state = id;
+  void select(String? id) {
+    state = id;
+    if (id != null) ref.read(openedNotesProvider.notifier).add(id);
+  }
 }
+
+/// 이번 실행에서 한 번이라도 연 노트 (설계서 3.0 E2: 연 초안만 한꺼번에 확인).
+final openedNotesProvider = NotifierProvider<OpenedNotes, Set<String>>(OpenedNotes.new);
+
+class OpenedNotes extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => const {};
+
+  void add(String id) {
+    if (!state.contains(id)) state = {...state, id};
+  }
+}
+
+/// 충돌 사본 수 (설계서 3.0 E4). 앱·CLI·AI가 같은 노트를 동시에 고치면 `_meta/conflicts/`에 사본이 생긴다.
+final conflictCountProvider = Provider<int>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final dir = Directory(p.join(ref.read(vaultProvider).metaDir, 'conflicts'));
+  if (!dir.existsSync()) return 0;
+  return dir
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((f) => !p.basename(f.path).startsWith('.'))
+      .length;
+});
 
 /// 그래프 노드 위치. 저장된 위치로 바로 그리고, 새 노드가 있으면 isolate에서 배치한다 (설계서 5.5).
 final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((

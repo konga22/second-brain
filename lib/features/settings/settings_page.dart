@@ -1,3 +1,4 @@
+import 'undo_trash_card.dart';
 import 'dart:io';
 
 import 'package:brain_core/brain_core.dart';
@@ -225,6 +226,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
         Text('설정', style: theme.textTheme.h4),
+        const SizedBox(height: 16),
+        // E5 되돌리기·휴지통 (설계서 3.0)
+        const UndoTrashCard(),
         const SizedBox(height: 16),
         ShadCard(
           title: const Text('지식 폴더'),

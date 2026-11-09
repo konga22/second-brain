@@ -233,6 +233,15 @@ class _PastSessionsCard extends ConsumerWidget {
                   style: theme.textTheme.muted,
                 ),
               const SizedBox(height: 12),
+              // E1 정리 비용 어림 (설계서 3.0)
+              Text(
+                state.targetChars == null
+                    ? '비용 어림 계산 중…'
+                    : '축약 약 ${(state.targetChars! / 10000).toStringAsFixed(1)}만 자 · 어림 \$${(state.targetChars! / 100000 * PastSessionsState.usdPer100kChars).toStringAsFixed(2)} '
+                          '(실측 10만 자당 약 \$1.4, 모델·세션에 따라 ±50%)',
+                style: theme.textTheme.small,
+              ),
+              const SizedBox(height: 4),
               Text(
                 '선택한 세션 ${state.targets.length}개를 정리합니다. 사용자의 Claude Code 사용량(토큰)을 씁니다. '
                 'Claude Code는 brain 명령만 쓸 수 있게 묶어서 실행합니다.',

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'board_view.dart';
+import 'first_run_card.dart';
 import 'graph_view.dart';
 import 'structure_list_view.dart';
 import 'timeline_view.dart';
@@ -34,6 +35,8 @@ class _HomePageState extends State<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // E3 첫 실행 3단계 안내 (닫으면 다시 안 보임)
+        const FirstRunCard(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 32, 16, 10),
           // 좁은 창·큰 화면 배율에서도 넘치지 않게: 보기 버튼은 가로로 밀어 보고, 단축키 안내는 자리가 없으면 줄인다.

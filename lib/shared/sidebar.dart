@@ -4,6 +4,7 @@ import 'package:brain_core/brain_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../app/router/app_page.dart';
@@ -370,6 +371,14 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
             ),
           ],
         ),
+        // E4 충돌 사본 알림 (설계서 3.0)
+        if (ref.watch(conflictCountProvider) case final conflicts when conflicts > 0)
+          ShadButton.ghost(
+            size: ShadButtonSize.sm,
+            leading: const Icon(LucideIcons.triangleAlert, size: 14),
+            onPressed: () => Process.run('open', [p.join(ref.read(vaultProvider).metaDir, 'conflicts')]),
+            child: Text('충돌 사본 $conflicts개 — Finder에서 비교'),
+          ),
         Expanded(
           child: ListView(
             padding: EdgeInsets.zero,

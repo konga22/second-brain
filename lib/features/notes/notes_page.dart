@@ -42,6 +42,9 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     final all = ref.watch(notesProvider);
     final selected = ref.watch(selectedNoteProvider);
     final drafts = all.where((d) => d.isDraft).toList();
+    final opened = ref.watch(openedNotesProvider);
+    // E2: 한 번이라도 연 초안만 한꺼번에 확인한다 (W3: 검토 없이 정리됨 방지)
+    final openedDrafts = drafts.where((d) => opened.contains(d.id)).toList();
     final List<IndexedDoc> shown;
     if (_query.trim().isNotEmpty) {
       shown = ref
@@ -87,9 +90,12 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           if (drafts.isNotEmpty) ...[
             ShadButton.secondary(
               size: ShadButtonSize.sm,
-              onPressed: () => _onConfirmAll(drafts),
-              child: Text('대기 ${drafts.length}개 모두 확인'),
+              enabled: openedDrafts.isNotEmpty,
+              onPressed: () => _onConfirmAll(openedDrafts),
+              child: Text('연 초안 ${openedDrafts.length}개 확인'),
             ),
+            if (openedDrafts.length < drafts.length)
+              Text('초안은 한 번씩 열어 본 것만 한꺼번에 확인됩니다', style: theme.textTheme.muted),
           ],
         ],
       ),

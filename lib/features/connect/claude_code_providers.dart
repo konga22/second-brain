@@ -29,7 +29,25 @@ class PastSessionsState {
     this.elapsed = Duration.zero,
     this.log = const [],
     this.error,
+    this.condensedChars = const {},
   });
+
+  /// 세션 경로 → 축약본 글자 수 (E1 비용 어림). 아직 못 셌으면 비어 있다.
+  final Map<String, int> condensedChars;
+
+  /// 실측 단가: 축약본 10만 자당 약 1.4달러 (남은작업 W4, 긴 세션 163,624자 2.35달러).
+  static const usdPer100kChars = 1.4;
+
+  /// 고른 세션의 축약 글자 수 합. 하나라도 못 셌으면 null.
+  int? get targetChars {
+    var sum = 0;
+    for (final s in targets) {
+      final n = condensedChars[s.path];
+      if (n == null) return null;
+      sum += n;
+    }
+    return sum;
+  }
 
   final List<ClaudeSession> sessions;
   final Map<String, SessionStatus> statuses;
@@ -92,7 +110,9 @@ class PastSessionsState {
     List<String>? log,
     String? error,
     bool clearError = false,
+    Map<String, int>? condensedChars,
   }) => PastSessionsState(
+    condensedChars: condensedChars ?? this.condensedChars,
     sessions: sessions ?? this.sessions,
     statuses: statuses ?? this.statuses,
     excludedProjects: excludedProjects ?? this.excludedProjects,
@@ -125,6 +145,17 @@ class PastSessionsController extends Notifier<PastSessionsState> {
       statuses: SessionRegistry(vault).load(),
       isLoading: false,
     );
+    // E1: 비용 어림용 축약 글자 수는 목록을 먼저 보여 준 뒤 백그라운드에서 센다
+    try {
+      final sizes = await condensedSizesInBackground(
+        vault.root,
+        vault.indexPath,
+        [for (final s in sessions) s.path],
+      );
+      state = state.copyWith(condensedChars: sizes);
+    } on Object catch (e) {
+      debugPrint('[지난 대화 정리] 비용 어림 실패: $e');
+    }
   }
 
   void toggleProject(String project) {

@@ -71,7 +71,11 @@ class AppConfig {
     this.autoTidyDailyUsd = 1.0,
     this.autoTidySpentDay,
     this.autoTidySpentUsd = 0,
+    this.isFirstRunDone = false,
   });
+
+  /// 첫 실행 3단계 안내를 닫았는가 (설계서 3.0 E3).
+  final bool isFirstRunDone;
 
   /// 대화 중 자동 저장 끄기. 기본은 켬: 세션 시작 훅이 "지식이 확정되면 바로 초안으로 저장"을 알린다.
   final bool isAutoCaptureOff;
@@ -123,6 +127,7 @@ class AppConfig {
         autoTidyDailyUsd: (json['autoTidyDailyUsd'] as num?)?.toDouble() ?? 1.0,
         autoTidySpentDay: json['autoTidySpentDay'] as String?,
         autoTidySpentUsd: (json['autoTidySpentUsd'] as num?)?.toDouble() ?? 0,
+        isFirstRunDone: json['firstRunDone'] == true,
       );
     } on FormatException {
       return const AppConfig();
@@ -141,6 +146,7 @@ class AppConfig {
     double? autoTidyDailyUsd,
     String? autoTidySpentDay,
     double? autoTidySpentUsd,
+    bool? isFirstRunDone,
   }) => AppConfig(
     vaultPath: vaultPath ?? this.vaultPath,
     lastBackupAt: lastBackupAt ?? this.lastBackupAt,
@@ -153,6 +159,7 @@ class AppConfig {
     autoTidyDailyUsd: autoTidyDailyUsd ?? this.autoTidyDailyUsd,
     autoTidySpentDay: autoTidySpentDay ?? this.autoTidySpentDay,
     autoTidySpentUsd: autoTidySpentUsd ?? this.autoTidySpentUsd,
+    isFirstRunDone: isFirstRunDone ?? this.isFirstRunDone,
   );
 
   void save() => writeFileAtomic(
@@ -169,6 +176,7 @@ class AppConfig {
       'autoTidyDailyUsd': autoTidyDailyUsd,
       'autoTidySpentDay': ?autoTidySpentDay,
       'autoTidySpentUsd': autoTidySpentUsd,
+      'firstRunDone': isFirstRunDone,
     }),
   );
 }
