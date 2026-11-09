@@ -176,6 +176,37 @@ final changeHistoryProvider = Provider<List<ChangeEvent>>((ref) {
   return readChangeHistory(ref.watch(vaultProvider));
 });
 
+/// 처음 생긴 시각 (설계서 3.0 날짜 표시): 노트·실수 노트 id → add·lesson-add 시각, 할 일은 `todo:<내용>` → 추가 시각.
+/// 변경 기록(최근 3달)에서 가장 이른 것. 없으면 화면이 파일 시각을 쓴다.
+final firstSeenProvider = Provider<Map<String, DateTime>>((ref) {
+  final out = <String, DateTime>{};
+  void keep(String key, DateTime at) {
+    final old = out[key];
+    if (old == null || at.isBefore(old)) out[key] = at;
+  }
+
+  for (final e in ref.watch(changeHistoryProvider)) {
+    switch (e.action) {
+      case 'add' || 'lesson-add' || 'import':
+        keep(e.detail.split(' ').first, e.at);
+      case 'todo-add' || 'todo-accept' || 'todo-suggest':
+        keep('todo:${e.detail.trim()}', e.at);
+    }
+  }
+  return out;
+});
+
+/// 실수 노트 파일 시각 (변경 기록에 lesson-add가 없을 때 만듦 대신).
+final lessonsFileTimeProvider = Provider<Map<String, DateTime>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final dir = Directory(ref.watch(vaultProvider).lessonsDir);
+  if (!dir.existsSync()) return const {};
+  return {
+    for (final f in dir.listSync().whereType<File>())
+      if (f.path.endsWith('.md')) p.basenameWithoutExtension(f.path): f.statSync().modified,
+  };
+});
+
 final lessonsProvider = Provider<List<Lesson>>((ref) {
   ref.watch(vaultRevisionProvider);
   return ref.watch(lessonStoreProvider).all();

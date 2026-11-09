@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 import 'note_editor_dialog.dart';
 import '../../shared/page_header.dart';
@@ -178,6 +179,7 @@ class _NoteRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.muted,
                     ),
+                  Text('고침 ${stamp(doc.mtime)}', style: theme.textTheme.muted.copyWith(fontSize: 11)),
                 ],
               ),
             ),

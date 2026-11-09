@@ -86,6 +86,14 @@ void main() {
       router.go(page.path);
       await settle(tester);
       await shot(tester, '1${page.index}_${page.name}');
+      // 배운 것: 적용 탭의 규칙 카드(만듦·마지막 적용 날짜)도 찍는다 (설계서 3.0 날짜 표시)
+      // 설명 문장에도 '적용'이 있어 탭 이름('적용 12')만 정확히 고른다 (11/09 빈 캡처를 고침)
+      final activeTab = find.byWidgetPredicate((w) => w is Text && RegExp(r'^적용 \d+$').hasMatch(w.data ?? ''));
+      if (page == AppPage.lessons && activeTab.evaluate().isNotEmpty) {
+        await tester.tap(activeTab.first);
+        await settle(tester);
+        await shot(tester, '1${page.index}b_lessons_active');
+      }
     }
     router.go(AppPage.home.path);
     await settle(tester);

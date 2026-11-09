@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../core/brain_providers.dart';
+import '../../shared/date_text.dart';
 
 /// 되돌리기·휴지통 (설계서 3.0 E5). 최근 작업 묶음을 무엇을 했는지와 함께 보여 주고 되돌린다.
 /// 휴지통(`_meta/trash/`)은 쌓이기만 해서 30일 지난 묶음을 비울 수 있게 한다 (확인 후, 되돌릴 수 없음).
@@ -94,7 +95,7 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> {
     final batches = recentBatches(vault);
     final summaries = _summaries(vault);
     final old = _oldTrash(vault);
-    String time(DateTime d) => '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    String time(DateTime d) => stamp(d);
     return ShadCard(
       title: const Text('되돌리기·휴지통'),
       description: const Text('앱·brain 명령·AI가 한 작업은 묶음으로 남습니다. 묶음을 통째로 되돌리면 고친 파일은 되살리고 새로 생긴 파일은 휴지통으로 옮깁니다.'),

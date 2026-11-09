@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/markdown_view.dart';
 import 'note_editor_dialog.dart';
@@ -186,7 +187,7 @@ class _NoteDetail extends ConsumerWidget {
         ],
         const SizedBox(height: 6),
         Text(
-          '출처 ${note.source} · 수정 ${_date(note.updated ?? note.created ?? doc.mtime)} · 연결 ${links.length}',
+          '출처 ${note.source} · 만듦 ${stamp(note.created ?? doc.mtime)} · 고침 ${stamp(note.updated ?? note.created ?? doc.mtime)} · 연결 ${links.length}',
           style: theme.textTheme.muted.copyWith(fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -293,7 +294,6 @@ class _NoteDetail extends ConsumerWidget {
   }
 }
 
-String _date(DateTime t) => '${t.toLocal().month}/${t.toLocal().day}';
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.icon, required this.label});

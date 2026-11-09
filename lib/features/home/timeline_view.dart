@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 
 /// 타임라인 (설계서 3.3): 날짜별로 쌓이고 고쳐진 일, 이번 주 숫자와 7일 막대. `_log/`에서 만든다.
@@ -53,7 +54,7 @@ class TimelineView extends ConsumerWidget {
     final byDate = <String, List<ChangeEvent>>{};
     for (final e in events.take(300)) {
       final t = e.at.toLocal();
-      byDate.putIfAbsent('${t.month}월 ${t.day}일', () => []).add(e);
+      byDate.putIfAbsent(dayHeading(t), () => []).add(e);
     }
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),

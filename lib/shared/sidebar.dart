@@ -377,7 +377,7 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
             size: ShadButtonSize.sm,
             leading: const Icon(LucideIcons.triangleAlert, size: 14),
             onPressed: () => Process.run('open', [p.join(ref.read(vaultProvider).metaDir, 'conflicts')]),
-            child: Text('충돌 사본 $conflicts개 — Finder에서 비교'),
+            child: Text('충돌 사본 $conflicts개'), // 사이드바 폭(187px)에 맞게 짧게 (11/09 화면 시험에서 21px 넘침)
           ),
         Expanded(
           child: ListView(

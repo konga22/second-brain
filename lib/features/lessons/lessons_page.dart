@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/page_header.dart';
 
@@ -54,7 +55,7 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
         ),
         const SizedBox(height: 6),
         Text(
-          '교정에서 나온 규칙(언제 → 무엇을 → 왜)입니다. 적용 중인 규칙만 Claude Code가 관련 요청을 받을 때 최대 3개까지 들어갑니다.',
+          '교정에서 나온 규칙(언제 → 무엇을 → 왜)입니다. 적용 중인 규칙은 Claude Code 세션 시작 때 한 줄씩 늘 들어가고(최대 30개), 요청과 맞으면 이유까지 다시 붙습니다(최대 3개).',
           style: theme.textTheme.muted,
         ),
         const SizedBox(height: 16),
@@ -147,6 +148,21 @@ class _LessonCard extends StatelessWidget {
               Text(lesson.id, style: theme.textTheme.muted),
               const SizedBox(width: 8),
               ShadBadge.outline(child: Text(lesson.source == 'explicit' ? '직접 교정' : '자동 감지')),
+              const SizedBox(width: 8),
+              // 날짜 표시 (설계서 3.0): 만듦은 변경 기록, 없으면 파일 시각
+              Consumer(
+                builder: (context, ref, _) {
+                  final created = ref.watch(firstSeenProvider)[lesson.id] ??
+                      ref.watch(lessonsFileTimeProvider)[lesson.id];
+                  return Text(
+                    [
+                      if (created != null) '만듦 ${stamp(created)}',
+                      if (lesson.lastSeen != null) '마지막 적용 ${dayStamp(lesson.lastSeen!)}',
+                    ].join(' · '),
+                    style: theme.textTheme.muted.copyWith(fontSize: 11),
+                  );
+                },
+              ),
               const Spacer(),
               Text('지킴 ${lesson.kept} · 다시 교정 ${lesson.recorrected}', style: theme.textTheme.muted),
             ],

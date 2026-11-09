@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/page_header.dart';
 
@@ -175,6 +176,12 @@ class _TodosPageState extends ConsumerState<TodosPage> {
                     ),
                   ),
                 ),
+                // 날짜 표시 (설계서 3.0): 변경 기록의 추가 시각
+                if (ref.watch(firstSeenProvider)['todo:${todo.text.trim()}'] case final added?)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text('추가 ${stamp(added)}', style: theme.textTheme.muted.copyWith(fontSize: 11)),
+                  ),
                 sourceChip(todo.noteId),
                 ShadIconButton.ghost(
                   width: 26,
