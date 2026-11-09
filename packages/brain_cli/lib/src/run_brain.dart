@@ -31,6 +31,7 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(TodoCommand(context))
         ..addCommand(LintCommand(context))
         ..addCommand(BenchCommand(context))
+        ..addCommand(ReviewCommand(context))
         ..addCommand(_DoctorCommand(context));
   // `brain sessions [옵션]`은 `brain sessions list [옵션]`과 같다.
   final args = [...arguments];

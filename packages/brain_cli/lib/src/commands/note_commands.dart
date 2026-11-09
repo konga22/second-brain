@@ -13,6 +13,11 @@ class FindCommand extends Command<int> {
       ..addOption('topic', help: '이 주제 폴더(뇌)에서 먼저 찾는다. 없으면 전체에서 찾는다.')
       ..addOption('limit', defaultsTo: '5')
       ..addFlag(
+        'here',
+        help: '지금 작업 폴더의 Claude Code 대화에서 나온 노트를 앞으로 (설계서 3.0 E8).',
+        negatable: false,
+      )
+      ..addFlag(
         'brief',
         help: '짧게: id와 제목만, 약하게 맞은 것은 (약) 표시 (토큰 약 1/3, docs/토큰분석.md 6절).',
         negatable: false,
@@ -49,6 +54,17 @@ class FindCommand extends Command<int> {
       stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)');
       return 0;
     }
+    // E8 --here: 더 넓게 찾은 뒤 지금 폴더에서 나온 노트를 앞으로 (순서는 그 안에서 그대로)
+    final hereIds = <String>{};
+    if (argResults!['here'] as bool) {
+      final wide = context.index.search(query, limit: limit * 4, includeRaw: argResults!['raw'] as bool, topic: topic);
+      final pool = wide.isEmpty ? hits : wide;
+      for (final doc in pool) {
+        if (isFromFolder(context.vault, doc, Directory.current.path)) hereIds.add(doc.id);
+      }
+      hits = [...pool.where((d) => hereIds.contains(d.id)), ...pool.where((d) => !hereIds.contains(d.id))].take(limit).toList();
+      if (hereIds.isEmpty) stdout.writeln('(지금 폴더에서 나온 노트는 없어 전체 순서로 보임)');
+    }
     final mode = RetrievalMode.current;
     if (mode != RetrievalMode.base) {
       // R1: 질문 단어가 본문까지 2개 이상 맞는 노트만 남긴다. 약한 후보는 (약) 표시를 해도 AI가 근거로 써서
@@ -61,7 +77,8 @@ class FindCommand extends Command<int> {
       if (mode == RetrievalMode.r) {
         for (final doc in strong) {
           final summary = doc.summary.isEmpty ? '' : ' — ${doc.summary}';
-          stdout.writeln('${doc.id}  ${doc.isDraft ? '[초안] ' : ''}${doc.title}$summary  ${doc.folder}');
+          final here = hereIds.contains(doc.id) ? '  · 이 폴더' : '';
+          stdout.writeln('${doc.id}  ${doc.isDraft ? '[초안] ' : ''}${doc.title}$summary  ${doc.folder}$here');
         }
         return 0;
       }
@@ -337,4 +354,30 @@ class IndexCommand extends Command<int> {
     stdout.writeln('색인 $result (노트 ${context.index.notes().length}개)');
     return 0;
   }
+}
+
+
+/// 노트가 [folder]에서 한 Claude Code 대화에서 나왔는가 (설계서 3.0 E8).
+/// 노트 sources → `raw/sessions/` 축약본 → 그 sources의 세션 기록 경로(`~/.claude/projects/<폴더를 - 로 바꾼 이름>/…`).
+bool isFromFolder(Vault vault, IndexedDoc doc, String folder) {
+  // macOS는 한글 폴더 이름을 자모로 풀어(NFD) 돌려줄 수 있다. Claude Code 폴더 이름은 NFC 기준이라 맞춘다.
+  final encoded = '/projects/${toNfc(folder).replaceAll(RegExp(r'[^A-Za-z0-9]'), '-')}/';
+  List<String> sourcesOf(String path) {
+    final file = File(path);
+    if (!file.existsSync()) return const [];
+    try {
+      return Note.parse(file.readAsStringSync(), fallbackId: '', fallbackTitle: '').sources;
+    } on Object {
+      return const [];
+    }
+  }
+
+  for (final source in sourcesOf('${vault.root}/${doc.path}')) {
+    if (source.contains(encoded)) return true;
+    if (source.startsWith('raw/sessions/') || source.contains('/raw/sessions/')) {
+      final raw = source.startsWith('/') ? source : '${vault.root}/$source';
+      if (sourcesOf(raw).any((s) => s.contains(encoded))) return true;
+    }
+  }
+  return false;
 }

@@ -169,3 +169,71 @@ class BenchCommand extends Command<int> {
     return 0;
   }
 }
+
+
+/// `brain review [--days 7]`: 그 기간 변경 기록(`_log/`)으로 주간 회고 초안을 md로 낸다 (설계서 3.0 E7).
+/// 파일로 저장하지 않는다 — 사용자가 고쳐서 주간 보고·노트에 쓴다.
+class ReviewCommand extends Command<int> {
+  ReviewCommand(this.context) {
+    argParser.addOption('days', defaultsTo: '7', help: '며칠 치를 모을지');
+  }
+
+  final BrainContext context;
+
+  @override
+  String get name => 'review';
+
+  @override
+  String get description => '주간 회고 초안: 새 노트·고친 노트·실수 노트·할 일 (변경 기록에서).';
+
+  @override
+  int run() {
+    final days = int.tryParse(argResults!['days'] as String) ?? 7;
+    final since = DateTime.now().subtract(Duration(days: days));
+    final events = readChangeHistory(context.vault).where((e) => e.at.isAfter(since)).toList();
+    context.index.syncIfStale();
+    String title(String id) => context.index.byId(id)?.title ?? '(지워졌거나 옮겨진 노트)';
+    final added = <String>{}, changed = <String>{}, confirmed = <String>{}, lessons = <String>{}, todos = <String>[];
+    for (final e in events) {
+      final id = e.detail.split(' ').first;
+      switch (e.action) {
+        case 'add':
+          added.add(id);
+        case 'write' || 'update':
+          changed.add(id);
+        case 'status' when e.detail.contains(' active'):
+          confirmed.add(id);
+        case final a when a.startsWith('lesson-add') || a == 'lesson-edit':
+          lessons.add(id);
+        case 'todo-add' || 'todo-accept':
+          todos.add(e.detail);
+      }
+    }
+    changed.removeAll(added);
+    String day(DateTime d) => '${d.month}/${d.day}';
+    final out = StringBuffer()
+      ..writeln('# 회고 초안 (${day(since)} ~ ${day(DateTime.now())}, 최근 $days일)')
+      ..writeln()
+      ..writeln('변경 기록 ${events.length}건에서 모았다. 고쳐서 쓰고, 맞지 않는 줄은 지운다.')
+      ..writeln();
+    void section(String head, Iterable<String> lines) {
+      out.writeln('## $head (${lines.length})');
+      if (lines.isEmpty) out.writeln('- 없음');
+      for (final line in lines) {
+        out.writeln('- $line');
+      }
+      out.writeln();
+    }
+
+    section('새 지식', [for (final id in added) if (id.startsWith('n_')) '$id ${title(id)}']);
+    section('확인해 정리됨으로 보낸 노트', [for (final id in confirmed) if (id.startsWith('n_')) '$id ${title(id)}']);
+    section('고친 노트', [for (final id in changed) if (id.startsWith('n_')) '$id ${title(id)}']);
+    section('새로 배운 규칙 (실수 노트)', [
+      for (final id in lessons)
+        if (context.lessons.read(id) case final l?) '$id ${l.line}' else id,
+    ]);
+    section('할 일', todos);
+    stdout.write(out.toString());
+    return 0;
+  }
+}
