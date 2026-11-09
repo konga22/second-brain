@@ -76,7 +76,9 @@ class VaultRevision extends Notifier<int> {
           _debounce?.cancel();
           // 대량 가져오기 때는 이벤트를 모아서 한 번에 처리한다. 색인 확인은 백그라운드에서 하고
           // 실제로 바뀐 게 있을 때만 번호를 올린다 (노트 1만 개에서 화면 스레드 140ms 멈춤을 없앰).
-          _debounce = Timer(const Duration(milliseconds: 300), _syncInBackground);
+          // 바깥(CLI `brain add` 등)에서 생긴 파일은 그쪽이 색인을 이미 맞춰 확인 결과가 0일 수 있다 →
+          // 파일이 바뀐 것 자체로 다시 그린다 (설계서 v1.3.24, 11/09 사용자 제보)
+          _debounce = Timer(const Duration(milliseconds: 300), () => _syncInBackground(force: true));
         });
     ref.onDispose(() {
       _debounce?.cancel();
@@ -94,25 +96,30 @@ class VaultRevision extends Notifier<int> {
 
   var _syncing = false;
   var _again = false;
+  var _againForce = false;
 
   /// 색인 확인을 백그라운드(isolate)에서 하고, 바뀐 게 있으면 번호를 올린다. 도는 중에 또 불리면 끝난 뒤 한 번 더.
-  Future<void> _syncInBackground() async {
+  Future<void> _syncInBackground({bool force = false}) async {
     if (_syncing) {
       _again = true;
+      _againForce |= force;
       return;
     }
     _syncing = true;
     try {
       final vault = ref.read(vaultProvider);
       final changed = await syncIndexInBackground(vault.root, vault.indexPath);
-      if (changed > 0 && ref.mounted) state++;
+      if ((changed > 0 || force) && ref.mounted) state++;
     } on Object catch (e) {
       debugPrint('[색인] 갱신 실패: $e');
+      if (force && ref.mounted) state++;
     } finally {
       _syncing = false;
       if (_again && ref.mounted) {
+        final again = _againForce;
         _again = false;
-        unawaited(_syncInBackground());
+        _againForce = false;
+        unawaited(_syncInBackground(force: again));
       }
     }
   }
