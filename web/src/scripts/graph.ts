@@ -42,8 +42,13 @@ export function mountGraph(el: HTMLElement) {
     .linkLineDash((l: Link) => (l.suggested ? [3, 3] : null))
     .linkWidth(1)
     .enableZoomInteraction(false)
+    // 동작 줄이기: 움직임 없이 배치를 미리 다 계산해 멈춘 그림으로 보여 준다 (0번 돌리면 시작 위치에 뭉친 채 크게 확대됨)
+    .warmupTicks(reduce ? 200 : 0)
     .cooldownTicks(reduce ? 0 : 200)
     .nodeCanvasObject((n: any, ctx: CanvasRenderingContext2D, scale: number) => {
+      // 첫 프레임에는 배치 전이라 x·y가 없을 수 있다. 그대로 그리면 createRadialGradient가 예외를 내고
+      // force-graph의 그리기 반복이 멈춰 그래프가 끝까지 안 보인다(11/09 휴대폰에서 발견, 기능검토 K-14).
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(scale) || scale <= 0) return;
       const r = n.hub ? 6 : 4;
       const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 3);
       glow.addColorStop(0, 'rgba(228,225,245,0.35)');

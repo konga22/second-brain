@@ -40,3 +40,13 @@ npx --yes wrangler@4 pages deploy dist --project-name second-brain --branch main
 
 - 11/09 첫 로그인 때 한 번 `request_forbidden`이 나왔다. 다시 띄우자 됐다(원인 모름).
 - 설치 파일(.dmg)은 Pages 파일 하나 한도(25MiB)를 넘을 수 있어 여기에 올리지 않는다.
+
+## 배포 뒤 확인 (그래프가 실제로 그려지는지)
+
+```bash
+node --experimental-websocket web/check-graph.mjs https://second-brain-cvj.pages.dev/
+```
+
+- 데스크톱·휴대폰(터치·iPhone)·동작 줄이기에서 3번씩 그려진 점 수와 페이지 예외를 센다. 하나라도 0이면 종료 코드 1.
+- 캔버스가 있는지·크기만 보면 안 된다(11/09 첫 배포 때 빈 확인, 기능검토 K-14). 앱 안 브라우저 창이 숨겨져 있으면 화면 갱신이 멈춰 값을 믿을 수 없다.
+
