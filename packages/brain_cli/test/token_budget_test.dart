@@ -161,6 +161,23 @@ void main() {
     expect(c(r'brain show $(cat id) | head'), isNull);
   });
 
+  test('brain write로 제목·요약도 고친다 (v1.3.25, 한반도감 n_0059)', () async {
+    final added = await brain(['add', '--title', '배포 결정 Render', '--summary', 'Render로 간다', '--topic', '배포'], stdin: '처음 결정');
+    final id = RegExp(r'n_\d{4}').firstMatch(added)!.group(0)!;
+    final show = await brain(['show', id]);
+    final hash = RegExp(r'해시 ([0-9a-f]+)').firstMatch(show)!.group(1)!;
+    // 본문 없이 제목·요약만
+    await brain(['write', id, '--expect-hash', hash, '--title', '배포 결정 Vercel', '--summary', 'Vercel로 바꿈']);
+    final after = await brain(['show', id]);
+    expect(after, contains('배포 결정 Vercel'));
+    expect(after, contains('처음 결정')); // 본문은 그대로
+    final found = await brain(['find', 'Vercel로 바꿈']);
+    expect(found, contains('Vercel로 바꿈'));
+    // 옛 해시로는 거절
+    final stale = await brain(['write', id, '--expect-hash', hash, '--summary', '또 바꿈']);
+    expect(stale, isNot(contains(RegExp(r'^[0-9a-f]{12,}'))));
+  });
+
   test('관계없는 요청은 0자 (설계서 5.1)', () async {
     expect(await prompt('안녕'), isEmpty);
     expect(await prompt('오늘 날씨 어때'), isEmpty);

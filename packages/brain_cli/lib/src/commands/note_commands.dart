@@ -294,11 +294,11 @@ class AddCommand extends Command<int> {
 /// `brain write <id> --expect-hash H`: 본문 고치기.
 class WriteCommand extends Command<int> {
   WriteCommand(this.context) {
-    argParser.addOption(
-      'expect-hash',
-      help: 'brain show 머리 줄의 해시',
-      mandatory: true,
-    );
+    argParser
+      ..addOption('expect-hash', help: 'brain show 머리 줄의 해시', mandatory: true)
+      ..addOption('title', help: '새 제목 (바뀌면 파일 이름과 [[옛 제목]] 링크도 고친다)')
+      ..addOption('summary', help: '새 요약 (60자 이내, 찾기 결과에 그대로 보인다)')
+      ..addOption('tags', help: '새 태그 (쉼표로 구분)');
   }
 
   final BrainContext context;
@@ -307,22 +307,45 @@ class WriteCommand extends Command<int> {
   String get name => 'write';
 
   @override
-  String get description => '노트 본문을 바꾼다 (본문은 표준 입력). 그사이 바뀌었으면 거절한다.';
+  String get description =>
+      '노트를 고친다: 본문(표준 입력)과 --title·--summary·--tags. 결정이 바뀌면 제목·요약도 함께 고친다. 그사이 바뀌었으면 거절한다.';
 
   @override
   Future<int> run() async {
     if (argResults!.rest.isEmpty) usageException('노트 id를 주세요.');
+    final id = argResults!.rest.first;
+    final expect = argResults!['expect-hash'] as String;
+    final title = argResults!['title'] as String?;
+    final summary = argResults!['summary'] as String?;
+    final tags = argResults!['tags'] as String?;
     final body = await readStdin();
-    if (body == null || body.trim().isEmpty) {
-      usageException('새 본문을 표준 입력으로 주세요.');
+    final hasBody = body != null && body.trim().isNotEmpty;
+    final hasMeta = title != null || summary != null || tags != null;
+    if (!hasBody && !hasMeta) {
+      usageException('새 본문(표준 입력)이나 --title·--summary·--tags 중 하나는 주세요.');
     }
     try {
-      final hash = context.notes.write(
-        argResults!.rest.first,
-        body,
-        expectHash: argResults!['expect-hash'] as String,
+      if (!hasMeta) {
+        stdout.writeln(context.notes.write(id, body!, expectHash: expect));
+        return 0;
+      }
+      // 제목·요약·태그: 앱 편집과 같은 update (제목이 바뀌면 파일 이름·링크도). 빠진 값은 지금 값 그대로.
+      final found = context.notes.read(id);
+      if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+      final (_, note, hash) = found;
+      if (expect.length < 6 || !hash.startsWith(expect)) {
+        throw NoteStoreException('$id 노트가 그사이 바뀌었습니다 (지금 해시 ${hash.substring(0, 12)}). brain show로 다시 보고 고치세요.');
+      }
+      final newHash = context.notes.update(
+        id,
+        expectHash: hash,
+        title: title ?? note.title,
+        summary: summary ?? note.summary,
+        body: hasBody ? body : note.body,
+        tags: tags == null ? note.tags : [for (final t in tags.split(',')) t.trim()],
+        aliases: note.aliases,
       );
-      stdout.writeln(hash);
+      stdout.writeln(newHash);
       return 0;
     } on NoteStoreException catch (e) {
       stderr.writeln(e.message);
