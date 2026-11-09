@@ -18,7 +18,7 @@ class HookCommand extends Command<int> {
   String get name => 'hook';
 
   @override
-  String get description => '훅 전용: session-start, prompt, session-end';
+  String get description => '훅 전용: session-start, prompt, pre-tool, session-end';
 
   @override
   Future<int> run() async {
@@ -38,6 +38,8 @@ class HookCommand extends Command<int> {
           _sessionStart(input);
         case 'prompt':
           _prompt(input);
+        case 'pre-tool':
+          _preTool(input);
         case 'session-end':
           _sessionEnd(input);
       }
@@ -100,11 +102,57 @@ class HookCommand extends Command<int> {
     ];
   }
 
+  /// PreToolUse (설계서 5.2 v1.3.22): AI가 `brain show n_0042 2>&1 | head -60`처럼 이으면 허용 목록
+  /// (`Bash(brain *)`) 밖이라 거부되거나 매번 허락을 묻는다. 안내 문장만으로는 안 지켜져서(한반도감 세션 3번)
+  /// 읽기 명령에 붙은 `2>&1`·`| head`·`| tail`만 떼고 실행을 허락한다. 그 밖은 아무것도 내지 않는다(그대로 진행).
+  void _preTool(Map<String, dynamic> input) {
+    if (input['tool_name'] != 'Bash') return;
+    final toolInput = input['tool_input'];
+    if (toolInput is! Map) return;
+    final cleaned = cleanBrainPipe('${toolInput['command'] ?? ''}');
+    if (cleaned == null) return;
+    stdout.write(
+      jsonEncode({
+        'hookSpecificOutput': {
+          'hookEventName': 'PreToolUse',
+          'permissionDecision': 'allow',
+          'permissionDecisionReason': 'brain 출력은 이미 짧아 파이프를 떼고 실행 (세컨드 브레인)',
+          'updatedInput': {...toolInput, 'command': cleaned},
+        },
+      }),
+    );
+  }
+
+  static const _readOnly = {'find', 'show', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'bench', 'lint', '--help', '-h'};
+  static final _tailPipe = RegExp(r'^\s*(head|tail)(\s+-n\s*\d+|\s+-\d+|\s+--lines=\d+)?\s*$');
+  static final _stderr = RegExp(r'\s+2>(&1|\s*/dev/null)');
+
+  /// 떼어 낼 것이 있는 한 줄짜리 brain 읽기 명령이면 뗀 명령, 아니면 null.
+  static String? cleanBrainPipe(String command) {
+    final text = command.trim();
+    if (text.contains('\n') || text.contains('<<') || text.contains(';') || text.contains('&&') || text.contains('`') || text.contains(r'$(')) {
+      return null;
+    }
+    final parts = text.split('|');
+    final head = parts.first.trim();
+    final words = head.split(RegExp(r'\s+'));
+    if (words.isEmpty || !(words.first == 'brain' || words.first.endsWith('/brain') || words.first.endsWith('/brain"'))) return null;
+    if (words.length < 2 || !_readOnly.contains(words[1])) return null;
+    if (words[1] == 'lesson' && words.length > 2 && const {'add', 'set', 'edit', 'evidence'}.contains(words[2])) return null;
+    if (words[1] == 'todo' && words.length > 2 && const {'add', 'suggest', 'accept', 'done'}.contains(words[2])) return null;
+    if (words[1] == 'sessions' && words.length > 2 && words[2] == 'mark') return null;
+    if (words[1] == 'lint' && head.contains('--fix-safe')) return null;
+    if (!parts.skip(1).every(_tailPipe.hasMatch)) return null;
+    final cleaned = head.replaceAll(_stderr, '').trim();
+    return cleaned == text ? null : cleaned;
+  }
+
   /// 대화 중 자동 저장 안내 (설계서 5.6). 세션 id는 넣지 않는다 — brain add가 CLAUDE_CODE_SESSION_ID로 연결한다.
   static const autoCaptureLine =
       '· 자동 저장(켜짐): 오래 쓸 지식(결정과 이유, 문제와 해결, 작업 규칙, 쓸 만한 도구)이 확정되면 묻지 말고 '
       'brain-save 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄을 붙인다. '
-      '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지.';
+      '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지. '
+      '형식: brain add --draft --title "제목" --summary "60자 요약" --tags "a,b" --topic "주제" <<\'NOTE\' (본문 2~8줄) NOTE';
 
   /// `_profile.md`의 "주요 주제: A(3), B(2)" 줄에서 이름만 (노트 수는 자주 바뀌어 빼고 순서만 쓴다).
   static List<String> profileTopics(Vault vault) {

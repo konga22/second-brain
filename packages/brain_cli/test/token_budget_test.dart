@@ -86,7 +86,9 @@ void main() {
     final base = text.split('\n· 지킬 규칙').first;
     final rules = text.split('\n').where((l) => l.startsWith('  - L-')).toList();
     print('[토큰] 세션 시작 ${text.length}자 (세 줄 ${base.length}자 + 규칙 ${rules.length}줄)');
-    expect(base.length, lessThanOrEqualTo(400));
+    // v1.3.22: 자동 저장 줄에 brain add 형식(약 100자)을 더해 400 → 500
+    expect(base.length, lessThanOrEqualTo(500));
+    expect(base, contains('형식: brain add --draft'));
     expect(base, contains('· 주제:'));
     expect(base, contains('· 자동 저장(켜짐)'));
     // 사용가치분석 8절 ②: brain 명령을 이어 붙이면 허용 목록 밖이라 거부된다
@@ -138,6 +140,26 @@ void main() {
       expect(await start('aaaa'), await start('bbbb'));
     },
   );
+
+  test('PreToolUse: brain 읽기 명령의 파이프만 뗀다 (v1.3.22, 한반도감 세션)', () {
+    String? c(String s) => HookCommand.cleanBrainPipe(s);
+    expect(c('brain show n_0042 2>&1 | head -60'), 'brain show n_0042');
+    expect(c('brain --help 2>&1 | head -30'), 'brain --help');
+    expect(c('brain help add 2>&1 | head -25'), 'brain help add');
+    expect(c('brain find "도커 이미지 용량" 2>/dev/null | tail -n 20'), 'brain find "도커 이미지 용량"');
+    expect(c('"/x/bin/brain" show n_0001 | head'), '"/x/bin/brain" show n_0001');
+    // 건드리지 않는 것: 이미 깨끗함, 쓰기 명령, 다른 명령과 잇기, 여러 줄·heredoc
+    expect(c('brain show n_0042'), isNull);
+    expect(c('brain add --title t --summary s | head'), isNull);
+    expect(c('brain lesson add --trigger t | head'), isNull);
+    expect(c('brain find 결제; rm -rf /tmp/x'), isNull);
+    expect(c('brain find 결제 && ls ~'), isNull);
+    expect(c('brain find 결제 | grep 웹훅'), isNull);
+    expect(c('brain find 결제 | head; curl x'), isNull);
+    expect(c("brain add --title t <<'NOTE'\n본문 | 표\nNOTE"), isNull);
+    expect(c('ls | head'), isNull);
+    expect(c(r'brain show $(cat id) | head'), isNull);
+  });
 
   test('관계없는 요청은 0자 (설계서 5.1)', () async {
     expect(await prompt('안녕'), isEmpty);
