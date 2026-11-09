@@ -137,6 +137,9 @@ const _questionWords = {
   '해야', '해야해', '해줘', '되나', '돼', '될까', '그거', '그', '이거', '정리한', '적어', '둔',
 };
 
+/// 검색어에서 빼는 묻는 말인가 ("뭐였지", "알려", "줘" 등). 훅의 미리 넣기 비율 계산에도 쓴다.
+bool isQuestionWord(String token) => _questionWords.contains(toNfc(token));
+
 List<String> _terms(String query) {
   final all = toNfc(query)
       .replaceAll(RegExp(r'[?？!.]'), ' ')

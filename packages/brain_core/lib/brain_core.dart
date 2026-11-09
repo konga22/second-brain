@@ -1,6 +1,7 @@
 /// 세컨드 브레인 앱과 brain CLI가 함께 쓰는 로직.
 library;
 
+export 'src/bench/lesson_bench.dart';
 export 'src/bench/search_bench.dart';
 export 'src/chat/chat_context.dart';
 export 'src/graph/force_layout.dart';

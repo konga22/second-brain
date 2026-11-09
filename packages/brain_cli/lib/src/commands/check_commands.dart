@@ -5,6 +5,7 @@ import 'package:brain_core/brain_core.dart';
 import 'package:path/path.dart' as p;
 
 import '../brain_context.dart';
+import 'hook_command.dart';
 
 /// `brain lint [--fix-safe]`: 유형별 개수 + 상위 5개 (설계서 5.8).
 class LintCommand extends Command<int> {
@@ -63,10 +64,15 @@ class LintCommand extends Command<int> {
 /// `brain bench [--queries 파일]`: recall@5·MRR·평균 ms (설계서 5.8).
 class BenchCommand extends Command<int> {
   BenchCommand(this.context) {
-    argParser.addOption(
-      'queries',
-      help: '질문 세트 (기본: 지식 폴더의 bench/questions.yaml)',
-    );
+    argParser
+      ..addOption(
+        'queries',
+        help: '질문 세트 (기본: 지식 폴더의 bench/questions.yaml)',
+      )
+      ..addOption(
+        'lessons',
+        help: '규칙 매칭 시험 (bench/lessons.yaml): 실수 노트 걸림·헛걸림, 미리 넣기(R2) 헛넣기도 함께 잰다',
+      );
   }
 
   final BrainContext context;
@@ -79,6 +85,8 @@ class BenchCommand extends Command<int> {
 
   @override
   int run() {
+    final lessonsPath = argResults!['lessons'] as String?;
+    if (lessonsPath != null) return _lessons(lessonsPath);
     final path =
         argResults!['queries'] as String? ??
         p.join(context.vault.root, 'bench', 'questions.yaml');
@@ -98,6 +106,65 @@ class BenchCommand extends Command<int> {
       ..writeln('find 출력 평균 ${result.averageChars.round()}자');
     for (final miss in result.misses.take(10)) {
       stdout.writeln('놓침: $miss');
+    }
+    return 0;
+  }
+
+  /// 규칙 매칭 시험 (기능검토 2절, 실수 노트 L-0008). 돈 안 드는 결정적 시험이다.
+  /// ① 요청마다 붙는 실수 노트: 걸려야 할 요청 중 걸린 비율, 걸리면 안 될 요청 중 걸린 비율
+  /// ② 미리 넣기(R2): 어느 노트와도 상관없는 요청(none)에 노트를 넣은 비율, 질문 세트에서 넣은 노트가 정답인 비율
+  int _lessons(String path) {
+    final file = File(path);
+    if (!file.existsSync()) {
+      stderr.writeln('규칙 매칭 시험 파일이 없습니다: $path');
+      return 1;
+    }
+    final cases = LessonCase.parseYaml(file.readAsStringSync());
+    context.index.sync();
+    final known = {for (final l in context.lessons.all()) l.id};
+    final missing = [for (final c in cases) if (c.lesson != null && !known.contains(c.lesson)) c.lesson];
+    if (missing.isNotEmpty) stdout.writeln('없는 실수 노트(건너뜀 아님, 모두 안 걸림으로 셈): ${missing.join(', ')}');
+    final r = runLessonBench(context.lessons, cases);
+    String pct(int a, int b) => '$a/$b (${b == 0 ? 0 : (a * 100 / b).round()}%)';
+    stdout
+      ..writeln('실수 노트 걸림 (걸려야 할 요청): ${pct(r.hitOk, r.hitTotal)}')
+      ..writeln('헛걸림 (걸리면 안 될 요청에 그 규칙): ${pct(r.missWrong, r.missTotal)}')
+      ..writeln('헛걸림 (다른 규칙이 걸림): ${r.otherWrong}번')
+      ..writeln('관계없는 요청에 걸림: ${pct(r.noneWrong, r.noneTotal)}');
+    for (final line in r.unmatched) {
+      stdout.writeln('안 걸림: $line');
+    }
+    for (final line in r.wrong) {
+      stdout.writeln('잘못 걸림: $line');
+    }
+    // R2 미리 넣기: 관계없는 요청에는 0개여야 하고, 질문 세트에서는 넣은 노트가 정답이어야 한다.
+    final none = [for (final c in cases) if (c.lesson == null) ...c.miss];
+    var noneInjected = 0;
+    for (final text in none) {
+      final docs = HookCommand.relatedNotes(context.index, text);
+      if (docs.isNotEmpty) {
+        noneInjected++;
+        stdout.writeln('헛넣기: ${docs.map((d) => d.id).join(',')} ← $text');
+      }
+    }
+    stdout.writeln('미리 넣기 — 관계없는 요청에 넣음: ${pct(noneInjected, none.length)}');
+    final qPath = argResults!['queries'] as String? ?? p.join(p.dirname(path), 'questions.yaml');
+    final qFile = File(qPath);
+    if (qFile.existsSync()) {
+      final questions = BenchQuestion.parseYaml(qFile.readAsStringSync());
+      var injected = 0, correct = 0, wrongDocs = 0;
+      for (final q in questions) {
+        final docs = HookCommand.relatedNotes(context.index, q.question);
+        if (docs.isEmpty) continue;
+        injected++;
+        if (docs.any((d) => q.expect.contains(d.id))) correct++;
+        final bad = docs.where((d) => !q.expect.contains(d.id)).toList();
+        wrongDocs += bad.length;
+        if (bad.isNotEmpty) stdout.writeln('정답 밖 노트: ${bad.map((d) => d.id).join(',')} ← ${q.question}');
+      }
+      stdout
+        ..writeln('미리 넣기 — 질문 ${questions.length}개 중 넣음 ${pct(injected, questions.length)}, 넣은 것 중 정답 포함 ${pct(correct, injected)}')
+        ..writeln('미리 넣기 — 정답 밖 노트 $wrongDocs개');
     }
     return 0;
   }

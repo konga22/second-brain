@@ -138,6 +138,9 @@ class HookCommand extends Command<int> {
     for (final doc in index.search(prompt, limit: 8)) {
       final text = toNfc('${doc.title} ${doc.summary} ${doc.tags}').toLowerCase();
       final matched = heads.where(text.contains).length;
+      // 비율 기준(맞은 단어 ÷ 요청 단어)은 11/09에 재 보고 넣지 않았다: 엉뚱한 노트를 넣는 값은 약 100~200토큰,
+      // 맞는 노트를 놓치면 찾기 턴 하나(약 3만 토큰). 25%로 거르면 평소 말투 질문 14개 중 2개의 정답을 놓쳤다
+      // (설계서 5.1 v1.3.18, 기능검토 K-09, tool/inject_rules.dart).
       if (matched >= 2 || heads.length == 1 && matched == 1) out.add(doc);
       if (out.length >= 3) break;
     }
