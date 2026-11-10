@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:brain_core/brain_core.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -13,6 +14,7 @@ import 'package:secondbrain/app/second_brain_app.dart';
 import 'package:secondbrain/core/app_config_provider.dart';
 import 'package:secondbrain/core/brain_providers.dart';
 import 'package:secondbrain/features/home/structure_list_view.dart';
+import 'package:secondbrain/features/notes/note_panel.dart';
 
 /// 모든 화면을 돌며 예외 없이 그려지는지 본다. 노트를 하나 골라 오른쪽 패널, ⌘K 명령 창도 연다.
 /// 실제 지식 폴더를 쓰지 않도록 BRAIN_VAULT에 사본을 주고 돌린다.
@@ -68,6 +70,42 @@ void main() {
       container.read(selectedNoteProvider.notifier).select(notes.first.id);
       await settle(tester);
       await shot(tester, '05_note_panel');
+      // 출처 칸 (설계서 v1.3.26): 세션에서 나온 노트를 열고 패널을 내려 실제로 그려졌는지,
+      // [원본 열기]를 누르면 세션 축약본으로 가는지 본다. 그런 노트가 없는 지식 폴더면 건너뛴다.
+      final vaultRoot = container.read(vaultProvider).root;
+      final fromSession = notes.where((doc) {
+        final file = File('$vaultRoot/${doc.path}');
+        if (!file.existsSync()) return false;
+        final note = Note.parse(file.readAsStringSync(), fallbackId: doc.id, fallbackTitle: doc.title);
+        return note.sources.any((s) => s.startsWith('raw/sessions/') && File('$vaultRoot/$s').existsSync());
+      }).firstOrNull;
+      if (fromSession != null) {
+        container.read(selectedNoteProvider.notifier).select(fromSession.id);
+        await settle(tester);
+        final originTitle = find.text('출처 — 이 지식이 나온 곳');
+        await tester.scrollUntilVisible(
+          originTitle,
+          300,
+          scrollable: find.descendant(of: find.byType(NotePanel), matching: find.byType(Scrollable)).first,
+          maxScrolls: 60,
+        );
+        await tester.scrollUntilVisible(
+          find.text('원본 열기').first,
+          200,
+          scrollable: find.descendant(of: find.byType(NotePanel), matching: find.byType(Scrollable)).first,
+          maxScrolls: 20,
+        );
+        await settle(tester, 400);
+        expect(originTitle, findsOneWidget);
+        expect(find.textContaining('시작 · 세션'), findsWidgets);
+        await shot(tester, '05b_note_origin');
+        await tester.tap(find.text('원본 열기').first);
+        await settle(tester);
+        expect(container.read(selectedNoteProvider), startsWith('r_'), reason: '[원본 열기]가 세션 축약본을 열어야 한다');
+        await shot(tester, '05c_origin_raw');
+        container.read(selectedNoteProvider.notifier).select(notes.first.id);
+        await settle(tester);
+      }
       // 목록에서 고른 노트의 연결 호, 주제를 눌렀을 때 주제 사이 호
       await tester.tap(find.text('목록').first);
       await settle(tester);

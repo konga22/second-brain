@@ -137,6 +137,7 @@ class _NoteDetail extends ConsumerWidget {
     final text = file.existsSync() ? file.readAsStringSync() : '';
     final note = Note.parse(text, fallbackId: doc.id, fallbackTitle: doc.title);
     final isRaw = doc.kind == 'raw';
+    final origins = resolveOrigins(ref.watch(vaultProvider), note);
     final links = [
       for (final link in ref.watch(linksProvider))
         if (link.fromId == id || link.toId == id)
@@ -187,7 +188,7 @@ class _NoteDetail extends ConsumerWidget {
         ],
         const SizedBox(height: 6),
         Text(
-          '출처 ${note.source} · 만듦 ${stamp(note.created ?? doc.mtime)} · 고침 ${stamp(note.updated ?? note.created ?? doc.mtime)} · 연결 ${links.length}',
+          '출처 ${origins.isEmpty ? note.source : origins.first.shortLabel} · 만듦 ${stamp(note.created ?? doc.mtime)} · 고침 ${stamp(note.updated ?? note.created ?? doc.mtime)} · 연결 ${links.length}',
           style: theme.textTheme.muted.copyWith(fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -274,9 +275,14 @@ class _NoteDetail extends ConsumerWidget {
         ],
         if (note.sources.isNotEmpty) ...[
           const SizedBox(height: 16),
-          _SectionTitle(icon: LucideIcons.fileText, label: '근거 원본'),
-          for (final source in note.sources)
-            Text(source, style: theme.textTheme.muted.copyWith(fontSize: 12, fontFamily: 'Menlo')),
+          _SectionTitle(icon: LucideIcons.fileText, label: '출처 — 이 지식이 나온 곳'),
+          for (final origin in origins)
+            _OriginRow(
+              origin: origin,
+              onOpen: origin.rawId != null && origin.rawId != id && index.byId(origin.rawId!) != null
+                  ? () => ref.read(selectedNoteProvider.notifier).select(origin.rawId)
+                  : null,
+            ),
         ],
         if (relatedLessons.isNotEmpty) ...[
           const SizedBox(height: 16),
@@ -294,6 +300,77 @@ class _NoteDetail extends ConsumerWidget {
   }
 }
 
+
+/// 출처 한 건: 도구·프로젝트 / 세션 제목 / 날짜·세션 id·대화 수 / 경로. 원본이 있으면 눌러서 연다.
+class _OriginRow extends StatelessWidget {
+  const _OriginRow({required this.origin, this.onOpen});
+
+  final NoteOrigin origin;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final muted = TextStyle(fontSize: 11, color: colors.textMuted);
+    final isSession = origin.kind == NoteOriginKind.session;
+    final box = Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: colors.surfaceRaised, borderRadius: BorderRadius.circular(8)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isSession ? LucideIcons.messagesSquare : LucideIcons.fileText,
+                size: 13,
+                color: colors.accentText,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  origin.shortLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (onOpen != null) Text('원본 열기', style: TextStyle(fontSize: 11, color: colors.accentText)),
+            ],
+          ),
+          if (isSession && origin.title != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                origin.title!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          if (origin.detail.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 3), child: Text(origin.detail, style: muted)),
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              origin.path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: colors.textFaint, fontFamily: 'Menlo'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onOpen == null) return box;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: onOpen, child: box),
+    );
+  }
+}
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.icon, required this.label});
