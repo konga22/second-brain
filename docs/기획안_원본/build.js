@@ -16,9 +16,15 @@ const DOC_TITLE = meta.docTitle || `${meta.title} 기획안`;
 
 const FONT = 'Malgun Gothic';
 const FONT_ATTR = { ascii: FONT, eastAsia: FONT, hAnsi: FONT, cs: FONT };
-const C = {
+// meta.theme === 'brain'이면 앱 디자인 기준(설계서 3.2: 차분한 도구형, 보라 포인트 1색, Pretendard)으로 만든다.
+// 기획안(content.js)은 theme이 없어 예전 모양 그대로다.
+const BRAIN = meta.theme === 'brain';
+const C = BRAIN ? {
+  navy: '18181B', accent: '6D28D9', text: '18181B', gray: '71717A',
+  head: 'F4F4F6', border: 'E4E4E7', callout: 'FAFAFA', terms: 'FAFAFA', bar: 'D4D4D8',
+} : {
   navy: '1F3A5F', accent: '2E6DB4', text: '222222', gray: '666666',
-  head: 'DCE6F2', border: 'B8C4D2', callout: 'EEF3F9', terms: 'F6F7F9',
+  head: 'DCE6F2', border: 'B8C4D2', callout: 'EEF3F9', terms: 'F6F7F9', bar: '2E6DB4',
 };
 const CONTENT_W = 9638; // A4 너비 11906 - 좌우 여백 1134 * 2
 const IMG_W = 640;
@@ -128,7 +134,7 @@ function docBlock(b) {
       return [new Paragraph({
         heading: HeadingLevel.HEADING_1,
         pageBreakBefore: Boolean(b.breakBefore),
-        border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: C.accent, space: 4 } },
+        border: { bottom: { style: BorderStyle.SINGLE, size: BRAIN ? 4 : 12, color: BRAIN ? C.bar : C.accent, space: 4 } },
         children: [new TextRun({ text: b.text })],
       })];
     case 'h2':
@@ -153,7 +159,7 @@ function docBlock(b) {
       return [boxTable([
         new Paragraph({ spacing: { before: 40, after: 80 }, children: [new TextRun({ text: b.title, bold: true, color: C.accent, size: 21 })] }),
         ...b.items.map((t) => bulletPara(t, 19)),
-      ], C.callout, C.accent), spacer()];
+      ], C.callout, C.bar), spacer()];
     case 'terms':
       return [boxTable([
         new Paragraph({ spacing: { before: 20, after: 60 }, children: [new TextRun({ text: '용어 설명', bold: true, color: C.gray, size: 18 })] }),
@@ -187,7 +193,7 @@ function coverDoc() {
       children: [new TextRun({ text: meta.title, bold: true, color: C.navy, size: 60 }), new TextRun({ text: `  ${meta.tentative}`, color: C.gray, size: 26 })],
     }),
     new Paragraph({
-      border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: C.navy, space: 8 } },
+      border: { bottom: { style: BorderStyle.SINGLE, size: BRAIN ? 4 : 18, color: BRAIN ? C.bar : C.navy, space: 8 } },
       spacing: { after: 600 },
       children: [new TextRun({ text: meta.subtitle, color: C.gray, size: 24 })],
     }),
@@ -211,7 +217,7 @@ async function buildDocx(file) {
           paragraph: { spacing: { before: 360, after: 160 }, keepNext: true },
         },
         heading2: {
-          run: { font: FONT_ATTR, size: 23, bold: true, color: C.accent },
+          run: { font: FONT_ATTR, size: 23, bold: true, color: BRAIN ? C.text : C.accent },
           paragraph: { spacing: { before: 220, after: 100 }, keepNext: true },
         },
       },
@@ -266,7 +272,107 @@ function htmlBlock(b) {
   }
 }
 
+// ---- 앱 디자인 기준 테마 (주간 보고)
+const FONT_DIR = path.relative(WORK, path.resolve(__dirname, '../../assets/fonts/pretendard')).split(path.sep).join('/');
+const MARK = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 11.5 8 4.5l4.5 5M4 11.5l8.5-2" stroke="#a78bfa" stroke-width="1.1"/><circle cx="8" cy="4.5" r="2.1" fill="#7c3aed"/><circle cx="4" cy="11.5" r="1.7" fill="#7c3aed"/><circle cx="12.5" cy="9.5" r="1.4" fill="#7c3aed"/></svg>';
+
+// "**이름**: 내용" 꼴 항목은 이름·내용 두 칸으로 나눠 그린다.
+function propRows(items) {
+  return items.map((t) => {
+    const m = /^\*\*(.+?)\*\*\s*:\s*(.*)$/s.exec(t);
+    return m ? `<div class="row"><div class="k">${esc(m[1])}</div><div class="v">${html(m[2])}</div></div>`
+      : `<div class="row one"><div class="v">${html(t)}</div></div>`;
+  }).join('');
+}
+
+function brainTable(b) {
+  const center = new Set(b.center || []);
+  const total = b.widths.reduce((a, w) => a + w, 0);
+  const cols = b.widths.map((w) => `<col style="width:${((w / total) * 100).toFixed(2)}%">`).join('');
+  const cls = (i) => (center.has(i) ? ' class="c"' : '');
+  const head = b.header.map((h, i) => `<th${cls(i)}>${html(h)}</th>`).join('');
+  const body = b.rows.map((r) => `<tr>${r.map((v, i) => `<td${cls(i)}>${html(v)}</td>`).join('')}</tr>`).join('');
+  return `<table><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function brainBlock(b) {
+  switch (b.type) {
+    case 'h1': {
+      const m = /^(\d+)\.\s*(.*)$/.exec(b.text);
+      const inner = m ? `<span class="n">${m[1].padStart(2, '0')}</span>${esc(m[2])}` : esc(b.text);
+      return `<h1${b.breakBefore ? ' class="break"' : ''}>${inner}</h1>`;
+    }
+    case 'table': return brainTable(b);
+    case 'callout': return `<div class="cap">${esc(b.title)}</div><div class="props key">${propRows(b.items)}</div>`;
+    case 'terms': return `<div class="cap">용어</div><div class="props terms">${propRows(b.items)}</div>`;
+    default: return htmlBlock(b);
+  }
+}
+
+function buildHtmlBrain(file) {
+  const info = meta.info.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+  const face = [['Regular', 400], ['Medium', 500], ['SemiBold', 600], ['Bold', 700]]
+    .map(([n, w]) => `@font-face { font-family: Pretendard; font-weight: ${w}; src: url("${FONT_DIR}/Pretendard-${n}.otf") format("opentype"); }`).join('\n  ');
+  const css = `
+  ${face}
+  @page { size: A4; margin: 18mm 18mm 16mm; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+  body { font-family: Pretendard, "Apple SD Gothic Neo", sans-serif; font-size: 9.4pt; line-height: 1.62; color: #18181b; margin: 0; word-break: keep-all; font-variant-numeric: tabular-nums; }
+  strong { font-weight: 600; }
+  .head { padding-bottom: 16px; border-bottom: 1px solid #d4d4d8; }
+  .head .label { display: flex; align-items: center; gap: 6px; font-size: 8.4pt; font-weight: 600; color: #6d28d9; }
+  .head .title { font-size: 21pt; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; margin-top: 12px; }
+  .head .title small { font-size: 9.5pt; font-weight: 400; color: #a1a1aa; margin-left: 7px; letter-spacing: 0; }
+  .head .subtitle { color: #52525b; font-size: 11pt; margin-top: 3px; }
+  .head .meta { display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 10px 20px; margin-top: 18px; }
+  .head .meta span { display: block; font-size: 7.4pt; font-weight: 500; color: #a1a1aa; line-height: 1.4; }
+  .head .meta b { font-weight: 500; font-size: 8.8pt; }
+  h1 { display: flex; align-items: baseline; gap: 9px; font-size: 12.5pt; font-weight: 700; letter-spacing: -0.01em; margin: 26px 0 8px; break-after: avoid; }
+  h1 .n { font-size: 8.4pt; font-weight: 600; color: #7c3aed; letter-spacing: 0.02em; }
+  h1.break { break-before: page; margin-top: 0; }
+  h2 { font-size: 10.2pt; font-weight: 600; margin: 16px 0 4px; break-after: avoid; }
+  p { margin: 4px 0 8px; }
+  p.note { font-size: 8.2pt; color: #71717a; margin: 2px 0 6px; }
+  ul, ol { margin: 4px 0 10px; padding-left: 18px; }
+  li { margin: 5px 0; padding-left: 2px; }
+  ol li::marker { color: #7c3aed; font-weight: 600; font-size: 8.6pt; }
+  table { width: 100%; border-collapse: collapse; margin: 2px 0 8px; font-size: 8.6pt; line-height: 1.5; }
+  th { text-align: left; font-size: 7.6pt; font-weight: 600; color: #71717a; padding: 5px 12px 5px 0; border-bottom: 1px solid #d4d4d8; }
+  td { padding: 6px 12px 6px 0; border-bottom: 1px solid #ececef; vertical-align: top; color: #3f3f46; }
+  td:first-child { color: #18181b; font-weight: 500; }
+  th:last-child, td:last-child { padding-right: 0; }
+  th.c, td.c { text-align: center; padding-left: 4px; padding-right: 4px; }
+  td strong { color: #18181b; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .cap { font-size: 7.6pt; font-weight: 600; color: #71717a; margin: 12px 0 4px; break-after: avoid; }
+  .props { border: 1px solid #e4e4e7; border-radius: 8px; background: #fafafa; padding: 2px 14px; margin: 0 0 6px; break-inside: avoid; }
+  .props .row { display: grid; grid-template-columns: 78px 1fr; gap: 14px; padding: 7px 0; border-bottom: 1px solid #ececef; }
+  .props .row:last-child { border-bottom: 0; }
+  .props .row.one { grid-template-columns: 1fr; }
+  .props .k { font-size: 8.4pt; font-weight: 600; color: #6d28d9; }
+  .props .v { color: #3f3f46; }
+  .props.terms { font-size: 8.4pt; }
+  .props.terms .row { grid-template-columns: 132px 1fr; padding: 5px 0; }
+  .props.terms .k { font-size: 8.2pt; color: #52525b; }
+  figure { margin: 10px 0 14px; text-align: center; break-inside: avoid; }
+  figure img { width: 100%; }
+  figcaption { font-size: 8.2pt; color: #71717a; margin-top: 4px; }
+  `;
+  const doc = `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>${esc(DOC_TITLE)}</title><style>${css}</style></head><body>
+  <header class="head">
+    <div class="label">${MARK}${esc(meta.label)}</div>
+    <div class="title">${esc(meta.title)}<small>${esc(meta.tentative)}</small></div>
+    <div class="subtitle">${esc(meta.subtitle)}</div>
+    <div class="meta">${info}</div>
+  </header>
+  ${blocks.map(brainBlock).join('\n')}
+  </body></html>`;
+  fs.writeFileSync(file, doc);
+}
+
 function buildHtml(file) {
+  if (BRAIN) return buildHtmlBrain(file);
   const toc = blocks.filter((b) => b.type === 'h1').map((b) => `<li>${esc(b.text)}</li>`).join('');
   const info = meta.info.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('');
   const css = `
