@@ -170,7 +170,8 @@ function docBlock(b) {
       return [
         new Paragraph({
           alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 },
-          children: [new ImageRun({ type: 'png', data, transformation: { width: IMG_W, height: Math.round(IMG_W * 760 / 1600) } })],
+          // 그림마다 비율이 다르다 (앱 화면 1600×1000 등): PNG 머리(IHDR)에서 가로·세로를 읽는다.
+          children: [new ImageRun({ type: 'png', data, transformation: { width: IMG_W, height: Math.round(IMG_W * data.readUInt32BE(20) / data.readUInt32BE(16)) } })],
         }),
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: runs(b.caption, { size: 17, color: C.gray }) }),
       ];
