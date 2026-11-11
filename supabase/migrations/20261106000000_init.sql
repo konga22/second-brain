@@ -81,3 +81,14 @@ $$;
 -- 사용량 함수는 서비스 키로만 부른다.
 revoke execute on function public.consume_ai_call(uuid, text, int) from public, anon, authenticated;
 revoke execute on function public.consume_verify_call(uuid, date, int) from public, anon, authenticated;
+
+-- 권한 부여 (11/11 독립 검토 S-1). 2026-05-30 이후 만든 Supabase 프로젝트는 public 표를 API 역할에
+-- 자동으로 열어 주지 않는다는 변경이 있다(검토자가 Supabase 변경 기록으로 확인, 이 프로젝트 설정은 대시보드 확인 필요).
+-- 어느 설정이든 해가 없도록 필요한 권한을 직접 준다. 쓰기는 서비스 키(Edge Function)만.
+grant select on public.profiles, public.usage, public.verify_usage to authenticated;
+grant select, insert, update on public.profiles, public.usage, public.verify_usage to service_role;
+grant execute on function public.consume_ai_call(uuid, text, int) to service_role;
+grant execute on function public.consume_verify_call(uuid, date, int) to service_role;
+
+-- 마이그레이션 전에 가입한 계정도 요금제 행을 갖게 한다 (S-9: 없으면 모의 결제가 0행 update로 조용히 실패).
+insert into public.profiles (id) select id from auth.users on conflict (id) do nothing;
