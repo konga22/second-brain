@@ -23,9 +23,11 @@ class VaultSummary {
   /// 온보딩 요약 최대 글자 수. 한글 1글자 ≈ 1토큰으로 보고 150토큰 안에 둔다.
   static const profileMaxChars = 300;
 
+  /// 부르는 쪽(노트 저장·`brain index`·실수 노트 승인)은 바로 앞에서 색인을 맞춘다. 여기서 다시 맞추면
+  /// 방금 쓴 폴더의 시각 때문에 전체 동기화가 한 번 더 돌아 1만 개에서 저장 1회에 약 80ms가 더 들었다 (11/12 측정, O-5).
   void writeAll() {
     // 자주 받은 교정: 적용 중인 실수 노트를 근거(지킨 횟수 + 다시 교정된 횟수)가 많은 순으로.
-    final lessons = LessonStore(vault, index).all(status: LessonStatus.active)
+    final lessons = LessonStore(vault, index, syncOnRead: false).all(status: LessonStatus.active)
       ..sort(
         (a, b) => (b.kept + b.recorrected).compareTo(a.kept + a.recorrected),
       );
@@ -91,7 +93,14 @@ class VaultSummary {
 
   void _writeIfChanged(String path, String content) {
     final file = File(path);
-    if (file.existsSync() && file.readAsStringSync() == content) return;
+    if (file.existsSync()) {
+      final old = file.readAsStringSync();
+      if (old == content) return;
+      // 우리가 만든 파일(첫 줄에 "(자동 생성)")만 다시 쓴다. 이미 있던 폴더(Obsidian 등)를 지식 폴더로 고르면
+      // 사용자의 index.md·_profile.md를 사본 없이 덮어썼다 (11/11 K-33).
+      final firstLine = old.split('\n').first;
+      if (!firstLine.contains('(자동 생성)')) return;
+    }
     writeFileAtomic(path, content);
   }
 }

@@ -18,6 +18,7 @@
         "hooks": [
           {
             "type": "command",
+            "if": "Bash(brain *)",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/brain\" hook pre-tool",
             "timeout": 3
           }

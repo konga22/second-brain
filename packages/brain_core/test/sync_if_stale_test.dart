@@ -36,12 +36,22 @@ void main() {
     expect(index.search('롤백 순서').map((d) => d.title), contains('롤백 순서'));
   });
 
+  int? syncedAt() {
+    final rows = index.db.select("select value from index_meta where key = 'synced_at'");
+    return rows.isEmpty ? null : rows.first['value'] as int;
+  }
+
   test('아무것도 안 바뀌면 전체 동기화를 건너뛴다', () async {
     write('wiki/결제/웹훅 재시도.md', '웹훅 재시도');
-    index.sync();
+    // 폴더 시각이 마지막 동기화보다 1초 넘게 앞서야 "안 바뀜"이다 (1초 여유를 둔다).
     await Future<void>.delayed(const Duration(milliseconds: 1100));
+    index.sync();
+    final before = syncedAt();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
     final r = index.syncIfStale();
     expect(r.added + r.updated + r.removed, 0);
+    // 바뀐 것이 0이어도 전체 동기화를 탔으면 synced_at이 바뀐다. 예전 시험은 이것을 보지 않아 빈 통과였다 (11/11 K-38).
+    expect(syncedAt(), before, reason: '전체 동기화를 타면 안 된다');
   });
 
   test('지운 노트는 빠른 동기화에서 빠진다', () async {

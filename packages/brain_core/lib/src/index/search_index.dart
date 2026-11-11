@@ -124,9 +124,44 @@ class SearchIndex {
   factory SearchIndex.open(Vault vault, {String? path}) {
     final dbPath = path ?? vault.indexPath;
     Directory(p.dirname(dbPath)).createSync(recursive: true);
+    Database db;
+    try {
+      db = _openDb(dbPath);
+    } on SqliteException catch (e) {
+      // 색인 파일이 깨졌으면(11 CORRUPT, 26 NOTADB) 지우고 새로 만든다. 색인은 원본(md)에서 언제든 다시 만들 수 있다
+      // (설계서 5.7). 예전에는 앱이 예외 화면에서 멈췄다 (11/11 K-32). 그래프 위치·세션 요약 캐시는 다시 계산된다.
+      if (e.resultCode != 11 && e.resultCode != 26) rethrow;
+      for (final suffix in ['', '-wal', '-shm']) {
+        final file = File('$dbPath$suffix');
+        if (file.existsSync()) file.deleteSync();
+      }
+      db = _openDb(dbPath);
+    }
+    final index = SearchIndex._(vault, db);
+    final version = db.select('pragma user_version').first.values.first as int;
+    if (version < schemaVersion) {
+      index.rebuild();
+      db.execute('pragma user_version = $schemaVersion');
+    }
+    return index;
+  }
+
+  static Database _openDb(String dbPath) {
     final db = sqlite3.open(dbPath);
+    try {
+      _createSchema(db);
+      return db;
+    } on Object {
+      db.close();
+      rethrow;
+    }
+  }
+
+  static void _createSchema(Database db) {
+    // 기다리기 설정을 먼저 한다: journal_mode를 바꾸는 순간에도 다른 프로세스가 WAL을 복구하고 있으면
+    // 기다리지 않고 BUSY_RECOVERY(261)로 실패했다 (11/12 동시 brain add 8개 시험).
+    db.execute('pragma busy_timeout = 5000');
     db.execute('pragma journal_mode = wal');
-    db.execute('pragma busy_timeout = 2000');
     db.execute('''
       create table if not exists docs (
         rowid integer primary key,
@@ -177,13 +212,8 @@ class SearchIndex {
         primary key (from_rowid, to_rowid)
       );
     ''');
-    final index = SearchIndex._(vault, db);
-    final version = db.select('pragma user_version').first.values.first as int;
-    if (version < schemaVersion) {
-      index.rebuild();
-      db.execute('pragma user_version = $schemaVersion');
-    }
-    return index;
+    // 스키마를 읽는 것까지 해 봐야 깨진 파일을 알 수 있다
+    db.select('pragma user_version');
   }
 
   /// 색인 표 구조가 바뀌면 올린다. 열 때 낮으면 처음부터 다시 색인한다.
@@ -199,9 +229,26 @@ class SearchIndex {
   final Vault vault;
   final Database _db;
 
+  /// 마지막 [sync]에서 읽지 못해 건너뛴 파일 (지식 폴더 기준 경로와 이유).
+  /// UTF-8이 아닌 .md(옛 CP949 회의록 등)나 권한 없는 파일 하나 때문에 색인 전체가 멈추던 것을 막는다 (11/11 K-20).
+  /// `brain lint`·`brain doctor`·앱이 이 목록을 보여 준다.
+  List<(String, String)> unreadable = const [];
+
   Database get db => _db;
 
-  void close() => _db.close();
+  /// 자주 쓰는 SQL은 한 번만 준비해 다시 쓴다. `execute(sql, 인자)`는 부를 때마다 준비·해제해
+  /// 처음 색인(1만 개, 문장 약 7만 번)에서 시간이 컸다 (11/11 검토 O-9).
+  final _prepared = <String, PreparedStatement>{};
+
+  PreparedStatement _stmt(String sql) => _prepared[sql] ??= _db.prepare(sql);
+
+  void close() {
+    for (final statement in _prepared.values) {
+      statement.close();
+    }
+    _prepared.clear();
+    _db.close();
+  }
 
   /// 빠른 동기화: 폴더 수정 시각만 보고 바뀐 게 있을 때만 [sync]한다 (`brain find`·훅용).
   ///
@@ -210,8 +257,23 @@ class SearchIndex {
   /// 폴더 수정 시각이 바뀌므로 폴더 몇십 개만 보면 된다. 제자리에서 고친 파일은 폴더 시각이 안 바뀌므로
   /// [fullEvery]가 지나면 한 번은 전체를 본다 (앱이 켜져 있으면 폴더 감시로 바로 반영된다).
   SyncResult syncIfStale({Duration fullEvery = const Duration(minutes: 10)}) {
-    final last = _meta('synced_at');
     final now = DateTime.now().millisecondsSinceEpoch;
+    // 훅 한 번에 실수 노트 조회와 관련 노트 찾기가 각각 부른다. 방금 확인했으면 다시 훑지 않는다
+    // (노트 1만 개에서 한 번에 약 10ms, 11/11 검토 O-3). 바꾸는 쪽은 늘 sync()를 직접 부른다.
+    // 부른 쪽이 더 자주 전체를 보라고 하면(fullEvery가 2초보다 짧으면) 따른다.
+    const window = 2000;
+    final checked = _staleCheckedAt;
+    if (fullEvery.inMilliseconds > window && checked != null && now - checked >= 0 && now - checked < window) {
+      return const SyncResult(added: 0, updated: 0, removed: 0);
+    }
+    final result = _syncIfChanged(now, fullEvery);
+    _staleCheckedAt = now; // sync()가 지운 뒤에 적는다
+    return result;
+  }
+
+  SyncResult _syncIfChanged(int now, Duration fullEvery) {
+    _checkVaultExists();
+    final last = _meta('synced_at');
     if (last == null || now - last > fullEvery.inMilliseconds) return sync();
     final dirs = {
       vault.wikiDir,
@@ -233,12 +295,26 @@ class SearchIndex {
   }
 
   int? _meta(String key) {
-    final rows = _db.select('select value from index_meta where key = ?', [key]);
+    final rows = _db.select('select value from index_meta where key = ?', [
+      key,
+    ]);
     return rows.isEmpty ? null : rows.first['value'] as int;
   }
 
   /// 바뀐 md 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
+  /// 지식 폴더가 없는데 색인에 문서가 있으면 동기화하지 않는다 (지우면 모든 노트가 사라진 것처럼 보인다, K-32).
+  /// 색인이 비어 있으면(처음 쓰는 폴더) 지킬 것이 없으므로 그대로 둔다 — `brain add`가 폴더를 만든다.
+  void _checkVaultExists() {
+    if (Directory(vault.root).existsSync()) return;
+    if (_db.select('select 1 from docs limit 1').isNotEmpty) throw VaultMissingException(vault.root);
+  }
+
+  /// [syncIfStale]이 마지막으로 폴더를 확인한 시각 (같은 프로세스 안에서만).
+  int? _staleCheckedAt;
+
   SyncResult sync() {
+    _staleCheckedAt = null;
+    _checkVaultExists();
     final startedAt = DateTime.now().millisecondsSinceEpoch;
     final existing = {
       for (final row in _db.select(
@@ -248,6 +324,7 @@ class SearchIndex {
     };
     // 1) 지금 있는 파일을 모은다.
     final files = <(String, String, File)>[];
+    final rootPrefix = '${vault.root}${p.separator}';
     for (final (dir, kind) in [
       (vault.wikiDir, 'note'),
       (p.join(vault.root, 'raw'), 'raw'),
@@ -257,23 +334,32 @@ class SearchIndex {
       if (!root.existsSync()) continue;
       for (final entity in root.listSync(recursive: true, followLinks: false)) {
         if (entity is! File || !entity.path.endsWith('.md')) continue;
-        final rel = toNfc(p.relative(entity.path, from: vault.root));
-        if (p.split(rel).any((part) => part.startsWith('.'))) continue;
+        // 목록의 경로는 지식 폴더 경로로 시작하므로 잘라 쓴다. `p.relative`·`p.split`은 파일 1만 개에서
+        // 변경 없는 동기화(약 120ms)의 1/3을 차지했다 (11/12 측정). 모양이 다르면 예전 방법으로.
+        final rel = toNfc(
+          entity.path.startsWith(rootPrefix)
+              ? entity.path.substring(rootPrefix.length)
+              : p.relative(entity.path, from: vault.root),
+        );
+        final parts = rel.split('/');
+        if (parts.any((part) => part.startsWith('.'))) continue;
         // 자동 생성 목차·검증 기준 파일은 노트가 아니다.
-        if (p.basename(rel) == 'index.md') continue;
-        if (p.basename(rel).startsWith('_')) continue;
-        final docKind = kind == 'lesson' && p.split(rel).contains('tests')
+        final name = parts.last;
+        if (name == 'index.md') continue;
+        if (name.startsWith('_')) continue;
+        final docKind = kind == 'lesson' && parts.contains('tests')
             ? 'test'
             : kind;
         files.add((rel, docKind, entity));
       }
     }
     final seen = {for (final (rel, _, _) in files) rel};
+    final skipped = <(String, String)>[];
     var added = 0;
     var updated = 0;
     var removed = 0;
-    final changed = <int>[];
-    _db.execute('begin');
+    final changed = <(int, Note)>[];
+    _db.execute('begin immediate'); // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
     try {
       // 2) 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
       //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
@@ -290,7 +376,14 @@ class SearchIndex {
         if (old != null && old['mtime'] == mtime && old['size'] == stat.size) {
           continue;
         }
-        final content = file.readAsStringSync();
+        final String content;
+        try {
+          content = file.readAsStringSync();
+        } on FileSystemException catch (e) {
+          // 읽지 못한 파일은 건너뛰고(이전 색인 줄은 그대로) 목록으로 알린다.
+          skipped.add((rel, e.osError?.message ?? e.message));
+          continue;
+        }
         final hash = contentHash(content);
         if (old != null && old['hash'] == hash) {
           _db.execute('update docs set mtime = ?, size = ? where path = ?', [
@@ -301,7 +394,15 @@ class SearchIndex {
           continue;
         }
         changed.add(
-          _upsert(rel, kind, content, hash, mtime, stat.size, old?['rowid'] as int?),
+          _upsert(
+            rel,
+            kind,
+            content,
+            hash,
+            mtime,
+            stat.size,
+            old?['rowid'] as int?,
+          ),
         );
         old == null ? added++ : updated++;
       }
@@ -309,8 +410,8 @@ class SearchIndex {
       // 노트마다 조각 수백 개를 하나씩 물으면 1만 개에 200초가 넘게 걸렸다 (11/07 측정).
       if (changed.length >= 50) _loadVocab();
       try {
-        for (final rowid in changed) {
-          _suggestFor(rowid);
+        for (final (rowid, note) in changed) {
+          _suggestFor(rowid, note);
         }
       } finally {
         _vocab = null;
@@ -320,6 +421,7 @@ class SearchIndex {
         ['synced_at', startedAt],
       );
       _db.execute('commit');
+      unreadable = skipped;
       return SyncResult(added: added, updated: updated, removed: removed);
     } catch (_) {
       _db.execute('rollback');
@@ -352,7 +454,7 @@ class SearchIndex {
     );
   }
 
-  int _upsert(
+  (int, Note) _upsert(
     String rel,
     String kind,
     String content,
@@ -380,48 +482,43 @@ class SearchIndex {
     if (_db.select('select 1 from docs where id = ?', [id]).isNotEmpty) {
       id = 'f_${contentHash(rel)}';
     }
-    _db.execute(
+    _stmt(
       'insert into docs(id, path, kind, title, summary, tags, status, mtime, size, hash) '
       'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        id,
-        rel,
-        kind,
-        note.title,
-        note.summary,
-        note.tags.join(', '),
-        statusText,
-        mtime,
-        size,
-        hash,
-      ],
-    );
+    ).execute([
+      id,
+      rel,
+      kind,
+      note.title,
+      note.summary,
+      note.tags.join(', '),
+      statusText,
+      mtime,
+      size,
+      hash,
+    ]);
     final newRowid = _db.lastInsertRowId;
     final titleText = [note.title, ...note.aliases, ...note.tags].join(' ');
-    _db.execute(
+    _stmt(
       'insert into docs_fts(rowid, title_grams, body_grams) values (?, ?, ?)',
-      [
-        newRowid,
-        toBigrams(titleText),
-        toBigrams('${note.summary}\n${note.body}'),
-      ],
-    );
+    ).execute([
+      newRowid,
+      toBigrams(titleText),
+      toBigrams('${note.summary}\n${note.body}'),
+    ]);
     if (kind == 'note') {
       for (final name in {linkKey(note.title), ...note.aliases.map(linkKey)}) {
         if (name.isEmpty) continue;
-        _db.execute('insert into doc_names(doc_rowid, name) values (?, ?)', [
-          newRowid,
-          name,
-        ]);
+        _stmt('insert into doc_names(doc_rowid, name) values (?, ?)')
+            .execute([newRowid, name]);
       }
       for (final target in parseWikiLinks(note.body)) {
-        _db.execute(
+        _stmt(
           'insert into link_targets(from_rowid, target, label) values (?, ?, ?)',
-          [newRowid, linkKey(target), target],
-        );
+        ).execute([newRowid, linkKey(target), target]);
       }
     }
-    return newRowid;
+    return (newRowid, note);
   }
 
   /// 실수 노트는 trigger → action을 제목으로, reason을 요약으로 색인한다.
@@ -444,44 +541,35 @@ class SearchIndex {
   ///
   /// 핵심 조각: 이 노트에 자주 나오고 전체 노트에는 드문 2글자 조각·영어 단어 상위 5개.
   /// 띄어쓰기를 건너 생긴 경계 조각은 원문에 그대로 없으므로 뺀다.
-  void _suggestFor(int rowid) {
-    _db.execute('delete from suggested_links where from_rowid = ?', [rowid]);
-    final rows = _db.select(
-      "select kind, path from docs where rowid = ? and kind = 'note'",
-      [rowid],
-    );
+  void _suggestFor(int rowid, Note note) {
+    _stmt('delete from suggested_links where from_rowid = ?').execute([rowid]);
+    final rows = _stmt(
+      "select kind from docs where rowid = ? and kind = 'note'",
+    ).select([rowid]);
     if (rows.isEmpty) return;
-    final file = File(p.join(vault.root, rows.first['path'] as String));
-    if (!file.existsSync()) return;
-    final note = Note.parse(
-      file.readAsStringSync(),
-      fallbackId: '',
-      fallbackTitle: p.basenameWithoutExtension(file.path),
-    );
+    // 노트는 방금 색인할 때 읽고 푼 것을 그대로 쓴다 (예전에는 파일을 다시 읽고 다시 풀었다, 11/11 검토 O-9).
     final terms = keyTerms(note);
     if (terms.length < suggestMinShared) return;
     // 핵심 단어가 몇 개 겹치는지 센다. 핵심 단어는 드문 조각이라 결과가 많지 않다.
     final shared = <int, int>{};
     for (final term in terms) {
-      for (final row in _db.select(
+      for (final row in _stmt(
         'select f.rowid as rowid from docs_fts f join docs d on d.rowid = f.rowid '
         "where docs_fts match ? and d.kind = 'note' limit 500",
-        ['"$term"'],
-      )) {
+      ).select(['"$term"'])) {
         final other = row['rowid'] as int;
-        if (other != rowid) shared.update(other, (n) => n + 1, ifAbsent: () => 1);
+        if (other != rowid) {
+          shared.update(other, (n) => n + 1, ifAbsent: () => 1);
+        }
       }
     }
-    final candidates = shared.entries
-        .where((e) => e.value >= suggestMinShared)
-        .toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    final candidates =
+        shared.entries.where((e) => e.value >= suggestMinShared).toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
     for (final entry in candidates.take(suggestLimit)) {
-      _db.execute(
-        'insert or replace into suggested_links(from_rowid, to_rowid, score) '
-        'values (?, ?, ?)',
-        [rowid, entry.key, entry.value / terms.length],
-      );
+      _stmt(
+        'insert or replace into suggested_links(from_rowid, to_rowid, score) values (?, ?, ?)',
+      ).execute([rowid, entry.key, entry.value / terms.length]);
     }
   }
 
@@ -489,16 +577,32 @@ class SearchIndex {
   List<String> keyTerms(Note note, {int limit = 5}) {
     final text = '${note.title}\n${note.summary}\n${note.body}';
     final original = toNfc(text).toLowerCase();
+    // 원문에 붙어 있는 두 글자 쌍. 경계 조각(띄어쓰기를 건너 생긴 조각)은 여기 없다.
+    // 예전에는 조각마다 `original.contains`로 본문 전체를 훑어 길이의 제곱에 가깝게 느려졌다 (11/11 검토 O-9·K 코어 14).
+    final runes = original.runes.toList();
+    final pairs = <String>{
+      for (var i = 0; i + 1 < runes.length; i++)
+        String.fromCharCodes([runes[i], runes[i + 1]]),
+    };
     final counts = <String, int>{};
     for (final gram in toBigrams(text).split(' ')) {
-      if (gram.runes.length < 2) continue;
-      if (!original.contains(gram)) continue; // 경계 조각 제외
+      final length = gram.runes.length;
+      if (length < 2) continue;
+      // 두 글자 조각만 경계일 수 있다 (영어 단어는 원문의 한 낱말이다).
+      if (length == 2 ? !pairs.contains(gram) : !original.contains(gram)) {
+        continue; // 경계 조각 제외
+      }
       counts.update(gram, (n) => n + 1, ifAbsent: () => 1);
     }
     if (counts.isEmpty) return const [];
     final vocab = _vocab;
-    final total = vocab?.total ??
-        (_db.select("select count(*) as n from docs where kind = 'note'").first['n']
+    final total =
+        vocab?.total ??
+        (_db
+                    .select(
+                      "select count(*) as n from docs where kind = 'note'",
+                    )
+                    .first['n']
                 as int)
             .clamp(1, 1 << 30);
     if (vocab == null) _ensureVocab();
@@ -508,10 +612,8 @@ class SearchIndex {
       if (vocab != null) {
         n = vocab.df[entry.key] ?? 1;
       } else {
-        final df = _db.select(
-          'select doc from docs_vocab where term = ?',
-          [entry.key],
-        );
+        final df = _stmt('select doc from docs_vocab where term = ?')
+            .select([entry.key]);
         n = df.isEmpty ? 1 : (df.first['doc'] as int);
       }
       if (n >= total && total > 3) continue; // 모든 노트에 나오는 조각은 의미 없음
@@ -533,8 +635,14 @@ class SearchIndex {
         for (final row in _db.select('select term, doc from docs_vocab'))
           row['term'] as String: row['doc'] as int,
       },
-      total: (_db.select("select count(*) as n from docs where kind = 'note'").first['n'] as int)
-          .clamp(1, 1 << 30),
+      total:
+          (_db
+                      .select(
+                        "select count(*) as n from docs where kind = 'note'",
+                      )
+                      .first['n']
+                  as int)
+              .clamp(1, 1 << 30),
     );
   }
 
@@ -603,7 +711,10 @@ class SearchIndex {
       'join docs f on f.rowid = l.from_rowid '
       'left join doc_names n on n.name = l.target where n.doc_rowid is null',
     ))
-      DeadLink(fromId: row['from_id'] as String, target: row['label'] as String),
+      DeadLink(
+        fromId: row['from_id'] as String,
+        target: row['label'] as String,
+      ),
   ];
 
   /// 그래프 위치 캐시 (설계서 4.2 `graph_pos`). 다음 실행 때 바로 그린다.
@@ -617,11 +728,16 @@ class SearchIndex {
 
   /// [base]는 전체 배치를 했을 때만 준다. 그때의 상태를 기록해 두고, 뒤에 배치가 얼마나 나빠졌는지 견준다
   /// (설계서 5.5 "꼬임 막기" v1.3.28).
-  void saveGraphPositions(Map<String, Point<double>> positions, {LayoutBase? base}) {
-    _db.execute('begin');
+  void saveGraphPositions(
+    Map<String, Point<double>> positions, {
+    LayoutBase? base,
+  }) {
+    _db.execute('begin immediate'); // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
     try {
       _db.execute('delete from graph_pos');
-      final insert = _db.prepare('insert into graph_pos(id, x, y) values (?, ?, ?)');
+      final insert = _db.prepare(
+        'insert into graph_pos(id, x, y) values (?, ?, ?)',
+      );
       for (final e in positions.entries) {
         insert.execute([e.key, e.value.x, e.value.y]);
       }
@@ -635,7 +751,10 @@ class SearchIndex {
           ('layout_cross', base.crossings),
           ('layout_stray', base.stray),
         ]) {
-          _db.execute('insert or replace into index_meta(key, value) values (?, ?)', [key, value]);
+          _db.execute(
+            'insert or replace into index_meta(key, value) values (?, ?)',
+            [key, value],
+          );
         }
       }
       _db.execute('commit');
@@ -648,7 +767,9 @@ class SearchIndex {
   /// 마지막 전체 배치의 기록. 없으면 null (이 기록을 남기기 전에 만든 배치이거나 아직 배치한 적 없음).
   LayoutBase? graphLayoutBase() {
     final values = {
-      for (final row in _db.select("select key, value from index_meta where key like 'layout_%'"))
+      for (final row in _db.select(
+        "select key, value from index_meta where key like 'layout_%'",
+      ))
         row['key'] as String: row['value'] as int,
     };
     if (values.length < 6) return null;
@@ -664,7 +785,7 @@ class SearchIndex {
 
   /// 저장된 위치와 배치 기록을 지운다. 다음에 그래프를 열 때 처음부터 다시 배치한다 ([다시 배치] 버튼).
   void clearGraphLayout() {
-    _db.execute('begin');
+    _db.execute('begin immediate'); // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
     try {
       _db.execute('delete from graph_pos');
       _db.execute("delete from index_meta where key like 'layout_%'");
@@ -766,7 +887,8 @@ class SearchIndex {
       "select id from docs where substr(id, 1, ?) = ?",
       [prefix.length, prefix],
     )) {
-      final n = int.tryParse((row['id'] as String).substring(prefix.length)) ?? 0;
+      final n =
+          int.tryParse((row['id'] as String).substring(prefix.length)) ?? 0;
       if (n > max) max = n;
     }
     return max;

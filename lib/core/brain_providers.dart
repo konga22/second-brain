@@ -72,12 +72,23 @@ class VaultRevision extends Notifier<int> {
           final rel = p.relative(event.path, from: vault.root);
           // 우리가 남기는 되돌리기 사본·휴지통·충돌 사본은 노트가 아니다.
           if (!rel.endsWith('.md') || rel.startsWith('_meta')) return;
+          // 자동 목차·온보딩 요약·변경 기록은 노트를 고칠 때 함께 쓰는 파일이라, 그것만으로 다시 그릴 일이 없다
+          // (같이 바뀐 노트 파일 이벤트가 따로 온다). 11/12 O-6: 저장 1회에 모든 계산이 두 번 돌던 원인 중 하나.
+          final name = p.basename(rel);
+          if (name == 'index.md' || name == '_profile.md' || rel.startsWith('_log')) return;
+          // 앱 안에서 방금 고친 것([bump] 뒤 2초 안)은 색인이 이미 맞고 번호도 이미 올렸다. 이때는 실제로
+          // 색인이 바뀐 게 있을 때만 올린다. 그 밖(CLI·편집기·자동 정리)은 예전처럼 바뀐 것 자체로 다시 그린다.
+          _pendingForce |= DateTime.now().isAfter(_ownWriteUntil);
           _debounce?.cancel();
           // 대량 가져오기 때는 이벤트를 모아서 한 번에 처리한다. 색인 확인은 백그라운드에서 하고
           // 실제로 바뀐 게 있을 때만 번호를 올린다 (노트 1만 개에서 화면 스레드 140ms 멈춤을 없앰).
           // 바깥(CLI `brain add` 등)에서 생긴 파일은 그쪽이 색인을 이미 맞춰 확인 결과가 0일 수 있다 →
           // 파일이 바뀐 것 자체로 다시 그린다 (설계서 v1.3.24, 11/09 사용자 제보)
-          _debounce = Timer(const Duration(milliseconds: 300), () => _syncInBackground(force: true));
+          _debounce = Timer(const Duration(milliseconds: 300), () {
+            final force = _pendingForce;
+            _pendingForce = false;
+            _syncInBackground(force: force);
+          });
         });
     ref.onDispose(() {
       _debounce?.cancel();
@@ -89,9 +100,16 @@ class VaultRevision extends Notifier<int> {
   /// 앱 안에서 고친 뒤 부른다. 노트·실수 노트 저장(NoteStore·LessonStore)은 이미 색인을 맞췄으므로
   /// 바로 번호를 올리고, 앱 밖에서 바뀐 것(자동 정리가 만든 파일 등)은 백그라운드 확인으로 따라잡는다.
   void bump() {
+    _ownWriteUntil = DateTime.now().add(const Duration(seconds: 2));
     state++;
     _syncInBackground();
   }
+
+  /// 앱 안에서 고친 직후 이 시각까지 오는 폴더 이벤트는 앱이 쓴 파일로 본다.
+  var _ownWriteUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 모아 둔 폴더 이벤트 가운데 앱 밖에서 온 것이 있었나.
+  var _pendingForce = false;
 
   var _syncing = false;
   var _again = false;

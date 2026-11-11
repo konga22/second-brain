@@ -1,4 +1,24 @@
+import 'dart:typed_data';
+
 import '../text/nfc.dart';
+
+final _letterOrDigit = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
+/// 글자·숫자인지 기억해 두는 표 (기본 다국어 평면 65,536칸, 0 = 아직 모름, 1 = 예, 2 = 아니오).
+/// 예전에는 글자마다 정규식을 새로 만들어 검사해 처음 색인 시간의 큰 몫을 차지했다 (11/11 검토 O-2).
+/// 판정 규칙은 같은 정규식이라 결과는 그대로다.
+final _letterTable = Uint8List(0x10000);
+
+bool _isLetter(int rune) {
+  if (rune >= 0x10000) {
+    return _letterOrDigit.hasMatch(String.fromCharCode(rune));
+  }
+  final known = _letterTable[rune];
+  if (known != 0) return known == 1;
+  final isLetter = _letterOrDigit.hasMatch(String.fromCharCode(rune));
+  _letterTable[rune] = isLetter ? 1 : 2;
+  return isLetter;
+}
 
 /// 띄어쓰기를 무시한 2글자 분할 (설계서 4.2).
 ///
@@ -26,10 +46,7 @@ List<List<String>> _segments(String text) {
         (rune >= 0x30 && rune <= 0x39) ||
         (rune >= 0x61 && rune <= 0x7a) ||
         rune == 0x5f;
-    final isLetter =
-        !isAsciiWord &&
-        rune > 0x7f &&
-        RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(char);
+    final isLetter = !isAsciiWord && rune > 0x7f && _isLetter(rune);
     if (char == ' ' && kind == 'h' && !pendingSpace) {
       pendingSpace = true;
       continue;
@@ -154,7 +171,9 @@ List<String> _terms(String query) {
 ///
 /// "결제 실패 원인" → ("결제 제실 실패 패원 원인") OR ("결제" AND "실패" AND "원인")
 String? toBigramQuery(String query) {
-  final terms = _terms(query).map(_termExpression).whereType<String>().toList();
+  // 같은 식은 한 번만 넣는다 (순서 유지). 긴 오류 로그를 붙여넣으면 같은 단어가 수십 번 나와
+  // 조각 약 400개짜리 AND 질의가 되어 노트 1만 개에서 검색 한 번이 120ms를 넘었다 (11/12 측정).
+  final terms = _terms(query).map(_termExpression).whereType<String>().toSet().toList();
   if (terms.isEmpty) return null;
   if (terms.length == 1) return terms.first;
   final joined = _termExpression(_terms(query).join());
@@ -164,7 +183,7 @@ String? toBigramQuery(String query) {
 
 /// 느슨한 질의: 검색어 중 하나라도 맞으면 찾는다. 엄격한 결과가 모자랄 때 채운다.
 String? toRelaxedQuery(String query) {
-  final terms = _terms(query).map(_termExpression).whereType<String>().toList();
+  final terms = _terms(query).map(_termExpression).whereType<String>().toSet().toList();
   if (terms.length < 2) return null;
   return terms.join(' OR ');
 }
