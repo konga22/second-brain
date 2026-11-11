@@ -9,7 +9,17 @@ import 'search_index.dart';
 /// [isStrongMatch]보다 느슨하다. 규칙 비교(11/07, tool/strong_rules.dart): 정답 남김 17/20, 답 없음 맞힘 4/6.
 bool isRelevantMatch(String query, IndexedDoc doc, String body) {
   final heads = LessonStore.wordHeads(query);
-  if (heads.isEmpty) return false;
+  if (heads.isEmpty) {
+    // 한 글자 낱말뿐인 질문(`훅`, `맥`)은 단어 머리(2글자)가 없어 늘 "확실한 노트 없음"이었다 (11/11 K-28).
+    // 그 글자가 제목·요약·태그에 있으면 남긴다. 본문은 보지 않는다(한 글자는 본문 어디에나 섞여 있다).
+    final words = [
+      for (final w in toNfc(query).toLowerCase().split(RegExp(r'[\s?？!.,]+')))
+        if (w.isNotEmpty) w,
+    ];
+    if (words.isEmpty) return false;
+    final head = toNfc('${doc.title} ${doc.summary} ${doc.tags}').toLowerCase();
+    return words.every(head.contains);
+  }
   final text = toNfc('${doc.title} ${doc.summary} ${doc.tags} $body').toLowerCase();
   final matched = heads.where(text.contains).length;
   return matched >= 2 || heads.length == 1 && matched == 1;

@@ -62,6 +62,8 @@ void main() {
       environment: {
         'BRAIN_VAULT': vaultRoot,
         'BRAIN_CONFIG': configPath,
+        // Claude Code 세션 안에서 돌릴 때 그 세션 기록을 시험 폴더로 가져오지 않게
+        'CLAUDE_CODE_SESSION_ID': '',
       },
     );
     if (stdin != null) process.stdin.write(stdin);
@@ -192,6 +194,8 @@ void main() {
       'brain lint "--fix-safe" | head',
       // 목록에 없던 쓰기 경로
       'brain lesson checklist --add "항목" | head',
+      'brain lesson tests --remove T-0001 | head',
+      'brain lesson tests --remove=T-0001 2>&1',
       'brain lesson checklist "--add=항목" | head',
       'brain todo --source n_0001 suggest 할 일 | head',
       'brain todo -- add 할 일 | head',
@@ -264,6 +268,9 @@ void main() {
   test('만들기 요청: 안내 + 관련 노트 3개, 500자 이하', () async {
     final text = await prompt('결제 웹훅 재시도 기능 만들어 줘');
     print('[토큰] 만들기 요청 안내 ${text.length}자');
+    // 길이만 보면 출력이 0자여도 통과했다 (11/11 K-38). 안내와 관련 노트가 실제로 나왔는지 본다.
+    expect(text, contains('만들기 요청이다'));
+    expect(text.split('\n').where((l) => l.startsWith('- n_')), isNotEmpty);
     expect(text.length, lessThanOrEqualTo(500));
   });
 
@@ -296,6 +303,7 @@ void main() {
   test('brain find: 5줄·1,000자 이하', () async {
     final out = await brain(['find', '결제 웹훅 재시도']);
     print('[토큰] find ${out.length}자');
+    expect(out, contains('n_'), reason: '찾은 노트가 실제로 나와야 한다 (빈 출력 통과 방지, K-38)');
     expect(out.trim().split('\n').length, lessThanOrEqualTo(5));
     expect(out.length, lessThanOrEqualTo(1000));
   });

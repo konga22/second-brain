@@ -20,6 +20,15 @@ class NoteStoreException implements Exception {
   String toString() => message;
 }
 
+/// 고치는 사이 다른 곳(CLI·AI·편집기)에서 노트가 바뀌었다. 고친 내용은 [copyPath]에 남겼다.
+/// 앱은 이것을 보고 [덮어쓰기]·[최신 내용 불러오기]를 보여 준다 (11/11 K-34).
+class NoteConflictException extends NoteStoreException {
+  const NoteConflictException(super.message, this.copyPath);
+
+  /// 지식 폴더 기준 상대 경로.
+  final String copyPath;
+}
+
 /// 노트 읽기·쓰기. 모든 쓰기는 형식 검사·비밀값 가림·원자적 쓰기·변경 기록을 거친다.
 class NoteStore {
   NoteStore(this.vault, this.index);
@@ -42,6 +51,40 @@ class NoteStore {
       fallbackTitle: doc.title,
     );
     return (doc, note, contentHash(content));
+  }
+
+  /// 고칠 노트를 읽는다. 노트(`wiki/`)가 아니거나 frontmatter가 깨졌으면 거절한다.
+  ///
+  /// - 실수 노트·회귀 시험·원본(`raw/`)도 같은 색인에 있어 `brain write L-0001`이나 앱 타임라인의 [고치기]로
+  ///   노트처럼 다시 쓰였다. 그러면 승인 대기 규칙이 `status: active`가 되어 모든 세션에 들어갔다 (11/11 K-19).
+  /// - frontmatter를 읽지 못한 노트를 다시 쓰면 제목·요약·태그·출처가 기본값으로 바뀐다 (11/11 K-21).
+  (IndexedDoc, Note, String) _readForChange(String id) {
+    final found = read(id);
+    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final (doc, note, _) = found;
+    if (doc.kind != 'note') {
+      throw NoteStoreException(
+        doc.kind == 'raw'
+            ? '$id 문서는 원본(raw/)이라 고치지 않습니다. 원본에서 노트를 만들려면 brain add를 쓰세요.'
+            : '$id 문서는 실수 노트라 노트처럼 고칠 수 없습니다. 규칙 문장은 brain lesson edit, 상태는 앱의 [배운 것]에서 바꾸세요.',
+      );
+    }
+    if (note.isFrontmatterBroken) {
+      throw NoteStoreException(
+        '$id 노트의 머리말(frontmatter)을 읽지 못해 고치지 않습니다 (${doc.path}). '
+        '편집기로 열어 YAML을 고치세요 — 값에 쌍점(:)이 있으면 큰따옴표로 감쌉니다.',
+      );
+    }
+    return found;
+  }
+
+  /// 다음 노트 번호. 색인과 변경 기록 중 큰 쪽 + 1 — 지운 노트의 번호를 다시 쓰지 않는다 (11/11 K-26).
+  String nextNoteId() {
+    final max = [
+      index.maxNoteNumber(),
+      maxLoggedNumber(vault, 'n_'),
+    ].reduce((a, b) => a > b ? a : b);
+    return 'n_${(max + 1).toString().padLeft(4, '0')}';
   }
 
   /// 새 노트를 만든다. 반환: (id, 지식 폴더 기준 경로).
@@ -73,40 +116,54 @@ class NoteStore {
     if (body.trim().isEmpty) {
       throw const NoteStoreException('본문이 비었습니다 (표준 입력).');
     }
-    vault.ensure();
-    index.sync();
-    final id = 'n_${(index.maxNoteNumber() + 1).toString().padLeft(4, '0')}';
-    final now = DateTime.now();
-    final note = Note(
-      id: id,
-      title: maskSecrets(cleanTitle),
-      summary: maskSecrets(cleanSummary),
-      tags: [
-        for (final t in tags)
-          if (t.trim().isNotEmpty) t.trim(),
-      ],
-      aliases: [
-        for (final a in aliases)
-          if (a.trim().isNotEmpty) maskSecrets(a.trim()),
-      ],
-      source: source,
-      sources: sources,
-      created: now,
-      updated: now,
-      status: draft ? NoteStatus.draft : NoteStatus.active,
-      body: maskSecrets(body),
-    );
-    final dir = p.join(
-      vault.wikiDir,
-      topicDirName(topic ?? (note.tags.isEmpty ? null : note.tags.first)),
-    );
-    final path = uniqueNotePath(dir, note.title);
-    recordBeforeChange(vault, path, batch: batch);
-    writeFileAtomic(path, note.toMarkdown());
-    final rel = p.relative(path, from: vault.root);
-    appendChangeLog(vault, 'add', '$id ${note.status.value} $rel', batch: batch);
-    _afterChange();
-    return (id, rel);
+    // 번호를 정하고 저장해 색인에 들어갈 때까지 다른 프로세스가 끼어들지 않게 (K-26(다)).
+    return withVaultLock(vault, () {
+      vault.ensure();
+      index.sync();
+      final id = nextNoteId();
+      final now = DateTime.now();
+      final note = Note(
+        id: id,
+        title: maskSecrets(cleanTitle),
+        summary: maskSecrets(cleanSummary),
+        tags: [
+          for (final t in tags)
+            if (t.trim().isNotEmpty) maskSecrets(t.trim()),
+        ],
+        aliases: [
+          for (final a in aliases)
+            if (a.trim().isNotEmpty) maskSecrets(a.trim()),
+        ],
+        source: source,
+        sources: sources,
+        created: now,
+        updated: now,
+        status: draft ? NoteStatus.draft : NoteStatus.active,
+        body: maskSecrets(body),
+      );
+      final dir = p.join(
+        vault.wikiDir,
+        topicDirName(topic ?? (note.tags.isEmpty ? null : note.tags.first)),
+      );
+      final path = uniqueNotePath(dir, note.title);
+      recordBeforeChange(vault, path, batch: batch);
+      writeFileAtomic(path, note.toMarkdown());
+      final rel = p.relative(path, from: vault.root);
+      appendChangeLog(
+        vault,
+        'add',
+        '$id ${note.status.value} $rel',
+        batch: batch,
+      );
+      _afterChange();
+      // 색인에 안 들어갔으면 "저장함"이라고 하지 않는다 (찾을 수 없는 노트, 같은 id 재사용을 막는다).
+      if (index.byId(id) == null) {
+        throw NoteStoreException(
+          '$id를 저장했지만 색인에서 찾지 못했습니다 ($rel). brain index로 다시 맞춘 뒤 확인하세요.',
+        );
+      }
+      return (id, rel);
+    });
   }
 
   /// 본문을 바꾼다. 파일 해시가 기대와 다르면 거절하고 충돌 사본을 남긴다.
@@ -116,8 +173,7 @@ class NoteStore {
     required String expectHash,
     String? batch,
   }) {
-    final found = read(id);
-    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final found = _readForChange(id);
     final (doc, note, hash) = found;
     if (!hash.startsWith(expectHash) || expectHash.length < 6) {
       final conflict = p.join(
@@ -125,9 +181,10 @@ class NoteStore {
         'conflicts',
         '${id}_${DateTime.now().millisecondsSinceEpoch}.md',
       );
-      writeFileAtomic(conflict, newBody);
-      throw NoteStoreException(
+      writeFileAtomic(conflict, maskSecrets(newBody)); // 사본도 지식 폴더 안이다 (11/11 K-31)
+      throw NoteConflictException(
         '$id 노트가 그사이 바뀌었습니다 (지금 해시 $hash). 고친 내용은 ${p.relative(conflict, from: vault.root)}에 남겼습니다.',
+        p.relative(conflict, from: vault.root),
       );
     }
     final updated = note.copyWith(
@@ -156,8 +213,7 @@ class NoteStore {
     List<String> aliases = const [],
     String? batch,
   }) {
-    final found = read(id);
-    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final found = _readForChange(id);
     final (doc, note, hash) = found;
     if (hash != expectHash) {
       final conflict = p.join(
@@ -165,23 +221,47 @@ class NoteStore {
         'conflicts',
         '${id}_${DateTime.now().millisecondsSinceEpoch}.md',
       );
-      writeFileAtomic(conflict, body);
-      throw NoteStoreException(
-        '$id 노트가 그사이 다른 곳에서 바뀌었습니다. 고친 본문은 ${p.relative(conflict, from: vault.root)}에 남겼습니다.',
+      // 본문만 남기면 고친 제목·요약·태그가 사라졌다 (11/11 K-34). 고치려던 노트 전체를 남기고, 가림도 거친다 (K-31).
+      final attempted = note.copyWith(
+        title: maskSecrets(title.trim()),
+        summary: maskSecrets(summary.trim()),
+        tags: [
+          for (final t in tags)
+            if (t.trim().isNotEmpty) maskSecrets(t.trim()),
+        ],
+        aliases: [
+          for (final a in aliases)
+            if (a.trim().isNotEmpty) maskSecrets(a.trim()),
+        ],
+        body: maskSecrets(body),
+      );
+      writeFileAtomic(conflict, attempted.toMarkdown());
+      throw NoteConflictException(
+        '$id 노트가 그사이 다른 곳에서 바뀌었습니다. 고친 내용(제목·요약·태그·본문)은 ${p.relative(conflict, from: vault.root)}에 남겼습니다.',
+        p.relative(conflict, from: vault.root),
       );
     }
     final cleanTitle = title.trim();
     final cleanSummary = summary.trim();
     if (cleanTitle.isEmpty) throw const NoteStoreException('제목이 비었습니다.');
     if (cleanSummary.runes.length > 60) {
-      throw NoteStoreException('요약 줄은 60자 이내여야 합니다 (지금 ${cleanSummary.runes.length}자).');
+      throw NoteStoreException(
+        '요약 줄은 60자 이내여야 합니다 (지금 ${cleanSummary.runes.length}자).',
+      );
     }
     final batchId = batch ?? newBatchId();
     final updated = note.copyWith(
       title: maskSecrets(cleanTitle),
       summary: maskSecrets(cleanSummary),
-      tags: [for (final t in tags) if (t.trim().isNotEmpty) t.trim()],
-      aliases: [for (final a in aliases) if (a.trim().isNotEmpty) a.trim()],
+      // 태그·별칭도 가린다: 앱 편집 화면에서 들어온다 (11/11 K-31)
+      tags: [
+        for (final t in tags)
+          if (t.trim().isNotEmpty) maskSecrets(t.trim()),
+      ],
+      aliases: [
+        for (final a in aliases)
+          if (a.trim().isNotEmpty) maskSecrets(a.trim()),
+      ],
       body: maskSecrets(body),
       updated: DateTime.now(),
     );
@@ -252,8 +332,7 @@ class NoteStore {
 
   /// 노트를 다른 주제 폴더로 옮긴다. id·제목이 그대로라 `[[링크]]`는 깨지지 않는다.
   String move(String id, String topic, {String? batch}) {
-    final found = read(id);
-    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final found = _readForChange(id);
     final (doc, note, _) = found;
     final target = topicDirName(topic);
     if (doc.topic == target) return doc.path;
@@ -265,7 +344,12 @@ class NoteStore {
     Directory(p.dirname(to)).createSync(recursive: true);
     from.renameSync(to);
     final rel = p.relative(to, from: vault.root);
-    appendChangeLog(vault, 'move', '$id ${doc.topic} → $target', batch: batchId);
+    appendChangeLog(
+      vault,
+      'move',
+      '$id ${doc.topic} → $target',
+      batch: batchId,
+    );
     _afterChange();
     return rel;
   }
@@ -277,10 +361,15 @@ class NoteStore {
     final topicOf = {for (final d in index.notes()) d.id: d.topic};
     final votes = <String, Map<String, int>>{};
     for (final link in index.links()) {
-      for (final (a, b) in [(link.fromId, link.toId), (link.toId, link.fromId)]) {
+      for (final (a, b) in [
+        (link.fromId, link.toId),
+        (link.toId, link.fromId),
+      ]) {
         final t = topicOf[b];
         if (t == null || !topicOf.containsKey(a)) continue;
-        votes.putIfAbsent(a, () => {}).update(t, (n) => n + 1, ifAbsent: () => 1);
+        votes
+            .putIfAbsent(a, () => {})
+            .update(t, (n) => n + 1, ifAbsent: () => 1);
       }
     }
     final out = <(String, String, String, int)>[];
@@ -298,8 +387,7 @@ class NoteStore {
 
   /// 노트를 지운다. 실제로는 `_meta/trash/<묶음>/`으로 옮겨서 `brain undo`로 되살릴 수 있다.
   String delete(String id, {String? batch}) {
-    final found = read(id);
-    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final found = _readForChange(id);
     final (doc, _, _) = found;
     final batchId = batch ?? newBatchId();
     final file = fileOf(doc);
@@ -314,15 +402,19 @@ class NoteStore {
 
   /// 정리 대기 → 정리됨 같은 상태 바꾸기.
   void setStatus(String id, NoteStatus status, {String? batch}) {
-    final found = read(id);
-    if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+    final found = _readForChange(id);
     final (doc, note, _) = found;
     recordBeforeChange(vault, fileOf(doc).path, batch: batch);
     writeFileAtomic(
       fileOf(doc).path,
       note.copyWith(status: status, updated: DateTime.now()).toMarkdown(),
     );
-    appendChangeLog(vault, 'status', '$id ${status.value} ${doc.path}', batch: batch);
+    appendChangeLog(
+      vault,
+      'status',
+      '$id ${status.value} ${doc.path}',
+      batch: batch,
+    );
     _afterChange();
   }
 

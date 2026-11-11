@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../core/brain_providers.dart';
 import '../../shared/date_text.dart';
+import '../../shared/safe_set_state.dart';
 
 /// 되돌리기·휴지통 (설계서 3.0 E5). 최근 작업 묶음을 무엇을 했는지와 함께 보여 주고 되돌린다.
 /// 휴지통(`_meta/trash/`)은 쌓이기만 해서 30일 지난 묶음을 비울 수 있게 한다 (확인 후, 되돌릴 수 없음).
@@ -18,7 +19,7 @@ class UndoTrashCard extends ConsumerStatefulWidget {
   ConsumerState<UndoTrashCard> createState() => _UndoTrashCardState();
 }
 
-class _UndoTrashCardState extends ConsumerState<UndoTrashCard> {
+class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState<UndoTrashCard> {
   static const keepDays = 30;
   String? _message;
 
@@ -110,7 +111,7 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> {
                 children: [
                   Expanded(
                     child: Text(
-                      '${time(b.at)}  ${summaries[b.id] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
+                      '${time(b.at)}  ${summaries[b.id] ?? summaries[b.id.replaceFirst(RegExp(r'-u\d+$'), '')] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
                       style: theme.textTheme.small,
                       overflow: TextOverflow.ellipsis,
                     ),

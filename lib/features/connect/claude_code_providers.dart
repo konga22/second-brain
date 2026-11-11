@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/brain_providers.dart';
 import '../../core/session_listing.dart';
 import '../../core/claude_code.dart';
+import 'auto_tidy.dart';
 
 /// Claude Code가 있는지, 플러그인이 깔렸는지.
 final claudeCodeStatusProvider = FutureProvider<ClaudeCodeStatus>(
@@ -139,7 +140,14 @@ class PastSessionsController extends Notifier<PastSessionsState> {
   Future<void> load() async {
     final vault = ref.read(vaultProvider);
     state = state.copyWith(isLoading: true, clearError: true);
-    final sessions = await listSessionsInBackground(vault.root, vault.indexPath);
+    final List<ClaudeSession> sessions;
+    try {
+      sessions = await listSessionsInBackground(vault.root, vault.indexPath);
+    } on Object catch (e) {
+      // 실패하면 "세션 기록 읽는 중…"에 멈추지 않고 알린다. 버튼을 다시 누를 수 있다 (11/11 K-37).
+      state = state.copyWith(isLoading: false, error: '세션 기록을 읽지 못했습니다: $e');
+      return;
+    }
     state = state.copyWith(
       sessions: sessions,
       statuses: SessionRegistry(vault).load(),
@@ -155,6 +163,9 @@ class PastSessionsController extends Notifier<PastSessionsState> {
       state = state.copyWith(condensedChars: sizes);
     } on Object catch (e) {
       debugPrint('[지난 대화 정리] 비용 어림 실패: $e');
+      // 0으로 채워 "계산 중…"에 멈추지 않게 한다. 화면은 0이면 "어림 못 함"으로 보인다 (11/11 K-37).
+      state = state.copyWith(condensedChars: {for (final s in sessions) s.path: 0});
+      state = state.copyWith(error: '비용 어림을 계산하지 못했습니다 (정리는 할 수 있습니다): $e');
     }
   }
 
@@ -180,7 +191,17 @@ class PastSessionsController extends Notifier<PastSessionsState> {
   Future<void> run() async {
     final vault = ref.read(vaultProvider);
     final claude = ref.read(claudeCodeProvider);
-    final targets = state.targets;
+    // 자동 정리가 도는 중이면 같은 세션을 claude 두 개가 정리할 수 있다 (11/11 K-25).
+    if (ref.read(autoTidyProvider).isRunning) {
+      state = state.copyWith(error: '자동 정리가 진행 중입니다. 끝난 뒤 다시 시작하세요.');
+      return;
+    }
+    // 목록을 불러온 뒤 저장된 세션(대화 중 자동 저장·자동 정리)은 빼고 시작한다.
+    final saved = SessionRegistry(vault).load();
+    final targets = [
+      for (final s in state.targets)
+        if (!(saved[s.sessionId]?.isDone ?? false)) s,
+    ];
     _isStopRequested = false;
     state = state.copyWith(
       isRunning: true,

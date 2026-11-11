@@ -7,6 +7,7 @@ import '../../core/brain_providers.dart';
 import '../../core/claude_code.dart';
 import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
+import '../../shared/safe_set_state.dart';
 
 /// 연동: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
@@ -37,7 +38,7 @@ class _ClaudeCodeCard extends ConsumerStatefulWidget {
   ConsumerState<_ClaudeCodeCard> createState() => _ClaudeCodeCardState();
 }
 
-class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
+class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> with SafeSetState<_ClaudeCodeCard> {
   bool _isWorking = false;
   List<String> _log = const [];
   String? _error;
@@ -77,20 +78,26 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
       setState(() => _log = log);
     } on ClaudeCodeException catch (e) {
       setState(() => _error = e.message);
+    } on Object catch (e) {
+      setState(() => _error = '설치하지 못했습니다: $e');
     } finally {
       setState(() => _isWorking = false);
-      ref.invalidate(claudeCodeStatusProvider);
+      if (mounted) ref.invalidate(claudeCodeStatusProvider);
     }
   }
 
   Future<void> _onUninstall() async {
     setState(() => _isWorking = true);
-    await ref.read(claudeCodeProvider).uninstall();
-    setState(() {
-      _isWorking = false;
-      _log = const ['연동 해제함'];
-    });
-    ref.invalidate(claudeCodeStatusProvider);
+    try {
+      await ref.read(claudeCodeProvider).uninstall();
+      setState(() => _log = const ['연동 해제함']);
+    } on Object catch (e) {
+      // 실패해도 "…중"에 멈추지 않는다 (11/11 K-37)
+      setState(() => _error = '연동을 해제하지 못했습니다: $e');
+    } finally {
+      setState(() => _isWorking = false);
+      if (mounted) ref.invalidate(claudeCodeStatusProvider);
+    }
   }
 
   @override
@@ -237,6 +244,8 @@ class _PastSessionsCard extends ConsumerWidget {
               Text(
                 state.targetChars == null
                     ? '비용 어림 계산 중…'
+                    : state.targetChars == 0 && state.targets.isNotEmpty
+                    ? '비용 어림 못 함 (아래 오류 참고)'
                     : '축약 약 ${(state.targetChars! / 10000).toStringAsFixed(1)}만 자 · 어림 \$${(state.targetChars! / 100000 * PastSessionsState.usdPer100kChars).toStringAsFixed(2)} '
                           '(실측 10만 자당 약 \$1.4, 모델·세션에 따라 ±50%)',
                 style: theme.textTheme.small,

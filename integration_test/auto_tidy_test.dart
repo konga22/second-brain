@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('자동 정리 미리 보기·지난 대화 목록 읽기', (tester) async {
+    // 실제 지식 폴더·설정을 건드리지 않게 사본으로만 돈다 (11/11 K-38)
+    expect(Platform.environment['BRAIN_VAULT'] ?? '', isNotEmpty, reason: '실제 지식 폴더 보호: BRAIN_VAULT=<사본>');
+    expect(Platform.environment['BRAIN_CONFIG'] ?? '', isNotEmpty, reason: '실제 설정 보호: BRAIN_CONFIG=<임시 파일>');
     final container = ProviderContainer();
     addTearDown(container.dispose);
     final targets = await container.read(autoTidyProvider.notifier).preview();

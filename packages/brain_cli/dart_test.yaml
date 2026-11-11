@@ -1,0 +1,3 @@
+# CLI 시험은 실제 brain을 `dart run`·`dart build cli`로 띄운다. 파일 여러 개를 한꺼번에 돌리면
+# build hook이 같은 .dart_tool/lib/libsqlite3.dylib에 동시에 서명하다 실패한다 (11/12). 파일을 하나씩 돌린다.
+concurrency: 1

@@ -30,6 +30,9 @@ void main() {
   }
 
   testWidgets('그래프 화면에서 화면 배율을 바꿔도 떨리지 않는다', (tester) async {
+    // 실제 지식 폴더·설정을 건드리지 않게 사본으로만 돈다 (11/11 K-38)
+    expect(Platform.environment['BRAIN_VAULT'] ?? '', isNotEmpty, reason: '실제 지식 폴더 보호: BRAIN_VAULT=<사본>');
+    expect(Platform.environment['BRAIN_CONFIG'] ?? '', isNotEmpty, reason: '실제 설정 보호: BRAIN_CONFIG=<임시 파일>');
     expect(
       Platform.environment['BRAIN_CONFIG'],
       isNotNull,

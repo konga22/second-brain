@@ -56,6 +56,9 @@ Future<int> runBrain(List<String> arguments) async {
   } on FormatException catch (e) {
     stderr.writeln(e.message);
     return 64;
+  } on VaultMissingException catch (e) {
+    stderr.writeln(e.message);
+    return 1;
   } finally {
     context.close();
   }
@@ -91,6 +94,10 @@ class _DoctorCommand extends Command<int> {
       stdout.writeln(
         '[통과] 색인 ${context.vault.indexPath} (노트 ${context.index.notes().length}개, 이번 갱신 $result)',
       );
+      // 읽지 못해 건너뛴 파일 (11/11 K-20). 색인은 나머지로 계속 돈다.
+      for (final (rel, reason) in context.index.unreadable) {
+        stdout.writeln('[주의] 읽을 수 없는 파일 $rel — UTF-8로 다시 저장하거나 지식 폴더 밖으로 ($reason)');
+      }
     }
     final sessionsDir = Directory(context.sessions.projectsDir).existsSync();
     stdout.writeln(

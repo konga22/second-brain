@@ -36,7 +36,7 @@ class TodoCommand extends Command<int> {
         if (text.isEmpty) usageException('추천할 할 일 내용을 주세요.');
         final added = store.suggest(text, source: argResults!['source'] as String?);
         stdout.writeln(added ? '추천 칸에 넣음 (앱 할 일에서 확인): $text' : '이미 있는 할 일이라 넣지 않음');
-      default:
+      case 'list':
         final todos = store.list().where((t) => !t.isDone).toList();
         final suggestions = store.suggestions();
         if (todos.isEmpty && suggestions.isEmpty) stdout.writeln('할 일 없음');
@@ -46,6 +46,10 @@ class TodoCommand extends Command<int> {
         for (final t in suggestions) {
           stdout.writeln('- (추천) ${t.text}');
         }
+      default:
+        // `brain todo done 보고서`처럼 없는 동작이 목록을 보여 주고 성공(0)으로 끝나 AI가 끝낸 줄 알았다 (11/11 K-37).
+        // 할 일을 끝내는 것은 앱의 체크 상자에서 한다.
+        usageException('모르는 동작: $action (list·add·suggest만 있습니다. 끝낸 표시는 앱의 할 일 화면에서 합니다)');
     }
     return 0;
   }

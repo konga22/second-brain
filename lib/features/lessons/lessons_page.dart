@@ -26,7 +26,8 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
   }
 
   Future<void> _onNew() async {
-    await showShadDialog<void>(context: context, builder: (_) => const _NewLessonDialog());
+    // 7칸을 쓰다 바깥 클릭 한 번에 사라지지 않게 (11/11 K-24)
+    await showShadDialog<void>(context: context, barrierDismissible: false, builder: (_) => const _NewLessonDialog());
     bumpVault(ref);
   }
 

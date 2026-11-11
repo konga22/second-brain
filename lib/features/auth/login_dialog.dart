@@ -3,6 +3,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/supabase_config.dart';
+import '../../shared/safe_set_state.dart';
 
 /// 로그인·가입 (설계서 3절 `/login`, `/signup`). Supabase 이메일 로그인.
 /// 로그인은 앱 안 AI 질문·요금제에만 필요하다. 노트·연동은 로그인 없이 된다.
@@ -16,7 +17,7 @@ class _LoginDialog extends StatefulWidget {
   State<_LoginDialog> createState() => _LoginDialogState();
 }
 
-class _LoginDialogState extends State<_LoginDialog> {
+class _LoginDialogState extends State<_LoginDialog> with SafeSetState<_LoginDialog> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _isSignUp = false;

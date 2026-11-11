@@ -207,12 +207,16 @@ class _GraphViewState extends ConsumerState<GraphView> {
           };
           final xs = positions.values.map((p) => p.x);
           final ys = positions.values.map((p) => p.y);
-          final bounds = Rect.fromLTRB(
-            xs.reduce(min) - 80,
-            ys.reduce(min) - 60,
-            xs.reduce(max) + 80,
-            ys.reduce(max) + 60,
-          );
+          // [이 노트 주변] + 다른 주제 칩처럼 보이는 노드가 0개일 수 있다. 예전에는 reduce가 터져 화면이 오류로 바뀌었다
+          // (11/11 K-37). 빈 영역을 그리고 도구 줄은 그대로 두어 칩을 다시 고를 수 있게 한다.
+          final bounds = positions.isEmpty
+              ? const Rect.fromLTRB(-200, -150, 200, 150)
+              : Rect.fromLTRB(
+                  xs.reduce(min) - 80,
+                  ys.reduce(min) - 60,
+                  xs.reduce(max) + 80,
+                  ys.reduce(max) + 60,
+                );
           return LayoutBuilder(
             builder: (context, constraints) {
               final viewport = constraints.biggest;

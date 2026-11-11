@@ -137,6 +137,8 @@ class _NoteDetail extends ConsumerWidget {
     final text = file.existsSync() ? file.readAsStringSync() : '';
     final note = Note.parse(text, fallbackId: doc.id, fallbackTitle: doc.title);
     final isRaw = doc.kind == 'raw';
+    // 실수 노트·회귀 시험은 노트처럼 고치거나 지우면 상태가 바뀌어 버린다 (11/11 K-19). 배운 것 화면에서 다룬다.
+    final isNote = doc.kind == 'note';
     final origins = resolveOrigins(ref.watch(vaultProvider), note);
     final links = [
       for (final link in ref.watch(linksProvider))
@@ -196,14 +198,14 @@ class _NoteDetail extends ConsumerWidget {
           spacing: 6,
           runSpacing: 6,
           children: [
-            if (!isRaw)
+            if (isNote)
               ShadButton.outline(
                 size: ShadButtonSize.sm,
                 leading: const Icon(LucideIcons.pencil, size: 14),
                 onPressed: () => showNoteEditor(context, noteId: id),
                 child: const Text('고치기'),
               ),
-            if (doc.isDraft)
+            if (doc.isDraft && isNote)
               ShadButton(
                 size: ShadButtonSize.sm,
                 onPressed: () => _onConfirm(ref),
@@ -215,7 +217,7 @@ class _NoteDetail extends ConsumerWidget {
               onPressed: () => _onReveal(ref, doc),
               child: const Text('Finder'),
             ),
-            if (!isRaw)
+            if (isNote)
               ShadButton.ghost(
                 size: ShadButtonSize.sm,
                 leading: Icon(LucideIcons.trash2, size: 14, color: colors.danger),

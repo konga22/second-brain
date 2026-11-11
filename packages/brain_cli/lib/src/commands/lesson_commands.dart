@@ -116,6 +116,13 @@ class _LessonAdd extends Command<int> {
       stdout.writeln(
         '$id 저장함 (${LessonStatus.parse(a['status']).label})${testId == null ? '' : ' · 회귀 시험 $testId'}',
       );
+      final wantedTest = ((a['question'] as String?) ?? '').trim().isNotEmpty && ((a['expect'] as String?) ?? '').trim().isNotEmpty;
+      if (wantedTest && testId == null) {
+        stderr.writeln(
+          '주의: 회귀 시험이 ${LessonStore.maxTests}개라 이번 사례는 시험으로 남기지 않았습니다. '
+          'brain lesson tests로 보고 겹치는 것을 brain lesson tests --remove T-xxxx로 지운 뒤 다시 넣으세요.',
+        );
+      }
       return 0;
     } on NoteStoreException catch (e) {
       stderr.writeln(e.message);
@@ -215,12 +222,18 @@ class _LessonEdit extends Command<int> {
       return 1;
     }
     final a = argResults!;
+    String? clean(String name) {
+      final value = (a[name] as String?)?.trim();
+      return value == null || value.isEmpty ? null : maskSecrets(value);
+    }
+
+    final trigger = clean('trigger'), action = clean('action'), reason = clean('reason');
+    // 옵션 없이 부르면 아무것도 안 바꾸고 "고침"이라 했다 (11/11 K-37). 새 문장도 비밀값을 가린다 (K-31).
+    if (trigger == null && action == null && reason == null) {
+      usageException('--trigger·--action·--reason 중 하나는 주세요.');
+    }
     context.lessons.save(
-      lesson.copyWith(
-        trigger: a['trigger'] as String?,
-        action: a['action'] as String?,
-        reason: a['reason'] as String?,
-      ),
+      lesson.copyWith(trigger: trigger, action: action, reason: reason),
       action: 'lesson-edit',
     );
     stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}');
@@ -262,7 +275,9 @@ class _LessonEvidence extends Command<int> {
 }
 
 class _LessonTests extends Command<int> {
-  _LessonTests(this.context);
+  _LessonTests(this.context) {
+    argParser.addOption('remove', help: '회귀 시험 하나를 지운다 (예: T-0003, 상한 30개에서 자리 만들기)');
+  }
 
   final BrainContext context;
 
@@ -274,6 +289,17 @@ class _LessonTests extends Command<int> {
 
   @override
   int run() {
+    final remove = argResults!['remove'] as String?;
+    if (remove != null) {
+      try {
+        context.lessons.removeTest(remove.trim());
+      } on NoteStoreException catch (e) {
+        stderr.writeln(e.message);
+        return 1;
+      }
+      stdout.writeln('$remove 회귀 시험을 지움 (되돌리기: brain undo)');
+      return 0;
+    }
     final text = argResults!.rest.join(' ').trim();
     context.index.sync();
     final tests = text.isEmpty

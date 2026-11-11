@@ -1,4 +1,5 @@
 import 'package:brain_core/brain_core.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -15,8 +16,9 @@ Future<String?> showNoteEditor(
   String? initialTitle,
 }) => showShadDialog<String>(
   context: context,
-  builder: (context) =>
-      _NoteEditor(noteId: noteId, initialTitle: initialTitle),
+  // 바깥을 누르거나 ESC 한 번에 닫혀 쓴 글이 사라지지 않게 (11/11 K-24). 닫기는 [취소]·ESC → 확인.
+  barrierDismissible: false,
+  builder: (context) => _NoteEditor(noteId: noteId, initialTitle: initialTitle),
 );
 
 class _NoteEditor extends ConsumerStatefulWidget {
@@ -38,7 +40,50 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
   final _body = TextEditingController();
   String? _hash;
   String? _error;
+
+  /// 저장하려는데 그사이 다른 곳에서 노트가 바뀌었다 → [덮어쓰기]·[최신 내용 불러오기] (11/11 K-34).
+  bool _hasConflict = false;
   bool _isSaving = false;
+
+  /// 연 시점의 내용. 바뀐 것이 있으면 닫기 전에 묻는다.
+  String _initial = '';
+
+  String get _current => [
+    _title,
+    _summary,
+    _tags,
+    _aliases,
+    _topic,
+    _body,
+  ].map((c) => c.text).join('\u0000');
+
+  bool get _isDirty => _current != _initial;
+
+  /// 바뀐 내용이 있으면 버릴지 묻고, 버려도 되면 닫는다.
+  Future<void> _confirmClose() async {
+    if (!_isDirty) {
+      Navigator.of(context).pop();
+      return;
+    }
+    final isDiscard = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog.alert(
+        title: const Text('저장하지 않고 닫을까요?'),
+        description: const Text('쓴 내용이 사라집니다.'),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('계속 쓰기'),
+          ),
+          ShadButton.destructive(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('버리고 닫기'),
+          ),
+        ],
+      ),
+    );
+    if (isDiscard == true && mounted) Navigator.of(context).pop();
+  }
 
   bool get _isNew => widget.noteId == null;
 
@@ -47,8 +92,14 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
     super.initState();
     if (_isNew) {
       _title.text = widget.initialTitle ?? '';
+      _initial = _current;
       return;
     }
+    _load();
+  }
+
+  /// 파일에서 지금 내용을 읽어 칸을 채운다 (처음 열 때, 충돌 뒤 [최신 내용 불러오기]).
+  void _load() {
     final found = ref.read(noteStoreProvider).read(widget.noteId!);
     if (found == null) {
       _error = '노트를 찾지 못했습니다.';
@@ -62,6 +113,7 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
     _aliases.text = note.aliases.join(', ');
     _topic.text = doc.topic;
     _body.text = note.body.trim();
+    _initial = _current;
   }
 
   @override
@@ -72,13 +124,16 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
     super.dispose();
   }
 
-  List<String> _split(String text) =>
-      [for (final t in text.split(',')) if (t.trim().isNotEmpty) t.trim()];
+  List<String> _split(String text) => [
+    for (final t in text.split(','))
+      if (t.trim().isNotEmpty) t.trim(),
+  ];
 
   void _onSave() {
     setState(() {
       _isSaving = true;
       _error = null;
+      _hasConflict = false;
     });
     final store = ref.read(noteStoreProvider);
     try {
@@ -107,98 +162,172 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
       }
       bumpVault(ref);
       ref.read(selectedNoteProvider.notifier).select(id);
-      Navigator.of(context).pop(id);
+      _initial = _current; // 저장했으니 닫을 때 묻지 않는다
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop(id);
+      });
+    } on NoteConflictException catch (e) {
+      // 사이드바의 충돌 사본 수가 바로 보이게
+      bumpVault(ref);
+      setState(() {
+        _error = '${e.message}\n내 것으로 덮어쓰거나, 최신 내용을 불러와 다시 고칠 수 있습니다.';
+        _hasConflict = true;
+        _isSaving = false;
+      });
     } on NoteStoreException catch (e) {
       setState(() {
         _error = e.message;
         _isSaving = false;
       });
+    } on Object catch (e) {
+      // 색인 잠김·파일 오류 등: "저장 중…"에 멈추지 않고 알린다. 쓴 글은 대화상자에 그대로 남는다.
+      setState(() {
+        _error = '저장하지 못했습니다: $e';
+        _isSaving = false;
+      });
     }
+  }
+
+  /// 충돌: 지금 파일의 해시로 다시 저장한다 (다른 곳에서 바꾼 내용은 되돌리기 묶음에 남는다).
+  void _onOverwrite() {
+    final found = ref.read(noteStoreProvider).read(widget.noteId!);
+    if (found == null) {
+      setState(() => _error = '노트를 찾지 못했습니다 (그사이 지워졌을 수 있습니다).');
+      return;
+    }
+    _hash = found.$3;
+    _onSave();
+  }
+
+  /// 충돌: 내가 고친 것은 충돌 사본에 있으므로 버리고 지금 파일 내용으로 다시 채운다.
+  void _onReloadLatest() {
+    setState(() {
+      _error = null;
+      _hasConflict = false;
+      _load();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final summaryLength = _summary.text.runes.length;
-    return ShadDialog(
-      title: Text(_isNew ? '새 노트' : '노트 고치기'),
-      description: Text(
-        _isNew
-            ? '제목이 파일 이름이 됩니다. 다른 노트는 [[제목]]으로 잇습니다.'
-            : '제목을 바꾸면 파일 이름과 이 노트를 가리키는 [[링크]]도 함께 바뀝니다.',
-      ),
-      constraints: const BoxConstraints(maxWidth: 680),
-      actions: [
-        ShadButton.outline(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        ShadButton(
-          enabled: !_isSaving,
-          onPressed: _onSave,
-          child: Text(_isSaving ? '저장 중…' : '저장'),
-        ),
-      ],
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ShadInput(controller: _title, placeholder: const Text('제목'), autofocus: _isNew),
-          const SizedBox(height: 8),
-          ShadInput(
-            controller: _summary,
-            placeholder: const Text('요약 한 줄 (60자 이내, 검색 결과에 보임)'),
-            onChanged: (_) => setState(() {}),
-            trailing: Text(
-              '$summaryLength/60',
-              style: theme.textTheme.muted.copyWith(
-                color: summaryLength > 60 ? const Color(0xffdc2626) : null,
-              ),
-            ),
+    return PopScope(
+      canPop: !_isDirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmClose();
+      },
+      // 바깥 클릭으로 닫히지 않게 하면(barrierDismissible: false) ESC도 기본으로는 아무 일도 하지 않는다.
+      // ESC는 닫으려는 뜻이니 바뀐 내용이 있으면 버릴지 묻는다.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): _confirmClose,
+        },
+        child: ShadDialog(
+          title: Text(_isNew ? '새 노트' : '노트 고치기'),
+          description: Text(
+            _isNew
+                ? '제목이 파일 이름이 됩니다. 다른 노트는 [[제목]]으로 잇습니다.'
+                : '제목을 바꾸면 파일 이름과 이 노트를 가리키는 [[링크]]도 함께 바뀝니다.',
           ),
-          const SizedBox(height: 8),
-          Row(
+          constraints: const BoxConstraints(maxWidth: 680),
+          actions: [
+            ShadButton.outline(
+              onPressed: _confirmClose,
+              child: const Text('취소'),
+            ),
+            ShadButton(
+              enabled: !_isSaving,
+              onPressed: _onSave,
+              child: Text(_isSaving ? '저장 중…' : '저장'),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: ShadInput(
-                  controller: _tags,
-                  placeholder: const Text('태그 (쉼표로)'),
-                ),
+              ShadInput(
+                controller: _title,
+                placeholder: const Text('제목'),
+                autofocus: _isNew,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ShadInput(
-                  controller: _aliases,
-                  placeholder: const Text('다른 표기 (예: Xcode, 엑스코드)'),
-                ),
-              ),
-              if (_isNew) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ShadInput(
-                    controller: _topic,
-                    placeholder: const Text('주제 폴더 (비우면 첫 태그)'),
+              const SizedBox(height: 8),
+              ShadInput(
+                controller: _summary,
+                placeholder: const Text('요약 한 줄 (60자 이내, 검색 결과에 보임)'),
+                onChanged: (_) => setState(() {}),
+                trailing: Text(
+                  '$summaryLength/60',
+                  style: theme.textTheme.muted.copyWith(
+                    color: summaryLength > 60 ? const Color(0xffdc2626) : null,
                   ),
                 ),
-              ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ShadInput(
+                      controller: _tags,
+                      placeholder: const Text('태그 (쉼표로)'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ShadInput(
+                      controller: _aliases,
+                      placeholder: const Text('다른 표기 (예: Xcode, 엑스코드)'),
+                    ),
+                  ),
+                  if (_isNew) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ShadInput(
+                        controller: _topic,
+                        placeholder: const Text('주제 폴더 (비우면 첫 태그)'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 8),
+              ShadTextarea(
+                controller: _body,
+                placeholder: const Text('본문 (마크다운). 다른 노트는 [[제목]]으로 잇는다.'),
+                minHeight: 220,
+                maxHeight: 420,
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(color: Color(0xffdc2626)),
+                  ),
+                ),
+              if (_hasConflict)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      ShadButton.outline(
+                        size: ShadButtonSize.sm,
+                        onPressed: _onReloadLatest,
+                        child: const Text('최신 내용 불러오기'),
+                      ),
+                      const SizedBox(width: 8),
+                      ShadButton.destructive(
+                        size: ShadButtonSize.sm,
+                        onPressed: _onOverwrite,
+                        child: const Text('내 것으로 덮어쓰기'),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
-          const SizedBox(height: 8),
-          ShadTextarea(
-            controller: _body,
-            placeholder: const Text('본문 (마크다운). 다른 노트는 [[제목]]으로 잇는다.'),
-            minHeight: 220,
-            maxHeight: 420,
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Color(0xffdc2626)),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }

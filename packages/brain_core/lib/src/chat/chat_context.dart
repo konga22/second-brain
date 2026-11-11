@@ -81,17 +81,17 @@ class ChatContext {
       fallbackId: doc.id,
       fallbackTitle: doc.title,
     );
-    final body = note.body.trim();
     // 저장할 때 이미 가렸지만, 사용자가 직접 고친 파일일 수 있어 보내기 전에 한 번 더 가린다.
+    // 제목·요약도 서버로 나가므로 가리고(11/11 K-31·S-6), 본문은 자르기 **전에** 가린다 — 자른 뒤 가리면
+    // 경계에 걸린 키가 패턴 길이보다 짧아져 앞부분이 그대로 나갔다.
+    final body = maskSecrets(note.body.trim());
     return ChatNote(
       id: doc.id,
-      title: note.title,
-      summary: note.summary,
-      snippet: maskSecrets(
-        body.runes.length <= snippetChars
-            ? body
-            : String.fromCharCodes(body.runes.take(snippetChars)),
-      ),
+      title: maskSecrets(note.title),
+      summary: maskSecrets(note.summary),
+      snippet: body.runes.length <= snippetChars
+          ? body
+          : String.fromCharCodes(body.runes.take(snippetChars)),
     );
   }
 }

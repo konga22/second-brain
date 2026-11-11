@@ -57,7 +57,10 @@ class AutoTidyController extends Notifier<AutoTidyState> {
 
   /// 정리할 세션: 저장 안 함 · 끝남(최근 30분 기록 없음) · 사용자 대화 150개 이하, 짧은 것부터.
   static Future<List<ClaudeSession>> _targets(Vault vault) async {
-    final sessions = await listSessionsInBackground(vault.root, vault.indexPath);
+    final sessions = await listSessionsInBackground(
+      vault.root,
+      vault.indexPath,
+    );
     final statuses = SessionRegistry(vault).load();
     return [
       for (final s in sessions)
@@ -70,6 +73,9 @@ class AutoTidyController extends Notifier<AutoTidyState> {
 
   /// 미리 보기: 정리하지 않고 대상 세션만 센다 (비용 없음). 설정 화면에 "정리 대상 N개"로 보인다.
   Future<List<ClaudeSession>> preview() => _targets(ref.read(vaultProvider));
+
+  /// 이번 앱 실행에서 실패한 세션 (같은 세션에 돈을 되풀이해 쓰지 않게, 11/11 K-25).
+  final _failed = <String>{};
 
   Future<void> run() async {
     final config = ref.read(appConfigProvider);
@@ -86,13 +92,29 @@ class AutoTidyController extends Notifier<AutoTidyState> {
       for (final session in targets) {
         final now = ref.read(appConfigProvider);
         if (spentToday(now) >= now.autoTidyDailyUsd || !now.isAutoTidyOn) break;
+        // 사용자가 그사이 연동 화면에서 정리를 시작했으면 겹치지 않게 멈춘다.
+        if (ref.read(pastSessionsProvider).isRunning) break;
+        // 목록을 읽은 뒤 대화 중 자동 저장·수동 정리로 저장된 세션은 건너뛴다 (돈을 두 번 쓰지 않게).
+        final isSaved =
+            SessionRegistry(vault).load()[session.sessionId]?.isDone ?? false;
+        if (isSaved) continue;
+        if (_failed.contains(session.sessionId)) continue;
         state = AutoTidyState(
           isRunning: true,
           step: '${session.project} ${session.shortId} 정리 중',
           log: log,
         );
-        final result = await claude.saveSession(session);
-        final cost = result.costUsd ?? 0;
+        // 하루 상한이 세션 하나 안에서도 지켜지게 남은 예산을 claude에 넘긴다 (전에는 시작 전에만 봤다).
+        final budget = now.autoTidyDailyUsd - spentToday(now);
+        final result = await claude.saveSession(
+          session,
+          maxBudgetUsd: budget < 0.05 ? 0.05 : budget,
+        );
+        // 결과 이벤트 없이 끝나면 비용을 모른다 → 0으로 적지 않고 남은 예산을 다 쓴 것으로 본다 (원가 보호 쪽).
+        final cost =
+            result.costUsd ??
+            (result.ok ? 0 : budget.clamp(0, double.infinity));
+        if (!result.ok) _failed.add(session.sessionId);
         ref
             .read(appConfigProvider.notifier)
             .update(
@@ -117,7 +139,11 @@ class AutoTidyController extends Notifier<AutoTidyState> {
       debugPrint('[자동 정리] 오류: $e\n$stack');
       log.add('자동 정리 오류: $e');
     } finally {
-      state = AutoTidyState(isRunning: false, lastRunAt: DateTime.now(), log: log);
+      state = AutoTidyState(
+        isRunning: false,
+        lastRunAt: DateTime.now(),
+        log: log,
+      );
       ref.read(vaultRevisionProvider.notifier).bump();
     }
   }

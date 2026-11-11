@@ -9,6 +9,7 @@ import '../../core/ai_gateway.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/page_header.dart';
 import '../auth/login_dialog.dart';
+import '../../shared/safe_set_state.dart';
 
 /// AI 질문 (경로 B, 설계서 3절 `/chat`·5.3·5.4): 위키 기반 답, 근거 노트, [틀렸어].
 class ChatPage extends ConsumerStatefulWidget {
@@ -30,7 +31,7 @@ class _Turn {
   bool isWorking = true;
 }
 
-class _ChatPageState extends ConsumerState<ChatPage> {
+class _ChatPageState extends ConsumerState<ChatPage> with SafeSetState<ChatPage> {
   final _input = TextEditingController();
   final _turns = <_Turn>[];
 
@@ -60,17 +61,28 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       );
       var text = answer.answer;
       // 실수 노트가 들어간 답이면 검증해서, 어겼으면 한 번 다시 쓴다 (설계서 5.3).
+      // 검증이 실패해도(하루 한도·서버 오류) 이미 받은 답은 버리지 않는다 — 크레딧은 이미 빠졌다 (11/11 검토 S-4).
       if (context.lessons.isNotEmpty) {
-        final check = await gateway.verify({
-          'mode': 'answer',
-          'question': question,
-          'answer': text,
-          'lessons': [
-            for (final l in context.lessons)
-              {'id': l.id, 'trigger': l.trigger, 'action': l.action},
-          ],
-        });
-        if (check['verdict'] == 'rewrite' && check['fixedAnswer'] != null) {
+        Map<String, dynamic>? check;
+        try {
+          check = await gateway.verify({
+            'mode': 'answer',
+            'question': question,
+            'answer': text,
+            'lessons': [
+              for (final l in context.lessons)
+                {'id': l.id, 'trigger': l.trigger, 'action': l.action},
+            ],
+            // 검사 기준(검증이 놓친 실수에서 생긴 항목)도 함께 본다. 예전에는 쌓기만 하고 읽는 곳이 없었다 (11/11 K-36).
+            'checklist': ref.read(lessonStoreProvider).checklist(),
+          });
+        } on AiGatewayException catch (e) {
+          turn.verdict = '검증하지 못했습니다 (${e.message}). 아래 답은 검증 전입니다.';
+        }
+        if (check == null) {
+          // 검증 전 답을 그대로 보여 준다
+        } else if (check['verdict'] == 'rewrite' &&
+            check['fixedAnswer'] != null) {
           text = '${check['fixedAnswer']}';
           turn.verdict = '검증: 규칙을 어겨 다시 썼습니다 (${check['reason']})';
         } else {
@@ -98,6 +110,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       ref.invalidate(planProvider);
     } on AiGatewayException catch (e) {
       turn.error = e.message;
+    } on Object catch (e) {
+      turn.error = '답을 받지 못했습니다: $e';
     } finally {
       if (mounted) setState(() => turn.isWorking = false);
     }
@@ -106,7 +120,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// [틀렸어]: 고친 내용을 받아 검증 에이전트가 규칙 후보인지 판단한다 (설계서 5.4).
   Future<void> _onWrong(_Turn turn) async {
     final controller = TextEditingController();
+    // 교정 문장을 쓰다 바깥 클릭 한 번에 사라지지 않게 (11/11 K-24)
     final correction = await showShadDialog<String>(
+      barrierDismissible: false,
       context: context,
       builder: (context) => ShadDialog(
         title: const Text('어디가 틀렸나요?'),
@@ -145,6 +161,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           for (final t in store.testsFor(turn.question))
             {'id': t.id, 'question': t.question, 'expect': t.expect},
         ],
+        'checklist': store.checklist(),
       });
       final verdict = '${result['verdict']}';
       final lesson = result['lesson'] as Map?;
@@ -185,6 +202,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       setState(() => turn.verdict = message);
     } on AiGatewayException catch (e) {
       setState(() => turn.verdict = '검증 실패: ${e.message}');
+    } on Object catch (e) {
+      // 실수 노트 저장 실패 등: "검증 중…"에 멈추지 않는다 (11/11 K-37)
+      setState(() => turn.verdict = '검증 결과를 저장하지 못했습니다: $e');
     }
   }
 
@@ -204,7 +224,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             title: 'AI 질문',
             subtitle: user == null
                 ? '로그인 필요'
-                : '${plan?.isPro == true ? 'Pro' : '무료'} · 이번 달 ${plan?.used ?? 0}회 사용',
+                : '${plan?.isPro == true ? 'Pro' : '무료'} · 남은 크레딧 ${plan?.remainingCredits.toStringAsFixed(1) ?? '-'} (질문 약 ${plan?.remainingQuestions ?? 0}회)',
             actions: [
               if (user == null)
                 ShadButton(

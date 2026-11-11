@@ -55,53 +55,72 @@ class LessonStore {
         throw NoteStoreException('$name이 비었습니다 (언제 → 무엇을 → 왜).');
       }
     }
-    vault.ensure();
-    index.sync();
-    final id = 'L-${(index.maxNumber('L-') + 1).toString().padLeft(4, '0')}';
-    String? testId;
-    if ((question ?? '').trim().isNotEmpty && (expect ?? '').trim().isNotEmpty) {
-      if (index.docsOf('test').length >= maxTests) {
-        throw const NoteStoreException(
-          '회귀 시험이 30개를 넘습니다. 비슷한 시험을 합친 뒤 추가하세요.',
+    return withVaultLock(vault, () {
+      vault.ensure();
+      index.sync();
+      final id = 'L-${(_nextNumber('L-')).toString().padLeft(4, '0')}';
+      String? testId;
+      // 회귀 시험이 상한(30개)이면 규칙만 저장하고 시험은 만들지 않는다. 예전에는 규칙까지 통째로 실패했고
+      // 시험을 지울 명령도 없었다 (11/11 K-36). 부른 쪽은 testId가 null인 것으로 알고 `brain lesson tests --remove`를 안내한다.
+      if ((question ?? '').trim().isNotEmpty &&
+          (expect ?? '').trim().isNotEmpty &&
+          index.docsOf('test').length < maxTests) {
+        testId = 'T-${(_nextNumber('T-')).toString().padLeft(4, '0')}';
+        final test = LessonTest(
+          id: testId,
+          lesson: id,
+          question: maskSecrets(question!.trim()),
+          bad: maskSecrets((bad ?? '').trim()),
+          expect: maskSecrets(expect!.trim()),
         );
+        final testPath = p.join(vault.lessonsDir, 'tests', '$testId.md');
+        recordBeforeChange(vault, testPath, batch: batch);
+        writeFileAtomic(testPath, test.toMarkdown());
       }
-      testId = 'T-${(index.maxNumber('T-') + 1).toString().padLeft(4, '0')}';
-      final test = LessonTest(
-        id: testId,
-        lesson: id,
-        question: maskSecrets(question!.trim()),
-        bad: maskSecrets((bad ?? '').trim()),
-        expect: maskSecrets(expect!.trim()),
+      final lesson = Lesson(
+        id: id,
+        trigger: maskSecrets(trigger.trim()),
+        action: maskSecrets(action.trim()),
+        reason: maskSecrets(reason.trim()),
+        diff: maskSecrets(diff),
+        source: source,
+        status: status,
+        tests: [?testId],
+        body: '',
       );
-      final testPath = p.join(vault.lessonsDir, 'tests', '$testId.md');
-      recordBeforeChange(vault, testPath, batch: batch);
-      writeFileAtomic(testPath, test.toMarkdown());
-    }
-    final lesson = Lesson(
-      id: id,
-      trigger: maskSecrets(trigger.trim()),
-      action: maskSecrets(action.trim()),
-      reason: maskSecrets(reason.trim()),
-      diff: maskSecrets(diff),
-      source: source,
-      status: status,
-      tests: [?testId],
-      body: '',
-    );
-    final path = p.join(vault.lessonsDir, '$id.md');
-    recordBeforeChange(vault, path, batch: batch);
-    writeFileAtomic(path, lesson.toMarkdown());
-    appendChangeLog(
-      vault,
-      'lesson-add',
-      '$id ${status.value}${testId == null ? '' : ' $testId'}',
-      batch: batch,
-    );
-    index.sync();
-    return (id, testId);
+      final path = p.join(vault.lessonsDir, '$id.md');
+      recordBeforeChange(vault, path, batch: batch);
+      writeFileAtomic(path, lesson.toMarkdown());
+      appendChangeLog(
+        vault,
+        'lesson-add',
+        '$id ${status.value}${testId == null ? '' : ' $testId'}',
+        batch: batch,
+      );
+      index.sync();
+      return (id, testId);
+    });
   }
 
+  /// 실수 노트·회귀 시험 id 모양. 경로가 되므로 이것만 받는다
+  /// (11/11 K-18: `brain lesson set ../../outside`가 지식 폴더 밖 .md 맨 위에 frontmatter를 붙였다).
+  static final idPattern = RegExp(r'^[LT]-\d{1,6}$');
+
+  static void checkId(String id) {
+    if (!idPattern.hasMatch(id)) {
+      throw NoteStoreException('실수 노트 id 형식이 아닙니다: $id (예: L-0001)');
+    }
+  }
+
+  int _nextNumber(String prefix) =>
+      [
+        index.maxNumber(prefix),
+        maxLoggedNumber(vault, prefix),
+      ].reduce((a, b) => a > b ? a : b) +
+      1;
+
   Lesson? read(String id) {
+    checkId(id);
     final file = File(p.join(vault.lessonsDir, '$id.md'));
     if (!file.existsSync()) return null;
     return Lesson.parse(file.readAsStringSync(), fallbackId: id);
@@ -112,23 +131,32 @@ class LessonStore {
     if (syncOnRead) index.syncIfStale();
     return [
       for (final doc in index.docsOf('lesson'))
-        if (status == null || doc.statusText == status.value)
-          ?read(doc.id),
+        if (status == null || doc.statusText == status.value) ?read(doc.id),
     ];
   }
 
   void save(Lesson lesson, {String action = 'lesson-update', String? batch}) {
+    checkId(lesson.id);
     final path = p.join(vault.lessonsDir, '${lesson.id}.md');
     recordBeforeChange(vault, path, batch: batch);
     writeFileAtomic(path, lesson.toMarkdown());
-    appendChangeLog(vault, action, '${lesson.id} ${lesson.status.value}', batch: batch);
+    appendChangeLog(
+      vault,
+      action,
+      '${lesson.id} ${lesson.status.value}',
+      batch: batch,
+    );
     index.sync();
   }
 
   void setStatus(String id, LessonStatus status, {String? batch}) {
     final lesson = read(id);
     if (lesson == null) throw NoteStoreException('$id 실수 노트가 없습니다.');
-    save(lesson.copyWith(status: status), action: 'lesson-status', batch: batch);
+    save(
+      lesson.copyWith(status: status),
+      action: 'lesson-status',
+      batch: batch,
+    );
   }
 
   /// 규칙을 지켜 문제없었으면 kept, 다시 교정됐으면 recorrected를 하나 올린다.
@@ -173,14 +201,18 @@ class LessonStore {
     final heads = <String>[];
     for (final word in toNfc(trigger).toLowerCase().split(RegExp(r'\s+'))) {
       if (word.isEmpty || _stopwords.contains(word)) continue;
-      for (final m in RegExp(r'[a-z0-9_]{2,}|[^\x00-\x7f\p{P}\p{S}]+', unicode: true)
-          .allMatches(word)) {
+      for (final m in RegExp(
+        r'[a-z0-9_]{2,}|[^\x00-\x7f\p{P}\p{S}]+',
+        unicode: true,
+      ).allMatches(word)) {
         final part = m.group(0)!;
         final runes = part.runes.toList();
         final head = part.codeUnitAt(0) < 0x80
             ? part
             : (runes.length >= 2 ? String.fromCharCodes(runes.take(2)) : '');
-        if (head.isNotEmpty && !_stopwords.contains(head) && !heads.contains(head)) {
+        if (head.isNotEmpty &&
+            !_stopwords.contains(head) &&
+            !heads.contains(head)) {
           heads.add(head);
         }
       }
@@ -193,6 +225,30 @@ class LessonStore {
     for (final doc in index.search(text, limit: limit, kinds: {'test'}))
       ?_readTest(doc.path),
   ];
+
+  /// 회귀 시험 하나를 지운다 (상한에서 자리를 만들 때). 그 시험을 가진 실수 노트의 목록에서도 뺀다.
+  /// 지우기 전 사본을 남겨 `brain undo <묶음>`으로 되돌릴 수 있다.
+  void removeTest(String testId, {String? batch}) {
+    checkId(testId);
+    if (!testId.startsWith('T-')) throw NoteStoreException('회귀 시험 id가 아닙니다: $testId (예: T-0001)');
+    final batchId = batch ?? newBatchId();
+    final path = p.join(vault.lessonsDir, 'tests', '$testId.md');
+    final file = File(path);
+    if (!file.existsSync()) throw NoteStoreException('$testId 회귀 시험이 없습니다.');
+    final owner = LessonTest.parse(file.readAsStringSync(), fallbackId: testId).lesson;
+    recordBeforeChange(vault, path, batch: batchId);
+    file.deleteSync();
+    final lesson = owner.isEmpty ? null : read(owner);
+    if (lesson != null && lesson.tests.contains(testId)) {
+      save(
+        lesson.copyWith(tests: [for (final t in lesson.tests) if (t != testId) t]),
+        action: 'lesson-update',
+        batch: batchId,
+      );
+    }
+    appendChangeLog(vault, 'lesson-test-remove', '$testId ${owner.isEmpty ? '' : owner}'.trim(), batch: batchId);
+    index.sync();
+  }
 
   List<LessonTest> allTests() => [
     for (final doc in index.docsOf('test')) ?_readTest(doc.path),
@@ -220,9 +276,7 @@ class LessonStore {
   void addCheckItem(String item, {String? batch}) {
     final items = checklist();
     if (items.length >= maxChecklist) {
-      throw const NoteStoreException(
-        '검사 기준이 30항목입니다. 비슷한 항목을 합친 뒤 추가하세요.',
-      );
+      throw const NoteStoreException('검사 기준이 30항목입니다. 비슷한 항목을 합친 뒤 추가하세요.');
     }
     recordBeforeChange(vault, verifierPath, batch: batch);
     writeFileAtomic(
@@ -236,5 +290,4 @@ class LessonStore {
     );
     appendChangeLog(vault, 'verifier-add', item.trim(), batch: batch);
   }
-
 }

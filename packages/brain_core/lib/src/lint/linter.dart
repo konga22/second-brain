@@ -6,6 +6,7 @@ import '../index/search_index.dart';
 import '../links/dismissed_links.dart';
 import '../log/change_log.dart';
 import '../note/note.dart';
+import '../note/note_store.dart';
 import '../note/wiki_links.dart';
 import '../vault/vault.dart';
 
@@ -16,6 +17,7 @@ enum LintType {
   duplicate('중복 후보'),
   stale('신선도'),
   format('형식'),
+  unreadable('읽을 수 없는 파일'),
   tooLong('너무 긴 노트'),
   suspicious('의심 지시문');
 
@@ -118,11 +120,26 @@ class Linter {
       }
     }
 
+    for (final (rel, reason) in index.unreadable) {
+      issues.add(
+        LintIssue(
+          type: LintType.unreadable,
+          id: rel,
+          message: '색인에서 건너뜀 — UTF-8 텍스트로 다시 저장하거나 지식 폴더 밖으로 옮기기 ($reason)',
+        ),
+      );
+    }
+
     final now = DateTime.now();
     for (final doc in notes) {
       final file = File(p.join(vault.root, doc.path));
       if (!file.existsSync()) continue;
-      final text = file.readAsStringSync();
+      final String text;
+      try {
+        text = file.readAsStringSync();
+      } on FileSystemException {
+        continue;
+      }
       final note = Note.parse(
         text,
         fallbackId: '',
@@ -137,10 +154,20 @@ class Linter {
           ),
         );
       }
+      if (note.isFrontmatterBroken) {
+        // 자동으로 고치면 제목·요약·태그·출처를 잃는다 (11/11 K-21). 알리기만 한다.
+        issues.add(
+          LintIssue(
+            type: LintType.format,
+            id: doc.id,
+            message: '머리말(frontmatter)을 읽지 못함 — 편집기로 열어 YAML 고치기, 값에 쌍점(:)이 있으면 큰따옴표로 (${doc.path})',
+          ),
+        );
+      }
       final missing = [
-        if (note.id.isEmpty || doc.id.startsWith('f_')) 'id',
+        if (!note.isFrontmatterBroken && (note.id.isEmpty || doc.id.startsWith('f_'))) 'id',
         if (!text.startsWith('---')) 'frontmatter',
-        if (note.summary.trim().isEmpty) 'summary',
+        if (!note.isFrontmatterBroken && note.summary.trim().isEmpty) 'summary',
       ];
       if (missing.isNotEmpty) {
         issues.add(
@@ -188,20 +215,24 @@ class Linter {
   }
 
   /// 안전한 형식 채우기: frontmatter·id·요약(본문 첫 문장 60자). 반환: 고친 파일 수.
-  int fixSafe() {
+  ///
+  /// 머리말이 깨진 노트는 건드리지 않는다. 고치기 전 상태를 묶음에 남겨 `brain undo`로 되돌릴 수 있다 (11/11 K-21).
+  /// 같은 id를 가진 파일이 둘이면(색인 id가 `f_…`) 뒤 파일에 새 번호를 준다.
+  int fixSafe({String? batch}) {
     var fixed = 0;
+    final batchId = batch ?? newBatchId();
     for (final issue in run().where((i) => i.canFix)) {
       final doc = index.byId(issue.id);
       if (doc == null) continue;
       final file = File(p.join(vault.root, doc.path));
+      final newId = NoteStore(vault, index).nextNoteId();
       final note = Note.parse(
         file.readAsStringSync(),
-        fallbackId: 'n_${(index.maxNoteNumber() + 1).toString().padLeft(4, '0')}',
+        fallbackId: newId,
         fallbackTitle: p.basenameWithoutExtension(doc.path),
       );
-      final id = note.id.startsWith('f_')
-          ? 'n_${(index.maxNoteNumber() + 1).toString().padLeft(4, '0')}'
-          : note.id;
+      if (note.isFrontmatterBroken) continue;
+      final id = doc.id.startsWith('f_') && note.id != newId ? newId : note.id;
       final summary = note.summary.trim().isEmpty
           ? firstSentence(note.body)
           : note.summary;
@@ -220,8 +251,9 @@ class Linter {
         body: note.body,
         extra: note.extra,
       );
+      recordBeforeChange(vault, file.path, batch: batchId);
       writeFileAtomic(file.path, fixedNote.toMarkdown());
-      appendChangeLog(vault, 'lint-fix', '$id ${doc.path}');
+      appendChangeLog(vault, 'lint-fix', '$id ${doc.path}', batch: batchId);
       index.sync();
       fixed++;
     }

@@ -71,7 +71,7 @@ NOTE
 ## 3-1. 이미 있는 노트를 고칠 때
 
 - 사용자가 결정을 바꾸거나 틀린 내용을 정정하면 새 노트를 만들지 말고 그 노트를 고친다.
-- `brain show <id>`의 머리 줄 해시로 `brain write <id> --expect-hash <해시> --title "…" --summary "…" [--tags "a,b"]`. 본문도 바꾸면 heredoc을 붙인다.
+- `brain show <id>`의 머리 줄 해시로 `brain write <id> --expect-hash <해시> --title "…" --summary "…" [--tags "a,b"]`. 본문도 바꾸면 heredoc을 붙인다. 본문을 보내면 본문 **전체**가 바뀐다. `brain show`는 1,500자씩 보여 주므로 긴 노트는 `--from`으로 끝까지 읽고 전체 본문을 보낸다(긴 노트를 절반 아래로 줄이면 `brain`이 멈추고 묻는다).
 - 제목·요약도 꼭 맞춘다. 요약은 찾기 결과와 미리 넣는 노트 줄에 그대로 나가서, 본문만 고치면 다음 AI가 옛 결정을 본다.
 
 ## 4. 마무리

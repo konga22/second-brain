@@ -12,6 +12,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
 import '../connect/auto_tidy.dart';
+import '../../shared/safe_set_state.dart';
 
 /// 설정 (설계서 3절 `/settings`, 4.1, 5.7): 지식 폴더 위치·Finder 열기, 백업·복원, 온보딩 요약.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -21,7 +22,7 @@ class SettingsPage extends ConsumerStatefulWidget {
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends ConsumerState<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<SettingsPage> {
   // 설정은 한 저장소(appConfigProvider)로만 읽고 쓴다. 따로 읽으면 패널 너비·배율을 옛값으로 덮어쓴다.
   AppConfig get _config => ref.read(appConfigProvider);
   String? _message;
@@ -71,6 +72,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Future<void> _onChangeVault() async {
     final dir = await getDirectoryPath(confirmButtonText: '이 폴더 쓰기');
     if (dir == null) return;
+    // 저장하기 전에 쓰기·읽기를 시험한다. 못 쓰는 폴더를 저장하면 앱 전체가 예외 화면이 되고
+    // 다시 켜도 같은 폴더를 열어 앱 안에서 되돌릴 수 없었다 (11/11 K-33).
+    setState(() {
+      _isWorking = true;
+      _message = '폴더 점검 중…';
+    });
+    final access = await checkVaultAccess(dir);
+    if (!mounted) return;
+    setState(() => _isWorking = false);
+    if (!access.canWrite || !access.canRead) {
+      setState(() => _message = '이 폴더는 쓸 수 없어 바꾸지 않았습니다: $dir${access.error == null ? '' : ' (${access.error})'}');
+      return;
+    }
     _save(_config.copyWith(vaultPath: dir));
     ref.invalidate(vaultProvider);
     ref.read(selectedNoteProvider.notifier).select(null);
@@ -87,10 +101,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       _message = '백업 중…';
     });
     // macOS 기본 도구 ditto로 폴더째 압축한다. 색인은 지식 폴더 밖(캐시)에 있어 저절로 빠진다.
-    final result = await Process.run('ditto', [
-      '-c', '-k', '--sequesterRsrc', '--keepParent', vault.root, location.path,
-    ]);
+    final ProcessResult result;
+    try {
+      result = await Process.run('ditto', [
+        '-c', '-k', '--sequesterRsrc', '--keepParent', vault.root, location.path,
+      ]);
+    } on Object catch (e) {
+      setState(() {
+        _isWorking = false;
+        _message = '백업 실패: $e';
+      });
+      return;
+    }
     setState(() => _isWorking = false);
+    if (!mounted) return;
     if (result.exitCode != 0) {
       setState(() => _message = '백업 실패: ${result.stderr}');
       return;
@@ -105,13 +129,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       acceptedTypeGroups: const [XTypeGroup(label: '백업', extensions: ['zip'])],
     );
     if (zip == null) return;
-    final target = await getDirectoryPath(confirmButtonText: '여기에 풀기');
-    if (target == null) return;
+    final parent = await getDirectoryPath(confirmButtonText: '여기에 풀기');
+    if (parent == null) return;
+    // 늘 새 빈 폴더에 푼다. 지금 지식 폴더 위에 풀면 ditto가 합쳐 덮어써서, 백업 뒤에 고친 노트가
+    // 옛 내용으로 돌아가고 되돌릴 수도 없었다 (11/11 K-33).
+    final stamp = formatTime(DateTime.now()).substring(0, 19).replaceAll(':', '');
+    final target = p.join(parent, '복원-$stamp');
+    if (Directory(target).existsSync()) {
+      setState(() => _message = '이미 같은 이름의 폴더가 있어 풀지 않았습니다: $target');
+      return;
+    }
     setState(() {
       _isWorking = true;
       _message = '복원 중…';
     });
-    final result = await Process.run('ditto', ['-x', '-k', zip.path, target]);
+    Directory(target).createSync(recursive: true);
+    final ProcessResult result;
+    try {
+      result = await Process.run('ditto', ['-x', '-k', zip.path, target]);
+    } on Object catch (e) {
+      setState(() {
+        _isWorking = false;
+        _message = '복원 실패: $e';
+      });
+      return;
+    }
     setState(() => _isWorking = false);
     if (result.exitCode != 0) {
       setState(() => _message = '복원 실패: ${result.stderr}');
@@ -120,6 +162,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final restored = Directory(target)
         .listSync()
         .whereType<Directory>()
+        // 풀린 폴더 안에서만 찾는다 (예전에는 고른 폴더에서 찾아 다른 프로젝트 폴더를 가리킬 수 있었다)
         .where((d) => File(p.join(d.path, 'AGENTS.md')).existsSync())
         .map((d) => d.path)
         .firstOrNull;

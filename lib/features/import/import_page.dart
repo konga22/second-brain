@@ -10,6 +10,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/router/app_page.dart';
 import '../../core/brain_providers.dart';
+import '../../shared/safe_set_state.dart';
 
 /// 가져오기 (설계서 3절 `/import`, 5.6): 텍스트 회의록·문서를 원본(raw/)으로 넣는다.
 /// 정리는 사용자 AI의 brain-ingest가 정리 대기 노트로 만든다.
@@ -20,7 +21,7 @@ class ImportPage extends ConsumerStatefulWidget {
   ConsumerState<ImportPage> createState() => _ImportPageState();
 }
 
-class _ImportPageState extends ConsumerState<ImportPage> {
+class _ImportPageState extends ConsumerState<ImportPage> with SafeSetState<ImportPage> {
   ImportKind _kind = ImportKind.meeting;
   bool _isWorking = false;
   final _log = <String>[];
@@ -62,8 +63,12 @@ class _ImportPageState extends ConsumerState<ImportPage> {
         _log.add('${file.name} — 실패: ${e.message}');
       } on FormatException {
         _log.add('${file.name} — 실패: UTF-8 텍스트가 아닙니다.');
+      } on Object catch (e) {
+        // markitdown 실행 실패 등: 한 파일 때문에 "가져오는 중"에 멈추지 않는다 (11/11 K-37)
+        _log.add('${file.name} — 실패: $e');
       }
     }
+    if (!mounted) return;
     bumpVault(ref);
     setState(() => _isWorking = false);
   }

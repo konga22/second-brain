@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import '../note/note.dart';
+import '../sessions/session_registry.dart';
 import '../vault/vault.dart';
 
 /// 작업 묶음 id (설계서 5.1). AI 작업 한 번에 바뀐 파일을 같은 묶음으로 남겨 `brain undo`로 되돌린다.
@@ -45,8 +46,41 @@ void appendChangeLog(
   );
 }
 
-String _undoDir(Vault vault, String batch) =>
-    p.join(vault.metaDir, 'undo', batch);
+/// 묶음 id 모양: `b_20261106-213000-a1b2`, `s_1a2b3c4d`, `undo`, `BRAIN_BATCH` 값.
+/// 경로가 되므로 `/`·`..` 같은 글자는 받지 않는다 (11/11 K-18: `brain undo ../x`로 지식 폴더 밖을 고칠 수 있었다).
+final batchIdPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$');
+
+String _undoDir(Vault vault, String batch) {
+  if (!batchIdPattern.hasMatch(batch)) {
+    throw ArgumentError('묶음 id 형식이 아닙니다: $batch (예: b_20261106-213000-a1b2, s_1a2b3c4d)');
+  }
+  return p.join(vault.metaDir, 'undo', batch);
+}
+
+/// 변경 기록(`_log/*.md`)에 나온 [prefix] 번호 중 가장 큰 값 (`n_`, `L-`, `T-`).
+///
+/// 색인은 지금 있는 파일만 알아서, 가장 큰 번호의 노트를 휴지통으로 보내면 다음 노트가 같은 번호를 받았다
+/// (11/11 K-26: 변경 기록·세션 기록·대화 속 n_0050이 다른 노트를 가리키게 됨). 기록은 지우지 않으므로 번호를 다시 쓰지 않는다.
+int maxLoggedNumber(Vault vault, String prefix) {
+  final dir = Directory(vault.logDir);
+  if (!dir.existsSync()) return 0;
+  final pattern = RegExp('(?<![A-Za-z0-9_-])${RegExp.escape(prefix)}(\\d{1,6})(?![0-9])');
+  var max = 0;
+  for (final file in dir.listSync().whereType<File>()) {
+    if (!file.path.endsWith('.md')) continue;
+    final String text;
+    try {
+      text = file.readAsStringSync();
+    } on FileSystemException {
+      continue;
+    }
+    for (final m in pattern.allMatches(text)) {
+      final n = int.parse(m.group(1)!);
+      if (n > max) max = n;
+    }
+  }
+  return max;
+}
 
 /// 파일을 바꾸기 전 상태를 묶음에 남긴다. 같은 묶음에서 같은 파일은 처음 한 번만.
 void recordBeforeChange(Vault vault, String path, {String? batch}) {
@@ -125,6 +159,18 @@ int undoBatch(Vault vault, String batch) {
       if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, dynamic>,
   ].reversed;
   var count = 0;
+  final stamp = DateTime.now().millisecondsSinceEpoch;
+  // 같은 이름의 묶음을 전에 되돌린 적이 있으면 휴지통 폴더를 따로 쓴다 (앞 휴지통 파일을 덮지 않게)
+  final trashName = Directory(p.join(vault.metaDir, 'trash', batch)).existsSync() ? '$batch-u$stamp' : batch;
+  // 남이 준 백업을 복원한 뒤 되돌리기를 누르는 경우 등: manifest 경로가 지식 폴더 밖이면 아무것도 하지 않는다.
+  for (final entry in entries) {
+    final target = p.normalize(p.join(vault.root, entry['path'] as String));
+    final backupRel = entry['backup'] as String?;
+    if (!vault.contains(target) || target == vault.root ||
+        (backupRel != null && !p.isWithin(dir, p.normalize(p.join(dir, backupRel))))) {
+      throw ArgumentError('$batch 묶음의 경로가 지식 폴더 밖을 가리킵니다: ${entry['path']} — 되돌리지 않았습니다.');
+    }
+  }
   for (final entry in entries) {
     final target = p.join(vault.root, entry['path'] as String);
     if (entry['existed'] == true) {
@@ -133,13 +179,24 @@ int undoBatch(Vault vault, String batch) {
     } else {
       final file = File(target);
       if (!file.existsSync()) continue;
-      final trash = p.join(vault.metaDir, 'trash', batch, entry['path'] as String);
+      final trash = p.join(vault.metaDir, 'trash', trashName, entry['path'] as String);
       Directory(p.dirname(trash)).createSync(recursive: true);
       file.renameSync(trash);
     }
     count++;
   }
   undoneMark.writeAsStringSync(formatTime(DateTime.now()));
+  // 되돌린 묶음은 이름을 바꿔 보관한다. 세션 묶음(s_<세션 앞 8자>)은 같은 세션에서 다시 저장하면 같은 이름을 쓰는데,
+  // 예전에는 "이미 되돌림" 표시가 남은 폴더에 새 저장이 쌓여 다시 되돌릴 수 없었다 (11/11 K-35).
+  Directory(dir).renameSync('$dir-u$stamp');
+  // 세션 묶음을 되돌리면 그 세션은 다시 "저장 안 함"이다 — 자동 정리·지난 대화 목록에 다시 나온다.
+  if (batch.startsWith('s_') && batch.length > 2) {
+    final prefix = batch.substring(2);
+    final registry = SessionRegistry(vault);
+    for (final MapEntry(key: id, value: status) in registry.load().entries) {
+      if (id.startsWith(prefix) && status == SessionStatus.saved) registry.mark(id, SessionStatus.unsaved);
+    }
+  }
   appendChangeLog(vault, 'undo', '$batch 파일 $count개', batch: 'undo');
   return count;
 }

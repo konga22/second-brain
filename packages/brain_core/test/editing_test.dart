@@ -170,6 +170,12 @@ void main() {
     );
     final tenMs = watch.elapsedMilliseconds;
     print('1만 노드 배치: 처음 ${full}ms, 저장된 위치 그대로 ${cachedMs}ms, 새 노드 1개 ${newMs}ms, 새 노드 10개 ${tenMs}ms');
+    // 시간 상한 (11/11 K-38: 성능 시험에 단언이 없었다). 시험(JIT)은 앱(AOT)보다 1.5~2배 느려 넉넉히 잡는다.
+    // 11/12 이 맥: 처음 약 12~14초, 저장된 위치 1ms, 새 노드 1·10개 약 40ms.
+    expect(cachedMs, lessThan(100), reason: '저장된 위치는 다시 계산하지 않아야 한다');
+    expect(newMs, lessThan(1000), reason: '새 노드만 자리 잡기 (전체 다시 배치 2.4초였던 것)');
+    expect(tenMs, lessThan(1000));
+    expect(full, lessThan(60000));
     expect(cached['n5'], positions['n5']);
     expect(withNew, hasLength(10001));
     expect(withTen, hasLength(10010));
