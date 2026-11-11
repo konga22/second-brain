@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+import '../graph/layout_health.dart';
 import '../lessons/lesson.dart';
 import '../note/note.dart';
 import '../note/wiki_links.dart';
@@ -334,6 +335,7 @@ class SearchIndex {
     _db.execute('delete from link_targets');
     _db.execute('delete from suggested_links');
     _db.execute('delete from graph_pos'); // 배치 규칙이 바뀌었을 수 있어 다시 배치한다
+    _db.execute("delete from index_meta where key like 'layout_%'");
     final result = sync();
     _db.execute("insert into docs_fts(docs_fts) values('optimize')");
     return result;
@@ -613,7 +615,9 @@ class SearchIndex {
       ),
   };
 
-  void saveGraphPositions(Map<String, Point<double>> positions) {
+  /// [base]는 전체 배치를 했을 때만 준다. 그때의 상태를 기록해 두고, 뒤에 배치가 얼마나 나빠졌는지 견준다
+  /// (설계서 5.5 "꼬임 막기" v1.3.28).
+  void saveGraphPositions(Map<String, Point<double>> positions, {LayoutBase? base}) {
     _db.execute('begin');
     try {
       _db.execute('delete from graph_pos');
@@ -622,6 +626,48 @@ class SearchIndex {
         insert.execute([e.key, e.value.x, e.value.y]);
       }
       insert.close();
+      if (base != null) {
+        for (final (key, value) in [
+          ('layout_version', base.version),
+          ('layout_nodes', base.nodes),
+          ('layout_links', base.links),
+          ('layout_groups', base.groups),
+          ('layout_cross', base.crossings),
+          ('layout_stray', base.stray),
+        ]) {
+          _db.execute('insert or replace into index_meta(key, value) values (?, ?)', [key, value]);
+        }
+      }
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
+  }
+
+  /// 마지막 전체 배치의 기록. 없으면 null (이 기록을 남기기 전에 만든 배치이거나 아직 배치한 적 없음).
+  LayoutBase? graphLayoutBase() {
+    final values = {
+      for (final row in _db.select("select key, value from index_meta where key like 'layout_%'"))
+        row['key'] as String: row['value'] as int,
+    };
+    if (values.length < 6) return null;
+    return LayoutBase(
+      version: values['layout_version']!,
+      nodes: values['layout_nodes']!,
+      links: values['layout_links']!,
+      groups: values['layout_groups']!,
+      crossings: values['layout_cross']!,
+      stray: values['layout_stray']!,
+    );
+  }
+
+  /// 저장된 위치와 배치 기록을 지운다. 다음에 그래프를 열 때 처음부터 다시 배치한다 ([다시 배치] 버튼).
+  void clearGraphLayout() {
+    _db.execute('begin');
+    try {
+      _db.execute('delete from graph_pos');
+      _db.execute("delete from index_meta where key like 'layout_%'");
       _db.execute('commit');
     } catch (_) {
       _db.execute('rollback');

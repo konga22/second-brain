@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
 
@@ -7,6 +8,15 @@ import 'package:brain_core/brain_core.dart';
 //
 // 최상위 함수로만 둔다: 클래스 메서드 안 클로저를 Isolate.run에 넘기면 보낼 수 없는 객체까지
 // 붙잡혀 실패한다 (실수 노트 L-0004). 인자는 경로 문자열만 넘긴다.
+
+/// 그래프 배치 (설계서 5.5). 새 노드만 자리를 잡을지 처음부터 다시 배치할지는 [layoutGraph]가 정한다.
+/// 전체 배치는 노드 1만 개에서 13초쯤 걸린다. 넘기는 것은 노드·연결·좌표·기록 숫자뿐이다.
+Future<LayoutResult> layoutGraphInBackground(
+  List<GraphNode> nodes,
+  List<GraphEdge> edges,
+  Map<String, Point<double>> stored,
+  LayoutBase? base,
+) => Isolate.run(() => layoutGraph(nodes, edges, stored: stored, base: base));
 
 /// 색인 동기화 (앱 시작 때). 노트 1만 개를 처음 색인하면 30초쯤 걸려, 화면 스레드에서 하면 그동안 앱이 멈춘다.
 /// 바뀐 문서 수를 돌려준다.

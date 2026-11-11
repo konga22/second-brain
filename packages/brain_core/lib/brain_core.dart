@@ -5,6 +5,7 @@ export 'src/bench/lesson_bench.dart';
 export 'src/bench/search_bench.dart';
 export 'src/chat/chat_context.dart';
 export 'src/graph/force_layout.dart';
+export 'src/graph/layout_health.dart';
 export 'src/imports/text_import.dart';
 export 'src/index/bigram.dart';
 export 'src/index/match_strength.dart';

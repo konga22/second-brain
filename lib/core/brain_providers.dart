@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
@@ -287,7 +286,10 @@ final conflictCountProvider = Provider<int>((ref) {
       .length;
 });
 
-/// 그래프 노드 위치. 저장된 위치로 바로 그리고, 새 노드가 있으면 isolate에서 배치한다 (설계서 5.5).
+/// 그래프 노드 위치. 저장된 위치로 바로 그리고, 새 노드가 있거나 배치가 꼬였으면 isolate에서 배치한다 (설계서 5.5).
+///
+/// 새 노드만 끼워 넣기를 되풀이하면 배치가 꼬인다 (11/11 실제 지식 폴더: 직접 연결 47개가 43번 겹침).
+/// 전체 배치 때의 기록과 견줘 기준보다 나빠졌으면 처음부터 다시 배치한다 ("꼬임 막기" v1.3.28).
 final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
   ref,
 ) async {
@@ -302,13 +304,13 @@ final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
     for (final link in links)
       GraphEdge(link.fromId, link.toId, weight: link.isSuggested ? 0.25 : 1),
   ];
-  final initial = index.graphPositions();
-  if (nodes.every((n) => initial.containsKey(n.id))) {
-    return {for (final n in nodes) n.id: initial[n.id]!};
+  final stored = index.graphPositions();
+  final base = index.graphLayoutBase();
+  // 노트·연결·주제 구성이 기록과 같으면 아무것도 재지 않고 바로 돌려준다 (그래프 첫 표시 1초 목표).
+  if (decideLayout(nodes, edges, stored: stored, base: base) == LayoutAction.keep) {
+    return {for (final n in nodes) n.id: stored[n.id]!};
   }
-  final positions = await Isolate.run(
-    () => forceLayout(nodes, edges, initial: initial),
-  );
-  index.saveGraphPositions(positions);
-  return positions;
+  final result = await layoutGraphInBackground(nodes, edges, stored, base);
+  index.saveGraphPositions(result.positions, base: result.base);
+  return result.positions;
 });

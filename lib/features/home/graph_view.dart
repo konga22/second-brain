@@ -76,14 +76,22 @@ class _GraphViewState extends ConsumerState<GraphView> {
     return seen;
   }
 
+  /// 화면에 맞출 때 위 도구 줄(보기 전환·폴더 칩 두 줄)과 아래 범례 줄에 그래프가 가리지 않게 비워 두는 자리.
+  static const _fitTop = 84.0;
+  static const _fitBottom = 46.0;
+
   void _fit(Rect bounds, Size viewport) {
     graphFitCount++;
+    // 영역이 낮으면 비워 두지 않는다 (그래프가 지나치게 작아진다).
+    final hasRoom = viewport.height > 360;
+    final top = hasRoom ? _fitTop : 0.0;
+    final usable = viewport.height - top - (hasRoom ? _fitBottom : 0.0);
     final scale = min(
       viewport.width / max(bounds.width, 1),
-      viewport.height / max(bounds.height, 1),
+      usable / max(bounds.height, 1),
     ).clamp(0.05, 3.0);
     final dx = (viewport.width - bounds.width * scale) / 2 - bounds.left * scale;
-    final dy = (viewport.height - bounds.height * scale) / 2 - bounds.top * scale;
+    final dy = top + (usable - bounds.height * scale) / 2 - bounds.top * scale;
     _transform.value = Matrix4.identity()
       ..translateByDouble(dx, dy, 0, 1)
       ..scaleByDouble(scale, scale, 1, 1);
@@ -211,7 +219,10 @@ class _GraphViewState extends ConsumerState<GraphView> {
               // 맞추기는 보는 대상(전체·주변·폴더·노드 수)이 바뀔 때만 한다. 영역 크기는 넣지 않는다:
               // 화면 배율(⌘±)·창 크기가 바뀔 때마다 다시 맞추면, 앱 전체가 커진 직후 그래프가 다시
               // 줄어들어 덜덜 떨린다 (11/07 사용자 지적, 실수 노트). 크기가 바뀌면 [맞추기]로.
-              final fitKey = '${isLocal ? selected : 'all'}:$_topic:${positions.length}';
+              // 그림 크기(노드들이 차지하는 범위)는 넣는다: 다시 배치하면 노드 수는 같아도 범위가 달라져
+              // 다시 맞춰야 한다. 이것은 영역 크기와 달리 화면 배율·창 크기에 따라 바뀌지 않는다.
+              final fitKey =
+                  '${isLocal ? selected : 'all'}:$_topic:${positions.length}:${bounds.width.round()}x${bounds.height.round()}';
               if (_fittedKey != fitKey) {
                 _fittedKey = fitKey;
                 WidgetsBinding.instance.addPostFrameCallback((_) => _fit(Offset.zero & bounds.size, viewport));
@@ -321,6 +332,20 @@ class _GraphViewState extends ConsumerState<GraphView> {
                         ),
                         const SizedBox(width: 4),
                         _ModeButton(label: '맞추기', isOn: false, onTap: () => _fit(Offset.zero & bounds.size, viewport)),
+                        const SizedBox(width: 4),
+                        // 저장된 위치를 지우고 처음부터 다시 배치한다 (설계서 5.5 "꼬임 막기").
+                        _ModeButton(
+                          label: '다시 배치',
+                          isOn: false,
+                          onTap: () {
+                            try {
+                              ref.read(searchIndexProvider).clearGraphLayout();
+                              ref.invalidate(graphLayoutProvider);
+                            } on Object catch (e) {
+                              ShadToaster.of(context).show(ShadToast(description: Text('다시 배치하지 못했습니다: $e')));
+                            }
+                          },
+                        ),
                       ],
                     ),
                   ),
