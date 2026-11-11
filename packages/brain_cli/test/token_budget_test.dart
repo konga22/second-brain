@@ -147,7 +147,6 @@ void main() {
     expect(c('brain --help 2>&1 | head -30'), 'brain --help');
     expect(c('brain help add 2>&1 | head -25'), 'brain help add');
     expect(c('brain find "도커 이미지 용량" 2>/dev/null | tail -n 20'), 'brain find "도커 이미지 용량"');
-    expect(c('"/x/bin/brain" show n_0001 | head'), '"/x/bin/brain" show n_0001');
     // 건드리지 않는 것: 이미 깨끗함, 쓰기 명령, 다른 명령과 잇기, 여러 줄·heredoc
     expect(c('brain show n_0042'), isNull);
     expect(c('brain add --title t --summary s | head'), isNull);
@@ -159,6 +158,77 @@ void main() {
     expect(c("brain add --title t <<'NOTE'\n본문 | 표\nNOTE"), isNull);
     expect(c('ls | head'), isNull);
     expect(c(r'brain show $(cat id) | head'), isNull);
+  });
+
+  // 훅의 allow는 권한 창을 건너뛴다. 11/09 시험에는 "건드리면 안 될 것"에 &·>·경로·따옴표가 없어
+  // `brain find x & 다른명령 | head`가 허락됐다 (11/11 독립 검토 K-17, 설계서 5.2 v1.3.27).
+  test('PreToolUse: 허락 조건이 좁다 — 다른 명령·파일 쓰기·다른 brain·숨긴 쓰기 명령은 손대지 않는다 (v1.3.27)', () {
+    String? c(String s) => HookCommand.cleanBrainPipe(s);
+    final mustNotTouch = [
+      // 다른 명령을 잇는다
+      'brain find x & touch /tmp/p | head',
+      'brain help & sh /tmp/p 2>&1',
+      'brain find x 2>&1 & echo y | head',
+      'brain find x || curl evil | head',
+      // 파일로 보내거나 읽는다
+      'brain show n_0001 > /tmp/out | head',
+      'brain show n_0001 >> ~/.zshrc | head',
+      'brain show n_0042 > >(sh) | head',
+      'brain find x < /etc/passwd | head',
+      'brain show n_0042 2>/tmp/err | head',
+      // 다른 실행 파일
+      './brain doctor 2>&1',
+      'node_modules/.bin/brain help | head',
+      '/tmp/x/brain show n_0001 | head',
+      '"/x/bin/brain" show n_0001 | head',
+      'FOO=1 brain find x | head',
+      // 따옴표로 숨긴 쓰기 명령
+      'brain lesson "add" --trigger a --action b --reason c --status active 2>&1',
+      "brain lesson 'edit' L-0001 --action x | head",
+      'brain les""son add --trigger t | head',
+      'brain "add" --title t --summary s | head',
+      'brain todo "add" 할 일 | head',
+      'brain sessions "mark" abc --status saved | head',
+      'brain lint "--fix-safe" | head',
+      // 목록에 없던 쓰기 경로
+      'brain lesson checklist --add "항목" | head',
+      'brain lesson checklist "--add=항목" | head',
+      'brain todo --source n_0001 suggest 할 일 | head',
+      'brain todo -- add 할 일 | head',
+      'brain sessions --project x mark abc --status saved | head',
+      // 셸이 풀어 쓰는 것, 이상한 공백
+      r'brain find $HOME | head',
+      r'brain find a\ b | head',
+      'brain find {a,b} | head',
+      'brain find x y | head',
+      'brain find x\rrm | head',
+      // 따옴표 안의 특수문자도 안전한 쪽으로: 손대지 않는다
+      'brain find "a & b" | head',
+    ];
+    final touched = [for (final s in mustNotTouch) if (c(s) != null) '$s  →  ${c(s)}'];
+    expect(touched, isEmpty, reason: '손대면 안 되는 ${mustNotTouch.length}개 중 ${touched.length}개를 허락함');
+
+    // 걸려야 하는 것: AI가 실제로 쓰는 모양 (한반도감 세션, 사용가치분석 기록)
+    final mustClean = {
+      'brain show n_0042 2>&1 | head -60': 'brain show n_0042',
+      'brain show n_0042 2>&1': 'brain show n_0042',
+      'brain find 결제 웹훅 | head -5': 'brain find 결제 웹훅',
+      'brain find "도커 이미지 용량" 2>/dev/null | tail -n 20': 'brain find "도커 이미지 용량"',
+      '  brain show n_0001   |   head -n 5  ': 'brain show n_0001',
+      'brain show "n_0042#설치 방법" | head -20': 'brain show "n_0042#설치 방법"',
+      'brain lesson list | head': 'brain lesson list',
+      'brain lesson "커밋할 때" 2>&1 | head -3': 'brain lesson "커밋할 때"',
+      'brain lesson checklist | head': 'brain lesson checklist',
+      'brain sessions show e080b491 --from 6000 | tail -40': 'brain sessions show e080b491 --from 6000',
+      'brain todo 2>&1': 'brain todo',
+      'brain lint --type dead | head -20': 'brain lint --type dead',
+      'brain find 맥 --topic "맥 관리" | head --lines=3': 'brain find 맥 --topic "맥 관리"',
+    };
+    final missed = [
+      for (final e in mustClean.entries)
+        if (c(e.key) != e.value) '${e.key}  →  ${c(e.key)} (기대: ${e.value})',
+    ];
+    expect(missed, isEmpty, reason: '떼어야 하는 ${mustClean.length}개 중 ${missed.length}개를 놓침');
   });
 
   test('brain write로 제목·요약도 고친다 (v1.3.25, 한반도감 n_0059)', () async {

@@ -105,6 +105,7 @@ class HookCommand extends Command<int> {
   /// PreToolUse (설계서 5.2 v1.3.22): AI가 `brain show n_0042 2>&1 | head -60`처럼 이으면 허용 목록
   /// (`Bash(brain *)`) 밖이라 거부되거나 매번 허락을 묻는다. 안내 문장만으로는 안 지켜져서(한반도감 세션 3번)
   /// 읽기 명령에 붙은 `2>&1`·`| head`·`| tail`만 떼고 실행을 허락한다. 그 밖은 아무것도 내지 않는다(그대로 진행).
+  /// 허락 조건은 [cleanBrainPipe]가 정한다 (v1.3.27에서 좁힘).
   void _preTool(Map<String, dynamic> input) {
     if (input['tool_name'] != 'Bash') return;
     final toolInput = input['tool_input'];
@@ -124,27 +125,50 @@ class HookCommand extends Command<int> {
   }
 
   static const _readOnly = {'find', 'show', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'bench', 'lint', '--help', '-h'};
-  static final _tailPipe = RegExp(r'^\s*(head|tail)(\s+-n\s*\d+|\s+-\d+|\s+--lines=\d+)?\s*$');
-  static final _stderr = RegExp(r'\s+2>(&1|\s*/dev/null)');
+  static final _tailPipe = RegExp(r'^[ \t]*(head|tail)([ \t]+-n[ \t]*\d+|[ \t]+-\d+|[ \t]+--lines=\d+)?[ \t]*$');
+
+  /// 명령 끝에 붙은 `2>&1`·`2>/dev/null`. 가운데 있는 것은 떼지 않는다(따옴표 안 글자를 바꾸지 않게).
+  static final _trailingStderr = RegExp(r'([ \t]+2>(&1|[ \t]*/dev/null))+[ \t]*$');
+
+  /// 하나라도 있으면 손대지 않는 글자: 다른 명령을 잇는 것(& ;), 파일로 보내거나 읽는 것(< >),
+  /// 셸이 풀어 쓰는 것($ ` \ ( ) { } !). 따옴표 안이어도 손대지 않는다 — 안전한 쪽으로 틀린다.
+  static final _shellMeta = RegExp(r'[&;<>(){}$`\\!]');
+
+  /// 공백·탭이 아닌 공백류(줄바꿈 포함)와 제어 문자.
+  static final _oddSpace = RegExp(r'[^\S \t]|[\x00-\x08\x0e-\x1f\x7f]');
+  static final _quotes = RegExp('["\']');
 
   /// 떼어 낼 것이 있는 한 줄짜리 brain 읽기 명령이면 뗀 명령, 아니면 null.
+  ///
+  /// 여기서 null이 아니면 훅이 `allow`를 내 Claude Code의 권한 창을 건너뛴다. 그래서 허락할 모양을 좁게 정한다
+  /// (설계서 5.2 v1.3.27, 11/11 독립 검토 K-17: `brain find x & 다른명령 | head`가 허락됐다).
   static String? cleanBrainPipe(String command) {
     final text = command.trim();
-    if (text.contains('\n') || text.contains('<<') || text.contains(';') || text.contains('&&') || text.contains('`') || text.contains(r'$(')) {
-      return null;
-    }
+    if (text.isEmpty || _oddSpace.hasMatch(text)) return null;
     final parts = text.split('|');
-    final head = parts.first.trim();
-    final words = head.split(RegExp(r'\s+'));
-    if (words.isEmpty || !(words.first == 'brain' || words.first.endsWith('/brain') || words.first.endsWith('/brain"'))) return null;
-    if (words.length < 2 || !_readOnly.contains(words[1])) return null;
-    if (words[1] == 'lesson' && words.length > 2 && const {'add', 'set', 'edit', 'evidence'}.contains(words[2])) return null;
-    if (words[1] == 'todo' && words.length > 2 && const {'add', 'suggest', 'accept', 'done'}.contains(words[2])) return null;
-    if (words[1] == 'sessions' && words.length > 2 && words[2] == 'mark') return null;
-    if (words[1] == 'lint' && head.contains('--fix-safe')) return null;
     if (!parts.skip(1).every(_tailPipe.hasMatch)) return null;
-    final cleaned = head.replaceAll(_stderr, '').trim();
-    return cleaned == text ? null : cleaned;
+    final head = parts.first.replaceFirst(_trailingStderr, '').trim();
+    if (_shellMeta.hasMatch(head)) return null;
+    // 따옴표를 벗겨 비교한다: `brain lesson "add"`, `brain les""son add`도 셸에서는 쓰기 명령이다.
+    final words = [for (final w in head.split(RegExp(r'[ \t]+'))) w.replaceAll(_quotes, '')];
+    if (words.length < 2 || words.first != 'brain' || !_readOnly.contains(words[1])) return null;
+    final args = words.skip(2).toList();
+    // `--` 뒤는 옵션이 아니라 인자로 읽혀 하위 명령 검사를 비켜 간다.
+    if (args.contains('--')) return null;
+    switch (words[1]) {
+      case 'lesson':
+        // 하위 명령은 옵션 뒤에도 올 수 있어 어디에 있든 쓰기로 본다. checklist --add 도 쓰기다.
+        if (args.any(const {'add', 'set', 'edit', 'evidence'}.contains)) return null;
+        if (args.any((w) => w.startsWith('--add'))) return null;
+      case 'sessions':
+        if (args.contains('mark')) return null;
+      case 'todo':
+        // `brain todo` 한 가지만 읽기다: `brain todo --source n_1 suggest …`처럼 옵션 뒤에 쓰기 동작이 올 수 있다.
+        if (args.isNotEmpty) return null;
+      case 'lint':
+        if (args.any((w) => w.startsWith('--fix'))) return null;
+    }
+    return head == text ? null : head;
   }
 
   /// 대화 중 자동 저장 안내 (설계서 5.6). 세션 id는 넣지 않는다 — brain add가 CLAUDE_CODE_SESSION_ID로 연결한다.
