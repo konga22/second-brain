@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../../core/background_tasks.dart';
 import '../../core/brain_providers.dart';
 
 /// 새 노트·노트 고치기 대화상자 (설계서 3절 `/notes` 작성·수정).
@@ -44,6 +45,9 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
   /// 저장하려는데 그사이 다른 곳에서 노트가 바뀌었다 → [덮어쓰기]·[최신 내용 불러오기] (11/11 K-34).
   bool _hasConflict = false;
   bool _isSaving = false;
+
+  /// 고칠 노트를 백그라운드에서 읽는 중 (1만 개에서 약 80ms). 그동안 칸은 읽기 전용.
+  bool _isLoading = false;
 
   /// 연 시점의 내용. 바뀐 것이 있으면 닫기 전에 묻는다.
   String _initial = '';
@@ -95,25 +99,40 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
       _initial = _current;
       return;
     }
+    _isLoading = true;
     _load();
   }
 
   /// 파일에서 지금 내용을 읽어 칸을 채운다 (처음 열 때, 충돌 뒤 [최신 내용 불러오기]).
-  void _load() {
-    final found = ref.read(noteStoreProvider).read(widget.noteId!);
-    if (found == null) {
-      _error = '노트를 찾지 못했습니다.';
-      return;
+  /// 읽기 전에 색인을 맞추므로 백그라운드에서 한다 (11/11 검토 O-5).
+  Future<void> _load() async {
+    final vault = ref.read(vaultProvider);
+    try {
+      final found = await readNoteInBackground(vault.root, vault.indexPath, widget.noteId!);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (found == null) {
+          _error = '노트를 찾지 못했습니다.';
+          return;
+        }
+        final (doc, note, hash) = found;
+        _hash = hash;
+        _title.text = note.title;
+        _summary.text = note.summary;
+        _tags.text = note.tags.join(', ');
+        _aliases.text = note.aliases.join(', ');
+        _topic.text = doc.topic;
+        _body.text = note.body.trim();
+        _initial = _current;
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = '노트를 읽지 못했습니다: $e';
+      });
     }
-    final (doc, note, hash) = found;
-    _hash = hash;
-    _title.text = note.title;
-    _summary.text = note.summary;
-    _tags.text = note.tags.join(', ');
-    _aliases.text = note.aliases.join(', ');
-    _topic.text = doc.topic;
-    _body.text = note.body.trim();
-    _initial = _current;
   }
 
   @override
@@ -129,38 +148,35 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
       if (t.trim().isNotEmpty) t.trim(),
   ];
 
-  void _onSave() {
+  /// 저장은 백그라운드에서 한다: 쓰기 전·후 색인 맞추기와 자동 목차가 노트 1만 개에서 약 235ms라
+  /// 화면 스레드에서 하면 그동안 앱이 멈췄다 (11/11 검토 O-5).
+  Future<void> _onSave() async {
+    if (_isSaving || _isLoading) return;
     setState(() {
       _isSaving = true;
       _error = null;
       _hasConflict = false;
     });
-    final store = ref.read(noteStoreProvider);
+    final vault = ref.read(vaultProvider);
+    // 저장 중 창이 닫혀도 폴더 번호는 올려야 목록·그래프가 맞는다 → 미리 잡아 둔다.
+    final revision = ref.read(vaultRevisionProvider.notifier);
+    final topic = _topic.text.trim();
     try {
-      final String id;
-      if (_isNew) {
-        (id, _) = store.add(
-          title: _title.text,
-          summary: _summary.text,
-          body: _body.text,
-          tags: _split(_tags.text),
-          aliases: _split(_aliases.text),
-          topic: _topic.text.trim().isEmpty ? null : _topic.text.trim(),
-          batch: newBatchId(),
-        );
-      } else {
-        id = widget.noteId!;
-        store.update(
-          id,
-          expectHash: _hash!,
-          title: _title.text,
-          summary: _summary.text,
-          body: _body.text,
-          tags: _split(_tags.text),
-          aliases: _split(_aliases.text),
-        );
-      }
-      bumpVault(ref);
+      final id = await saveNoteInBackground(
+        vault.root,
+        vault.indexPath,
+        id: _isNew ? null : widget.noteId,
+        expectHash: _isNew ? null : _hash,
+        title: _title.text,
+        summary: _summary.text,
+        body: _body.text,
+        tags: _split(_tags.text),
+        aliases: _split(_aliases.text),
+        topic: _isNew && topic.isNotEmpty ? topic : null,
+        batch: _isNew ? newBatchId() : null,
+      );
+      revision.bump();
+      if (!mounted) return;
       ref.read(selectedNoteProvider.notifier).select(id);
       _initial = _current; // 저장했으니 닫을 때 묻지 않는다
       setState(() {});
@@ -169,19 +185,22 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
       });
     } on NoteConflictException catch (e) {
       // 사이드바의 충돌 사본 수가 바로 보이게
-      bumpVault(ref);
+      revision.bump();
+      if (!mounted) return;
       setState(() {
         _error = '${e.message}\n내 것으로 덮어쓰거나, 최신 내용을 불러와 다시 고칠 수 있습니다.';
         _hasConflict = true;
         _isSaving = false;
       });
     } on NoteStoreException catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.message;
         _isSaving = false;
       });
     } on Object catch (e) {
       // 색인 잠김·파일 오류 등: "저장 중…"에 멈추지 않고 알린다. 쓴 글은 대화상자에 그대로 남는다.
+      if (!mounted) return;
       setState(() {
         _error = '저장하지 못했습니다: $e';
         _isSaving = false;
@@ -190,14 +209,16 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
   }
 
   /// 충돌: 지금 파일의 해시로 다시 저장한다 (다른 곳에서 바꾼 내용은 되돌리기 묶음에 남는다).
-  void _onOverwrite() {
-    final found = ref.read(noteStoreProvider).read(widget.noteId!);
+  Future<void> _onOverwrite() async {
+    final vault = ref.read(vaultProvider);
+    final found = await readNoteInBackground(vault.root, vault.indexPath, widget.noteId!);
+    if (!mounted) return;
     if (found == null) {
       setState(() => _error = '노트를 찾지 못했습니다 (그사이 지워졌을 수 있습니다).');
       return;
     }
     _hash = found.$3;
-    _onSave();
+    await _onSave();
   }
 
   /// 충돌: 내가 고친 것은 충돌 사본에 있으므로 버리고 지금 파일 내용으로 다시 채운다.
@@ -205,8 +226,9 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
     setState(() {
       _error = null;
       _hasConflict = false;
-      _load();
+      _isLoading = true;
     });
+    _load();
   }
 
   @override
@@ -238,9 +260,9 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
               child: const Text('취소'),
             ),
             ShadButton(
-              enabled: !_isSaving,
+              enabled: !_isSaving && !_isLoading,
               onPressed: _onSave,
-              child: Text(_isSaving ? '저장 중…' : '저장'),
+              child: Text(_isSaving ? '저장 중…' : (_isLoading ? '불러오는 중…' : '저장')),
             ),
           ],
           child: Column(
@@ -249,12 +271,14 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
             children: [
               ShadInput(
                 controller: _title,
+                readOnly: _isLoading,
                 placeholder: const Text('제목'),
                 autofocus: _isNew,
               ),
               const SizedBox(height: 8),
               ShadInput(
                 controller: _summary,
+                readOnly: _isLoading,
                 placeholder: const Text('요약 한 줄 (60자 이내, 검색 결과에 보임)'),
                 onChanged: (_) => setState(() {}),
                 trailing: Text(
@@ -270,6 +294,7 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
                   Expanded(
                     child: ShadInput(
                       controller: _tags,
+                      readOnly: _isLoading,
                       placeholder: const Text('태그 (쉼표로)'),
                     ),
                   ),
@@ -277,6 +302,7 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
                   Expanded(
                     child: ShadInput(
                       controller: _aliases,
+                      readOnly: _isLoading,
                       placeholder: const Text('다른 표기 (예: Xcode, 엑스코드)'),
                     ),
                   ),
@@ -294,6 +320,7 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
               const SizedBox(height: 8),
               ShadTextarea(
                 controller: _body,
+                readOnly: _isLoading,
                 placeholder: const Text('본문 (마크다운). 다른 노트는 [[제목]]으로 잇는다.'),
                 minHeight: 220,
                 maxHeight: 420,

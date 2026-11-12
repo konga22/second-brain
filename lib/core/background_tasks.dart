@@ -19,7 +19,8 @@ Future<LayoutResult> layoutGraphInBackground(
 ) => Isolate.run(() => layoutGraph(nodes, edges, stored: stored, base: base));
 
 /// 색인 동기화 (앱 시작 때). 노트 1만 개를 처음 색인하면 30초쯤 걸려, 화면 스레드에서 하면 그동안 앱이 멈춘다.
-/// 바뀐 문서 수를 돌려준다.
+/// 바뀐 문서 수를 돌려준다. 색인 버전이 낮으면(스키마를 올린 첫 실행·새 폴더) 여기서 다시 만든다 —
+/// 앱의 다른 곳은 모두 `rebuildIfOld: false`로 열어 그동안 옛 색인을 본다 (11/11 K-32).
 Future<int> syncIndexInBackground(String vaultRoot, String indexPath) =>
     Isolate.run(() {
       final vault = Vault(vaultRoot);
@@ -39,7 +40,7 @@ Future<({List<IndexedDoc> notes, List<NoteLink> links})> vaultViewInBackground(
   String indexPath,
 ) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
   try {
     return (notes: index.notes(), links: index.links(dismissed: DismissedLinks(vault).load()));
   } finally {
@@ -51,7 +52,7 @@ Future<({List<IndexedDoc> notes, List<NoteLink> links})> vaultViewInBackground(
 Future<List<LintIssue>> lintInBackground(String vaultRoot, String indexPath) =>
     Isolate.run(() {
       final vault = Vault(vaultRoot);
-      final index = SearchIndex.open(vault, path: indexPath);
+      final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
       try {
         return Linter(vault, index).run();
       } finally {
@@ -65,10 +66,132 @@ Future<({List<Todo> candidates, List<Todo> fromNotes})> noteTodosInBackground(
   String indexPath,
 ) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
   try {
     final store = TodoStore(vault, index);
     return (candidates: store.candidatesFromNotes(), fromNotes: store.fromNotes());
+  } finally {
+    index.close();
+  }
+});
+
+/// 앱 안 노트 저장 (편집 창 [저장]·[내 것으로 덮어쓰기]). 쓰기라 색인을 기본값으로 연다: 처음 색인 중이면
+/// 다시 만들기를 기다린다(저장 뒤 확인이 색인에 기댄다, 11/12).
+/// 새 노트면 [id]가 null이다. 저장한 노트 id를 돌려준다.
+///
+/// 저장은 쓰기 전·후에 색인을 맞추고 자동 목차를 다시 쓴다. 노트 1만 개에서 약 235ms라 화면 스레드에서 하면
+/// 그동안 앱이 멈췄다 (11/11 검토 O-5). [NoteConflictException]·[NoteStoreException]은 그대로 다시 던져진다.
+Future<String> saveNoteInBackground(
+  String vaultRoot,
+  String indexPath, {
+  required String? id,
+  required String? expectHash,
+  required String title,
+  required String summary,
+  required String body,
+  required List<String> tags,
+  required List<String> aliases,
+  String? topic,
+  String? batch,
+}) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath);
+  try {
+    final store = NoteStore(vault, index);
+    if (id == null) {
+      final (newId, _) = store.add(
+        title: title,
+        summary: summary,
+        body: body,
+        tags: tags,
+        aliases: aliases,
+        topic: topic,
+        batch: batch,
+      );
+      return newId;
+    }
+    store.update(
+      id,
+      expectHash: expectHash!,
+      title: title,
+      summary: summary,
+      body: body,
+      tags: tags,
+      aliases: aliases,
+      batch: batch,
+    );
+    return id;
+  } finally {
+    index.close();
+  }
+});
+
+/// 고칠 노트 읽기 (편집 창을 열 때, 충돌 뒤 다시 읽을 때). 읽기 전 색인 맞추기가 1만 개에서 약 80ms다.
+Future<(IndexedDoc, Note, String)?> readNoteInBackground(
+  String vaultRoot,
+  String indexPath,
+  String id,
+) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath);
+  try {
+    return NoteStore(vault, index).read(id);
+  } finally {
+    index.close();
+  }
+});
+
+/// 노트 패널·사이드바의 작은 쓰기 (11/11 검토 O-5 나머지). 하나하나는 작아 보여도 쓰기 전·후 색인 맞추기와
+/// 자동 목차 다시 쓰기가 붙어, 노트 1만 개에서 편집 창 저장처럼 화면이 멈췄다.
+enum NoteChange {
+  /// 휴지통으로 옮긴다 (`brain undo`로 되살림).
+  delete,
+
+  /// 초안을 확정한다.
+  confirm,
+
+  /// 다른 주제 폴더로 옮긴다 ([topic] 필요).
+  move,
+
+  /// 추천 연결을 확정한다: 본문 끝에 `관련: [[linkTitle]]`.
+  appendLink,
+}
+
+Future<void> changeNoteInBackground(
+  String vaultRoot,
+  String indexPath, {
+  required NoteChange change,
+  required String id,
+  String? topic,
+  String? linkTitle,
+  String? batch,
+}) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath);
+  try {
+    final store = NoteStore(vault, index);
+    switch (change) {
+      case NoteChange.delete:
+        store.delete(id, batch: batch);
+      case NoteChange.confirm:
+        store.setStatus(id, NoteStatus.active, batch: batch);
+      case NoteChange.move:
+        store.move(id, topic!, batch: batch);
+      case NoteChange.appendLink:
+        final found = store.read(id);
+        if (found == null) throw NoteStoreException('$id 노트가 없습니다.');
+        final (_, note, hash) = found;
+        store.update(
+          id,
+          expectHash: hash,
+          title: note.title,
+          summary: note.summary,
+          body: '${note.body.trimRight()}\n\n관련: [[$linkTitle]]\n',
+          tags: note.tags,
+          aliases: note.aliases,
+          batch: batch,
+        );
+    }
   } finally {
     index.close();
   }

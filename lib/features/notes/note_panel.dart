@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../shared/date_text.dart';
+import '../../core/background_tasks.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/markdown_view.dart';
 import 'note_editor_dialog.dart';
@@ -86,34 +87,50 @@ class _NoteDetail extends ConsumerWidget {
         ],
       ),
     );
-    if (isConfirmed != true) return;
-    ref.read(noteStoreProvider).delete(doc.id);
-    ref.read(selectedNoteProvider.notifier).select(null);
-    bumpVault(ref);
+    if (isConfirmed != true || !context.mounted) return;
+    // 지운 뒤에는 이 위젯이 사라질 수 있어 미리 잡아 둔다.
+    final selected = ref.read(selectedNoteProvider.notifier);
+    final isDone = await _change(context, ref, NoteChange.delete, failure: '지우지 못했습니다');
+    if (isDone) selected.select(null);
   }
 
-  void _onConfirm(WidgetRef ref) {
-    ref.read(noteStoreProvider).setStatus(id, NoteStatus.active, batch: newBatchId());
-    bumpVault(ref);
+  /// 쓰기는 백그라운드에서 하고(1만 개에서 화면이 멈추지 않게, 11/11 O-5), 실패하면 알린다.
+  /// 예전에는 [확정]·[잇기]가 실패해도 아무 표시가 없었다. 성공하면 true.
+  Future<bool> _change(
+    BuildContext context,
+    WidgetRef ref,
+    NoteChange change, {
+    required String failure,
+    String? linkTitle,
+  }) async {
+    final vault = ref.read(vaultProvider);
+    final revision = ref.read(vaultRevisionProvider.notifier);
+    final toaster = ShadToaster.maybeOf(context);
+    try {
+      await changeNoteInBackground(
+        vault.root,
+        vault.indexPath,
+        change: change,
+        id: id,
+        linkTitle: linkTitle,
+        batch: newBatchId(),
+      );
+      revision.bump();
+      return true;
+    } on Object catch (e) {
+      final message = e is NoteStoreException ? e.message : '$e';
+      toaster?.show(ShadToast.destructive(description: Text('$failure: $message')));
+      revision.bump(); // 충돌 사본 등 일부만 바뀌었을 수 있다
+      return false;
+    }
   }
+
+  Future<void> _onConfirm(BuildContext context, WidgetRef ref) =>
+      _change(context, ref, NoteChange.confirm, failure: '확정하지 못했습니다');
 
   /// 추천 연결을 확정: 이 노트 본문 끝에 `[[제목]]`을 붙여 manual 연결로 만든다.
-  void _onAcceptLink(WidgetRef ref, IndexedDoc other) {
-    final store = ref.read(noteStoreProvider);
-    final found = store.read(id);
-    if (found == null) return;
-    final (_, note, hash) = found;
-    store.update(
-      id,
-      expectHash: hash,
-      title: note.title,
-      summary: note.summary,
-      body: '${note.body.trimRight()}\n\n관련: [[${other.title}]]\n',
-      tags: note.tags,
-      aliases: note.aliases,
-    );
-    bumpVault(ref);
-  }
+  Future<void> _onAcceptLink(BuildContext context, WidgetRef ref, IndexedDoc other) =>
+      _change(context, ref, NoteChange.appendLink, failure: '연결을 확정하지 못했습니다', linkTitle: other.title);
 
   void _onDismissLink(WidgetRef ref, String otherId) {
     DismissedLinks(ref.read(vaultProvider)).add(id, otherId);
@@ -208,7 +225,7 @@ class _NoteDetail extends ConsumerWidget {
             if (doc.isDraft && isNote)
               ShadButton(
                 size: ShadButtonSize.sm,
-                onPressed: () => _onConfirm(ref),
+                onPressed: () => _onConfirm(context, ref),
                 child: const Text('확인 → 정리됨'),
               ),
             ShadButton.ghost(
@@ -268,7 +285,7 @@ class _NoteDetail extends ConsumerWidget {
                 onOpen: () =>
                     ref.read(selectedNoteProvider.notifier).select(otherId),
                 onAccept: link.isSuggested && !isRaw
-                    ? () => _onAcceptLink(ref, other)
+                    ? () => _onAcceptLink(context, ref, other)
                     : null,
                 onDismiss: link.isSuggested
                     ? () => _onDismissLink(ref, otherId)

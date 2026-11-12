@@ -9,6 +9,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../app/router/app_page.dart';
 import '../app/theme/app_colors.dart';
+import '../core/background_tasks.dart';
 import '../core/brain_providers.dart';
 import '../features/connect/claude_code_providers.dart';
 import '../features/connect/system_check_provider.dart';
@@ -247,14 +248,24 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
     () => _open.contains(topic) ? _open.remove(topic) : _open.add(topic),
   );
 
-  void _onMove(String noteId, String topic) {
+  /// 노트 옮기기는 백그라운드에서 한다 (1만 개에서 화면이 멈추지 않게, 11/11 O-5).
+  Future<void> _onMove(String noteId, String topic) async {
+    final vault = ref.read(vaultProvider);
+    final revision = ref.read(vaultRevisionProvider.notifier);
+    final toaster = ShadToaster.maybeOf(context);
     try {
-      ref.read(noteStoreProvider).move(noteId, topic);
-      _open.add(topic);
-      bumpVault(ref);
-    } on NoteStoreException catch (e) {
-      ShadToaster.maybeOf(context)
-          ?.show(ShadToast.destructive(description: Text(e.message)));
+      await changeNoteInBackground(
+        vault.root,
+        vault.indexPath,
+        change: NoteChange.move,
+        id: noteId,
+        topic: topic,
+      );
+      if (mounted) setState(() => _open.add(topic));
+      revision.bump();
+    } on Object catch (e) {
+      final message = e is NoteStoreException ? e.message : '$e';
+      toaster?.show(ShadToast.destructive(description: Text('옮기지 못했습니다: $message')));
     }
   }
 
