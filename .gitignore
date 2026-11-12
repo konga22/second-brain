@@ -29,3 +29,6 @@ env/supabase.json
 assets/brain/bin/
 assets/brain/lib/
 assets/brain/SOURCE_HASH
+
+# 설치 파일 (tool/make_dmg.sh가 만든다)
+dist/
