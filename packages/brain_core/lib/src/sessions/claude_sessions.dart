@@ -173,6 +173,15 @@ class ClaudeSessions {
     return maskSecrets([header, ...body].join('\n\n'));
   }
 
+  /// 세션에서 사용자가 한 말만 (실수 노트 근거 검사용, 설계서 5.4 v1.3.35). 도구 결과·AI 답은 넣지 않는다.
+  List<String> userTexts(ClaudeSession session) {
+    final (_, lines) = _parse(File(session.path));
+    return [
+      for (final line in lines)
+        if (line.role == 'user') line.text,
+    ];
+  }
+
   static String _date(DateTime time) {
     final t = time.toLocal();
     return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';

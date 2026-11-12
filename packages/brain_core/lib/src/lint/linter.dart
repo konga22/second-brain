@@ -55,6 +55,9 @@ class Linter {
   /// 중복 후보: 핵심 단어가 모두 겹치면(점수 1.0) 내용이 많이 겹친다고 본다.
   static const duplicateScore = 1.0;
 
+  /// 실수 노트 안전 검사(`lessonSafetyProblems`)도 같은 패턴을 쓴다.
+  static RegExp get suspiciousPattern => _suspicious;
+
   static final _suspicious = RegExp(
     r'(이전|위의|앞의|모든)\s*(지시|명령|규칙)[을를은는]?\s*(모두\s*)?(무시|잊)'
     r'|ignore\s+(all\s+)?(previous|prior|above)\s+instructions'

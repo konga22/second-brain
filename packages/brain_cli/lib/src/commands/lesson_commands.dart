@@ -83,8 +83,9 @@ class _LessonAdd extends Command<int> {
         'status',
         allowed: ['pending', 'active'],
         defaultsTo: 'pending',
-        help: '검증·회귀 시험을 통과한 직접 교정만 active',
+        help: '검증·회귀 시험을 통과한 직접 교정만 active (안전 검사를 못 넘으면 승인 대기로 저장)',
       )
+      ..addOption('quote', help: '근거가 된 사용자 말 그대로 (active일 때 이 세션의 사용자 발화에 있어야 함)')
       ..addOption('question', help: '회귀 시험: 질문')
       ..addOption('bad', help: '회귀 시험: 교정 전 답의 요지')
       ..addOption('expect', help: '회귀 시험: 통과 조건');
@@ -101,6 +102,18 @@ class _LessonAdd extends Command<int> {
   @override
   int run() {
     final a = argResults!;
+    var status = LessonStatus.parse(a['status']);
+    // 바로 적용 전 안전 검사 (설계서 5.4 v1.3.35): 못 넘으면 승인 대기로 저장한다.
+    final problems = status == LessonStatus.active
+        ? activationProblems(
+            context,
+            trigger: a['trigger'] as String,
+            action: a['action'] as String,
+            reason: a['reason'] as String,
+            quote: a['quote'] as String?,
+          )
+        : const <String>[];
+    if (problems.isNotEmpty) status = LessonStatus.pending;
     try {
       final (id, testId) = context.lessons.add(
         trigger: a['trigger'] as String,
@@ -108,14 +121,15 @@ class _LessonAdd extends Command<int> {
         reason: a['reason'] as String,
         diff: (a['diff'] as String).replaceAll(r'\n', '\n'),
         source: a['source'] as String,
-        status: LessonStatus.parse(a['status']),
+        status: status,
         question: a['question'] as String?,
         bad: a['bad'] as String?,
         expect: a['expect'] as String?,
       );
       stdout.writeln(
-        '$id 저장함 (${LessonStatus.parse(a['status']).label})${testId == null ? '' : ' · 회귀 시험 $testId'}',
+        '$id 저장함 (${status.label})${testId == null ? '' : ' · 회귀 시험 $testId'}',
       );
+      if (problems.isNotEmpty) warnKeptPending(id, problems);
       final wantedTest = ((a['question'] as String?) ?? '').trim().isNotEmpty && ((a['expect'] as String?) ?? '').trim().isNotEmpty;
       if (wantedTest && testId == null) {
         stderr.writeln(
@@ -170,6 +184,7 @@ class _LessonSet extends Command<int> {
       allowed: ['pending', 'active', 'archived'],
       mandatory: true,
     );
+    argParser.addOption('quote', help: 'active로 바꿀 때 근거가 된 사용자 말 그대로');
   }
 
   final BrainContext context;
@@ -184,9 +199,29 @@ class _LessonSet extends Command<int> {
   int run() {
     if (argResults!.rest.isEmpty) usageException('실수 노트 id를 주세요.');
     try {
+      final id = argResults!.rest.first;
       final status = LessonStatus.parse(argResults!['status']);
-      context.lessons.setStatus(argResults!.rest.first, status);
-      stdout.writeln('${argResults!.rest.first} → ${status.label}');
+      if (status == LessonStatus.active) {
+        final lesson = context.lessons.read(id);
+        if (lesson == null) {
+          stderr.writeln('$id 실수 노트가 없습니다.');
+          return 1;
+        }
+        final problems = activationProblems(
+          context,
+          trigger: lesson.trigger,
+          action: lesson.action,
+          reason: lesson.reason,
+          quote: argResults!['quote'] as String?,
+        );
+        if (problems.isNotEmpty) {
+          stdout.writeln('$id → ${lesson.status.label} (바꾸지 않음)');
+          warnKeptPending(id, problems);
+          return 0;
+        }
+      }
+      context.lessons.setStatus(id, status);
+      stdout.writeln('$id → ${status.label}');
       return 0;
     } on NoteStoreException catch (e) {
       stderr.writeln(e.message);
@@ -201,7 +236,8 @@ class _LessonEdit extends Command<int> {
     argParser
       ..addOption('trigger', help: '언제')
       ..addOption('action', help: '무엇을')
-      ..addOption('reason', help: '왜');
+      ..addOption('reason', help: '왜')
+      ..addOption('quote', help: '적용 중 규칙을 고칠 때 근거가 된 사용자 말 그대로');
   }
 
   final BrainContext context;
@@ -232,11 +268,21 @@ class _LessonEdit extends Command<int> {
     if (trigger == null && action == null && reason == null) {
       usageException('--trigger·--action·--reason 중 하나는 주세요.');
     }
-    context.lessons.save(
-      lesson.copyWith(trigger: trigger, action: action, reason: reason),
-      action: 'lesson-edit',
-    );
-    stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}');
+    var edited = lesson.copyWith(trigger: trigger, action: action, reason: reason);
+    // 적용 중 규칙을 고치면 고친 문장이 바로 모든 세션에 들어간다 → 같은 안전 검사 (설계서 5.4 v1.3.35)
+    final problems = lesson.status == LessonStatus.active
+        ? activationProblems(
+            context,
+            trigger: edited.trigger,
+            action: edited.action,
+            reason: edited.reason,
+            quote: a['quote'] as String?,
+          )
+        : const <String>[];
+    if (problems.isNotEmpty) edited = edited.copyWith(status: LessonStatus.pending);
+    context.lessons.save(edited, action: 'lesson-edit');
+    stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}${problems.isEmpty ? '' : ' (승인 대기로 바뀜)'}');
+    if (problems.isNotEmpty) warnKeptPending(id, problems);
     return 0;
   }
 }
@@ -393,3 +439,34 @@ class UndoCommand extends Command<int> {
     }
   }
 }
+
+/// 실수 노트를 적용 중으로 만들어도 되는지 (설계서 5.4 v1.3.35, 11/12 사용자 결정 "안전하다 검증되는 즉시 적용").
+/// ① 내용 검사 ② 근거 검사: [quote]가 지금 Claude Code 세션의 사용자 발화에 그대로 있는가.
+/// 노트·웹 글 속 숨은 지시에 속아 만든 규칙은 사용자 발화가 아니라 ②에서 걸린다. 걸린 까닭을 돌려준다.
+List<String> activationProblems(
+  BrainContext context, {
+  required String trigger,
+  required String action,
+  required String reason,
+  String? quote,
+}) {
+  final problems = lessonSafetyProblems(trigger: trigger, action: action, reason: reason);
+  final said = quote?.trim() ?? '';
+  if (said.isEmpty) {
+    problems.add('근거가 된 사용자 말(--quote)이 없음');
+    return problems;
+  }
+  final current = Platform.environment['CLAUDE_CODE_SESSION_ID'] ?? '';
+  final session = current.isEmpty ? null : context.sessions.find(current, vault: context.vault);
+  if (session == null) {
+    problems.add('지금 세션 기록을 찾지 못해 사용자 말을 확인할 수 없음');
+  } else if (!isQuoteFromUser(said, context.sessions.userTexts(session))) {
+    problems.add('--quote가 이 세션의 사용자 말에 없음');
+  }
+  return problems;
+}
+
+void warnKeptPending(String id, List<String> problems) => stderr.writeln(
+  '$id: 안전 검사를 통과하지 못해 승인 대기로 두었습니다 (${problems.join(' · ')}). '
+  '사용자가 앱 [배운 것]에서 확인하고 적용합니다.',
+);

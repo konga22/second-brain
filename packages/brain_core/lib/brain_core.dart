@@ -14,6 +14,7 @@ export 'src/index/search_index.dart';
 export 'src/index/sqlite_support.dart';
 export 'src/links/dismissed_links.dart';
 export 'src/lessons/lesson.dart';
+export 'src/lessons/lesson_safety.dart';
 export 'src/lessons/lesson_store.dart';
 export 'src/lint/linter.dart';
 export 'src/log/change_history.dart';

@@ -168,19 +168,27 @@ class _ChatPageState extends ConsumerState<ChatPage> with SafeSetState<ChatPage>
       final test = result['test'] as Map?;
       String message;
       if (verdict == 'lesson' && lesson != null) {
+        // 서버 AI가 만든 규칙 문장이라 바로 적용하기 전에 내용 검사를 한다 (설계서 5.4 v1.3.35, 독립 검토 S-5).
+        // 교정 문장은 사용자가 이 화면에서 직접 쓴 것이라 근거 검사는 필요 없다.
+        final problems = lessonSafetyProblems(
+          trigger: '${lesson['trigger']}',
+          action: '${lesson['action']}',
+          reason: '${lesson['reason']}',
+        );
         final (id, testId) = store.add(
           trigger: '${lesson['trigger']}',
           action: '${lesson['action']}',
           reason: '${lesson['reason']}',
           diff: '- ${turn.answer?.split('\n').first ?? ''}\n+ $correction',
-          status: LessonStatus.active, // 직접 교정 + 검증·시험 통과
+          status: problems.isEmpty ? LessonStatus.active : LessonStatus.pending,
           question: test == null ? null : '${test['question']}',
           bad: test == null ? null : '${test['bad']}',
           expect: test == null ? null : '${test['expect']}',
           batch: newBatchId(),
         );
-        message =
-            '실수 노트 $id로 저장했습니다${testId == null ? '' : ' (회귀 시험 $testId)'}: ${lesson['trigger']} → ${lesson['action']}';
+        message = problems.isEmpty
+            ? '실수 노트 $id로 저장해 바로 적용했습니다${testId == null ? '' : ' (회귀 시험 $testId)'}: ${lesson['trigger']} → ${lesson['action']}'
+            : '실수 노트 $id로 저장했지만 안전 검사에 걸려 승인 대기로 두었습니다 (${problems.join(' · ')}). [배운 것]에서 문장을 확인하고 적용하세요: ${lesson['trigger']} → ${lesson['action']}';
         bumpVault(ref);
       } else {
         message = switch (verdict) {

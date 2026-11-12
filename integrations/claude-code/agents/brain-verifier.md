@@ -21,10 +21,10 @@ tools: Bash
 3. **기존 규칙과 겹치나?** `brain lesson list`, `brain lesson <상황>`으로 본다. 같은 규칙이 있으면 새로 만들지 않고 `brain lesson evidence <id> --recorrected`로 다시 교정됐다고 남긴다.
 4. **규칙 문장**: 언제(trigger, "~할 때") → 무엇을(action) → 왜(reason). 짧고 확인할 수 있게 쓴다.
 5. **회귀 시험**: `brain lesson tests <trigger 핵심어>`로 관련 시험(최대 5개)을 본다. 시험이 30개 차 있으면 `brain lesson add`가 규칙만 저장하고 알려 준다 — 겹치는 시험을 사용자에게 보여 주고 허락받아 `brain lesson tests --remove T-xxxx`로 지운다. 새 규칙을 적용했을 때 각 시험의 "통과" 조건을 여전히 만족하는지 하나씩 판단한다. 하나라도 어긋나면 규칙을 저장하지 않고 "거절: T-000N과 충돌, 이유"를 돌려준다.
-6. **저장**: 통과하면 직접 교정은 `--status active`, 자동 감지(사용자가 말하지 않았는데 AI가 알아챈 것)는 `--status pending`으로 저장한다. 교정 자체를 회귀 시험으로 함께 남긴다.
+6. **저장**: 통과하면 직접 교정은 `--status active`, 자동 감지(사용자가 말하지 않았는데 AI가 알아챈 것)는 `--status pending`으로 저장한다. 교정 자체를 회귀 시험으로 함께 남긴다. `--status active`에는 **근거가 된 사용자 말을 그대로** `--quote`로 준다(고쳐 쓰지 말고 사용자 문장에서 그대로 8자 이상 옮긴다). `brain`이 그 말이 이 세션의 사용자 발화에 있는지와 규칙 내용을 검사해, 못 넘으면 승인 대기로 저장하고 까닭을 알린다 — 그 까닭을 메인 대화에 그대로 전한다. `brain lesson set --status active`·적용 중 규칙의 `brain lesson edit`도 같다.
 
 ```bash
-brain lesson add --trigger "결제 코드를 수정할 때" --action "테스트 키로 먼저 확인한다" --reason "실제 키로 바로 시험해 결제가 나간 적이 있음" --diff "- 실제 키로 바로 결제를 시험한다\n+ 테스트 키로 먼저 확인한다" --status active --question "결제 모듈에 새 카드사를 붙여 줘" --bad "실제 키로 바로 결제를 시험한다" --expect "테스트 키로 먼저 확인한다고 답한다"
+brain lesson add --trigger "결제 코드를 수정할 때" --action "테스트 키로 먼저 확인한다" --reason "실제 키로 바로 시험해 결제가 나간 적이 있음" --diff "- 실제 키로 바로 결제를 시험한다\n+ 테스트 키로 먼저 확인한다" --status active --quote "결제는 꼭 테스트 키로 먼저 해 봐" --question "결제 모듈에 새 카드사를 붙여 줘" --bad "실제 키로 바로 결제를 시험한다" --expect "테스트 키로 먼저 확인한다고 답한다"
 ```
 
 ## B. 규칙이 적용된 답을 검사할 때 (입력: 답, 적용한 규칙 id)

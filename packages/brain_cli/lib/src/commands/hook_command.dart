@@ -280,7 +280,7 @@ class HookCommand extends Command<int> {
       ],
       if (isCorrection)
         '사용자가 앞 답을 고치는 것 같다면, 고친 내용을 반영하고 일반 규칙이 될 만하면 '
-            'brain-verifier 에이전트에 질문·답·반응·diff를 넘겨 실수 노트 후보를 확인한다.',
+            'brain-verifier 에이전트에 질문·답·반응(사용자 말 그대로)·diff를 넘겨 실수 노트 후보를 확인한다.',
     ].join('\n');
     stdout.write(
       jsonEncode({
