@@ -333,11 +333,7 @@ class ClaudeCode {
             : (message.isEmpty ? '실행 실패 (종료 코드 $code)' : message),
       );
     }
-    return HeadlessResult(
-      ok: result['is_error'] != true && code == 0,
-      message: '${result['result'] ?? ''}'.trim(),
-      costUsd: (result['total_cost_usd'] as num?)?.toDouble(),
-    );
+    return HeadlessResult.fromEvent(result, exitCode: code);
   }
 }
 
@@ -409,6 +405,30 @@ class ClaudeCodeStatus {
 
 class HeadlessResult {
   const HeadlessResult({required this.ok, required this.message, this.costUsd});
+
+  /// stream-json의 마지막 `result` 이벤트로 만든다.
+  ///
+  /// 예산 한도에 닿으면 `result` 글이 없고 `subtype: error_max_budget_usd`, `errors`만 온다
+  /// (Claude Code 2.1.322 실측, 11/12). 그때 빈 메시지로 "실패: "만 보이지 않게 이유를 적는다.
+  factory HeadlessResult.fromEvent(
+    Map<String, dynamic> event, {
+    required int exitCode,
+  }) {
+    final text = '${event['result'] ?? ''}'.trim();
+    final errors = [
+      for (final e in event['errors'] as List? ?? const []) '$e',
+    ].join(' ');
+    final message = switch (event['subtype']) {
+      'error_max_budget_usd' => '예산 한도에 닿아 멈췄습니다. $errors'.trim(),
+      'error_max_turns' => '턴 한도에 닿아 멈췄습니다.',
+      _ => text.isNotEmpty ? text : errors,
+    };
+    return HeadlessResult(
+      ok: event['is_error'] != true && exitCode == 0,
+      message: message,
+      costUsd: (event['total_cost_usd'] as num?)?.toDouble(),
+    );
+  }
 
   final bool ok;
   final String message;
