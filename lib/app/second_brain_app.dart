@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../shared/vault_gate.dart';
 import '../shared/zoom_scope.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
@@ -20,7 +21,8 @@ class SecondBrainApp extends StatelessWidget {
       locale: const Locale('ko', 'KR'),
       supportedLocales: const [Locale('ko', 'KR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      builder: (context, child) => ZoomScope(child: child ?? const SizedBox()),
+      // 지식 폴더가 준비되기 전에는 앱 화면(라우터)을 그리지 않는다 (11/11 K-33).
+      builder: (context, child) => ZoomScope(child: VaultGate(child: child ?? const SizedBox())),
     );
   }
 }
