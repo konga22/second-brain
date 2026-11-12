@@ -44,19 +44,27 @@ void main() {
     final container = ProviderScope.containerOf(tester.element(find.byType(SecondBrainApp)));
 
     // 그래프를 축소해 그림이 보이는 영역보다 작아지게 한다 (− 4번).
+    double scale() => tester
+        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+        .transformationController!
+        .value
+        .getMaxScaleOnAxis();
+    final before = scale();
     for (var i = 0; i < 4; i++) {
       await tester.tap(find.text('−'));
       await settle(tester, 200);
     }
+    // [−] 4번이면 배율이 0.8⁴ ≈ 0.41배가 된다. 예전에는 z축 배율이 1로 남아 늘 1.0으로 읽혔다 (K-38).
+    expect(scale(), closeTo(before * 0.4096, before * 0.01), reason: '[−]가 배율을 줄이지 못함');
     final viewer = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
     final viewport = tester.getSize(find.byType(InteractiveViewer));
-    final scale = viewer.transformationController!.value.getMaxScaleOnAxis();
+    final zoom = viewer.transformationController!.value.getMaxScaleOnAxis();
     final content = tester.getSize(
       find.descendant(of: find.byType(InteractiveViewer), matching: find.byType(SizedBox)).first,
     );
-    debugPrint('[시험] 보이는 영역 $viewport, 그림 ${content * scale} (배율 ${scale.toStringAsFixed(2)})');
+    debugPrint('[시험] 보이는 영역 $viewport, 그림 ${content * zoom} (배율 ${zoom.toStringAsFixed(2)})');
     // 시험이 실제로 "그림이 영역보다 작은" 상황을 만들었는지 먼저 확인한다 (L-0006).
-    expect(content.width * scale, lessThan(viewport.width), reason: '축소가 안 돼 시험 조건이 안 만들어짐');
+    expect(content.width * zoom, lessThan(viewport.width), reason: '축소가 안 돼 시험 조건이 안 만들어짐');
 
     final veil = find.byWidgetPredicate((w) => w is ColoredBox && w.color == const Color(0x660d0b18));
     expect(veil, findsOneWidget);

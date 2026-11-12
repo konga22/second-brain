@@ -92,9 +92,12 @@ class _GraphViewState extends ConsumerState<GraphView> {
     ).clamp(0.05, 3.0);
     final dx = (viewport.width - bounds.width * scale) / 2 - bounds.left * scale;
     final dy = top + (usable - bounds.height * scale) / 2 - bounds.top * scale;
+    // z축도 같은 배율로 둔다. InteractiveViewer(휠 확대)와 아래 배율 읽기는 getMaxScaleOnAxis로 x·y·z 중
+    // 가장 큰 값을 읽는다. z를 1로 두면 축소(배율 < 1)한 상태가 늘 1.0으로 읽혀, 클릭 범위·글자 크기·
+    // 휠 확대 한도가 틀어졌다 (11/12 K-38, graph_focus_test가 [−]를 눌러도 배율 1.0이던 원인).
     _transform.value = Matrix4.identity()
       ..translateByDouble(dx, dy, 0, 1)
-      ..scaleByDouble(scale, scale, 1, 1);
+      ..scaleByDouble(scale, scale, scale, 1);
   }
 
   /// 영역 크기가 바뀌면 보던 가운데가 그대로 가운데에 오게 옮긴다 (다시 맞추지 않음).
@@ -115,7 +118,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
     final center = Offset(viewport.width / 2, viewport.height / 2);
     _transform.value = Matrix4.identity()
       ..translateByDouble(center.dx, center.dy, 0, 1)
-      ..scaleByDouble(factor, factor, 1, 1)
+      ..scaleByDouble(factor, factor, factor, 1) // z도 함께 (_fit 설명)
       ..translateByDouble(-center.dx, -center.dy, 0, 1)
       ..multiply(_transform.value);
   }
