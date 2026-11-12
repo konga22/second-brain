@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:brain_core/brain_core.dart';
@@ -12,15 +13,47 @@ import '../core/vault_startup.dart';
 import 'safe_set_state.dart';
 
 /// 지식 폴더가 준비된 뒤에만 앱 화면을 그린다. 없으면 "지식 폴더를 찾지 못했습니다" 화면 (11/11 K-33 나머지).
-class VaultGate extends ConsumerWidget {
+///
+/// 앱을 쓰는 중에 폴더가 사라져도(USB를 뽑음) 같은 화면으로 바꾼다. 전에는 켤 때만 봐서, 빠진 뒤에도
+/// 지난 색인으로 노트가 보이고 저장은 실패했다 (작업인계 0-4 "앱이 켜진 채 폴더가 빠질 때").
+class VaultGate extends ConsumerStatefulWidget {
   const VaultGate({super.key, required this.child});
 
   final Widget child;
 
+  /// 폴더가 있는지 보는 간격. 폴더 감시는 디스크를 뽑을 때 알림 없이 끊길 수 있어 직접 본다.
+  static const checkEvery = Duration(seconds: 2);
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VaultGate> createState() => _VaultGateState();
+}
+
+class _VaultGateState extends ConsumerState<VaultGate> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(VaultGate.checkEvery, (_) => _check());
+  }
+
+  void _check() {
+    final start = ref.read(vaultStartProvider);
+    if (!start.isReady || Directory(start.root).existsSync()) return;
+    // 지식 폴더·색인·감시를 모두 다시 만든다. 다시 볼 때 폴더가 없으면 묻는 화면이 된다.
+    ref.invalidate(vaultProvider);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final start = ref.watch(vaultStartProvider);
-    if (start.isReady) return child;
+    if (start.isReady) return widget.child;
     return _VaultMissingPage(start: start);
   }
 }
@@ -41,7 +74,9 @@ class _VaultMissingPageState extends ConsumerState<_VaultMissingPage>
 
   /// 외장 디스크를 다시 꽂은 뒤: 폴더가 있으면 그대로 앱이 열린다.
   void _onRetry() {
-    ref.invalidate(vaultStartProvider);
+    // 폴더 확인만이 아니라 색인·폴더 감시까지 새로 만든다. 폴더가 없는 동안 만든 감시는 이미 끊겨 있어,
+    // 다시 연결한 뒤 밖에서 넣은 노트가 화면에 안 나왔다 (11/12 통합 시험).
+    ref.invalidate(vaultProvider);
     if (!ref.read(vaultStartProvider).isReady) {
       setState(
         () => _message = '아직 찾지 못했습니다. 디스크가 연결됐는지, 폴더 이름이 바뀌지 않았는지 확인하세요.',
@@ -95,7 +130,7 @@ class _VaultMissingPageState extends ConsumerState<_VaultMissingPage>
       );
       return;
     }
-    ref.invalidate(vaultStartProvider);
+    ref.invalidate(vaultProvider);
   }
 
   @override

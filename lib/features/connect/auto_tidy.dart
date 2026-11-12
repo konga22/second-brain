@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
 import '../../core/session_listing.dart';
+import '../../core/vault_startup.dart';
 import 'claude_code_providers.dart';
 
 /// 자동 정리 상태 (연동 화면에 보여 준다).
@@ -83,6 +84,8 @@ class AutoTidyController extends Notifier<AutoTidyState> {
     // 사용자가 연동 화면에서 직접 정리 중이면 겹치지 않게 쉰다.
     if (ref.read(pastSessionsProvider).isRunning) return;
     if (spentToday(config) >= config.autoTidyDailyUsd) return;
+    // 지식 폴더가 빠져 있으면 하지 않는다: claude 실행 전 vault.ensure()가 빈 폴더를 새로 만들 수 있다.
+    if (!ref.read(vaultStartProvider).isReady) return;
     final vault = ref.read(vaultProvider);
     final claude = ref.read(claudeCodeProvider);
     state = AutoTidyState(isRunning: true, step: '세션 목록 읽는 중', log: state.log);

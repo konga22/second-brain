@@ -60,4 +60,45 @@ void main() {
       tester.view.resetPhysicalSize();
     }
   });
+
+  testWidgets('앱을 쓰는 중에 폴더가 빠지면 묻는 화면으로 바뀌고, 다시 연결하면 [다시 확인]으로 돌아온다', (tester) async {
+    final root = Platform.environment['BRAIN_VAULT'] ?? '';
+    expect(root, isNotEmpty, reason: '실제 지식 폴더 보호');
+    expect(Platform.environment['BRAIN_CONFIG'] ?? '', isNotEmpty, reason: '실제 설정 보호');
+    final away = '$root.away';
+    try {
+      tester.view.physicalSize = const Size(2880, 1800);
+      tester.view.devicePixelRatio = 2;
+      await tester.pumpWidget(const ProviderScope(child: SecondBrainApp()));
+      await settle(tester, 3000);
+      expect(find.text('지식 폴더를 찾지 못했습니다'), findsNothing, reason: '처음엔 열려 있다');
+      final container = ProviderScope.containerOf(tester.element(find.byType(SecondBrainApp)));
+      final count = container.read(notesProvider).length;
+      expect(count, greaterThan(0));
+
+      // 쓰는 중에 디스크를 뺀 것처럼
+      Directory(root).renameSync(away);
+      await settle(tester, 3000);
+      expect(find.text('지식 폴더를 찾지 못했습니다'), findsOneWidget);
+      expect(Directory(root).existsSync(), isFalse, reason: '빈 폴더를 새로 만들면 안 된다');
+
+      Directory(away).renameSync(root);
+      await tester.tap(find.text('다시 확인'));
+      await settle(tester, 3000);
+      expect(find.text('지식 폴더를 찾지 못했습니다'), findsNothing);
+      expect(container.read(notesProvider), hasLength(count));
+      // 다시 연결한 뒤에도 폴더 감시가 살아 있다: 밖에서 노트를 넣으면 보인다
+      final index = SearchIndex.open(Vault(root));
+      try {
+        NoteStore(Vault(root), index).add(title: '다시 연결 뒤 새 노트', summary: '감시 확인', body: '본문');
+      } finally {
+        index.close();
+      }
+      await settle(tester, 3000);
+      expect(container.read(notesProvider).any((n) => n.title == '다시 연결 뒤 새 노트'), isTrue);
+    } finally {
+      if (Directory(away).existsSync() && !Directory(root).existsSync()) Directory(away).renameSync(root);
+      tester.view.resetPhysicalSize();
+    }
+  });
 }
