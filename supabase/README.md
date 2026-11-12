@@ -29,9 +29,13 @@ bash supabase/tests/run_sql_tests.sh
 키와 로그인은 사용자가 직접 넣는다. 저장소·앱 코드에는 어떤 키도 넣지 않는다.
 
 **0. 대시보드 먼저 확인**
-- 프로젝트가 멈춰 있지 않은가: 무료 프로젝트는 7일 동안 활동이 없으면 멈춘다(11/06에 만들고 쓰지 않았음). 멈췄으면 [Restore].
+- 프로젝트가 멈춰 있지 않은가: 무료 프로젝트는 7일 동안 활동이 없으면 멈춘다(11/06에 만들고 쓰지 않았음 → 멈췄을 가능성이 큼). 멈췄으면 프로젝트 첫 화면의 복원 버튼(문서: "single button click from Studio's dashboard page")을 누른다. 멈춘 뒤 1년 안에만 한 번에 복원된다.
 - Settings → API Keys: 비밀 키(`sb_secret_…`) 또는 레거시 `service_role` 키가 있는가. 함수는 `SUPABASE_SECRET_KEYS`(새 키)를 먼저, 없으면 `SUPABASE_SERVICE_ROLE_KEY`를 읽는다.
-- Authentication → Sign In / Providers: 이메일 가입. 기본 메일 발송은 팀 주소에만 가고 시간당 2통이라, **시연 계정은 Authentication → Users → [Add user]로 직접 만들고(자동 확인)** 공개 가입은 끄는 것을 권한다.
+- **가입 방식 (11/12 사용자 결정: 시연 계정을 미리 만들고, 마감 12/08까지는 누구나 가입)**. 기본 메일 발송은 팀 주소에만 가고 시간당 2통이라 메일 인증을 켜 두면 팀 밖 사람은 가입할 수 없다.
+  - **시연 계정**: Authentication → Users → [Add user] → [Create new user] → 이메일·비밀번호 입력, **Auto Confirm User** 체크 → [Create user]. 비밀번호는 사용자만 알고 저장소·문서에 적지 않는다.
+  - **누구나 가입**: Authentication → Sign In / Providers → Email에서 **Confirm Email**을 끈다 → [Save]. 같은 화면(또는 Auth 설정)의 **Allow new users to sign up**은 켜 둔다. 메일 인증 없이 가입 즉시 로그인된다(앱은 이 경우를 처리한다: `login_dialog.dart` 가입 결과에 세션이 있으면 바로 로그인).
+  - **마감 뒤(12/08 이후)**: **Allow new users to sign up**을 끈다(개발진행 할 일).
+  - 화면 이름은 Supabase 문서(General configuration, 11/12 확인) 기준이다. 대시보드 표시가 다르면 같은 뜻의 항목을 찾는다.
 - Authentication → URL Configuration → Site URL: 홍보 페이지 주소(https://second-brain-cvj.pages.dev/)로. 기본 `localhost:3000`이면 확인 메일 링크가 "연결 안 됨"으로 보인다.
 - Anthropic Console → Limits: 월 지출 한도를 낮게 걸어 둔다(서버 코드가 막지 못하는 경우의 마지막 안전장치).
 
