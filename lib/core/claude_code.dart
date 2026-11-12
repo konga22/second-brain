@@ -128,16 +128,18 @@ class ClaudeCode {
     final log = <String>[];
     vault.ensure();
 
+    // 모두 임시 파일 → 이름 바꾸기로 넣는다. 덮어쓰는 동안 Claude Code가 훅으로 `brain`을 실행하면
+    // 반쯤 쓰인 파일을 돌릴 수 있었다 (K-22 나머지, 11/12).
     Future<void> copyText(String asset, String target) async {
-      final file = File(target)..parent.createSync(recursive: true);
-      file.writeAsStringSync(await rootBundle.loadString(asset));
+      writeFileAtomic(target, await rootBundle.loadString(asset));
     }
 
-    Future<void> copyBinary(String asset, String target) async {
+    Future<void> copyBinary(String asset, String target, {bool executable = false}) async {
       final data = await rootBundle.load(asset);
-      final file = File(target)..parent.createSync(recursive: true);
-      file.writeAsBytesSync(
+      writeBytesAtomic(
+        target,
         data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        executable: executable,
       );
     }
 
@@ -167,12 +169,12 @@ class ClaudeCode {
     await copyBinary(
       'assets/brain/bin/brain',
       p.join(pluginDir, 'bin', 'brain'),
+      executable: true,
     );
     await copyBinary(
       'assets/brain/lib/libsqlite3.dylib',
       p.join(pluginDir, 'lib', 'libsqlite3.dylib'),
     );
-    await Process.run('chmod', ['+x', p.join(pluginDir, 'bin', 'brain')]);
     log.add('플러그인 파일 작성: $pluginDir');
 
     final validate = await _run(claude, [

@@ -189,6 +189,26 @@ void writeFileAtomic(String path, String content) {
   temp.renameSync(path);
 }
 
+/// 바이트 파일을 임시 파일에 다 쓴 뒤 이름을 바꿔 넣는다. [executable]이면 바꾸기 전에 실행 권한을 준다.
+///
+/// 앱 [연동]이 플러그인의 `brain`을 덮어쓸 때 쓴다. 제자리에 덮어쓰면 그 순간 Claude Code 훅이 반쯤 쓰인
+/// `brain`을 실행할 수 있었다 (11/11 K-22). 이름 바꾸기는 한 번에 일어나고, 이미 실행 중인 `brain`은 옛 파일을 계속 읽는다.
+void writeBytesAtomic(String path, List<int> bytes, {bool executable = false}) {
+  Directory(p.dirname(path)).createSync(recursive: true);
+  final temp = File('$path.tmp-${DateTime.now().microsecondsSinceEpoch}');
+  try {
+    temp.writeAsBytesSync(bytes, flush: true);
+    if (executable) {
+      final result = Process.runSync('chmod', ['+x', temp.path]);
+      if (result.exitCode != 0) throw FileSystemException('실행 권한을 주지 못했습니다: ${result.stderr}', temp.path);
+    }
+    temp.renameSync(path);
+  } on Object {
+    if (temp.existsSync()) temp.deleteSync();
+    rethrow;
+  }
+}
+
 const _agentsMd = '''# 세컨드 브레인 지식 폴더 규칙
 
 이 폴더는 사용자의 지식 폴더다. AI는 아래 규칙을 지킨다.
