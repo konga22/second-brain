@@ -25,6 +25,9 @@ macos/Pods/
 # Supabase 프로젝트 주소·공개 키 (예시는 env/supabase.example.json). AI API 키는 여기에도 두지 않는다.
 env/supabase.json
 
+# supabase link가 만드는 연결 정보 (프로젝트 ref·풀러 주소)
+supabase/.temp/
+
 # brain CLI 빌드 결과 (tool/build_brain.sh가 만든다)
 assets/brain/bin/
 assets/brain/lib/

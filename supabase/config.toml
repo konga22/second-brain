@@ -9,3 +9,12 @@ verify_jwt = true
 
 [functions.mock-checkout]
 verify_jwt = true
+
+# 로그인 설정 (11/12 사용자 결정: 마감 12/08까지 누구나 가입, 메일 인증 끔). 12/08 뒤 enable_signup = false로 바꾸고 config push.
+[auth]
+site_url = "https://second-brain-cvj.pages.dev/"
+enable_signup = true
+
+[auth.email]
+enabled = true
+enable_confirmations = false

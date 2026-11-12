@@ -34,12 +34,15 @@ bash supabase/tests/run_sql_tests.sh
 - **가입 방식 (11/12 사용자 결정: 시연 계정을 미리 만들고, 마감 12/08까지는 누구나 가입)**. 기본 메일 발송은 팀 주소에만 가고 시간당 2통이라 메일 인증을 켜 두면 팀 밖 사람은 가입할 수 없다.
   - **시연 계정**: Authentication → Users → [Add user] → [Create new user] → 이메일·비밀번호 입력, **Auto Confirm User** 체크 → [Create user]. 비밀번호는 사용자만 알고 저장소·문서에 적지 않는다.
   - **누구나 가입**: Authentication → Sign In / Providers → Email에서 **Confirm Email**을 끈다 → [Save]. 같은 화면(또는 Auth 설정)의 **Allow new users to sign up**은 켜 둔다. 메일 인증 없이 가입 즉시 로그인된다(앱은 이 경우를 처리한다: `login_dialog.dart` 가입 결과에 세션이 있으면 바로 로그인).
-  - **마감 뒤(12/08 이후)**: **Allow new users to sign up**을 끈다(개발진행 할 일).
+  - **마감 뒤(12/08 이후)**: **Allow new users to sign up**을 끈다(개발진행 할 일). 대시보드 대신 `config.toml`의 `[auth] enable_signup = false`로 바꾸고 `npx supabase config push --yes`해도 된다.
+  - **11/12 적용**: Confirm Email 끔·Site URL은 대시보드 대신 `config.toml` `[auth]`에 적고 `config push`로 올렸다(선언한 값만 바뀐다). 공개 `/auth/v1/settings`에서 `mailer_autoconfirm: true`, `disable_signup: false` 확인. `config diff`는 올린 뒤에도 옛 값을 보였다(CLI 3.1.0, 원인 미확인). `MOCK_CHECKOUT=on`은 `secrets set`으로 넣음. `ANTHROPIC_API_KEY`는 크레딧이 생기면 사용자가 넣는다.
   - 화면 이름은 Supabase 문서(General configuration, 11/12 확인) 기준이다. 대시보드 표시가 다르면 같은 뜻의 항목을 찾는다.
 - Authentication → URL Configuration → Site URL: 홍보 페이지 주소(https://second-brain-cvj.pages.dev/)로. 기본 `localhost:3000`이면 확인 메일 링크가 "연결 안 됨"으로 보인다.
 - Anthropic Console → Limits: 월 지출 한도를 낮게 걸어 둔다(서버 코드가 막지 못하는 경우의 마지막 안전장치).
 
 **1. 설치·연결·마이그레이션**
+
+> 11/12 실제 배포 메모: 이 맥은 Command Line Tools가 오래돼 `brew install`이 막혀 `npx supabase`(3.1.0)로 했다(아래 `supabase`를 `npx supabase`로). CLI 3에서는 `db push`의 기본 대상이 로컬이라 `--remote`를 붙여야 하고, 에이전트가 실행하면 확인을 물을 수 없어 `--yes`가 필요하다(사용자 허락 뒤). 함수는 Docker 없이 서버에서 묶어 올라간다.
 
 ```bash
 brew install supabase/tap/supabase
