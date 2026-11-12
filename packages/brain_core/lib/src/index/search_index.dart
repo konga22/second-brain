@@ -121,7 +121,10 @@ String contentHash(String content) =>
 class SearchIndex {
   SearchIndex._(this.vault, this._db);
 
-  factory SearchIndex.open(Vault vault, {String? path}) {
+  /// [rebuildIfOld]가 false면 색인 버전이 낮아도 여기서 다시 만들지 않는다 ([isRebuildPending]).
+  /// 앱의 화면 스레드 쪽이 이렇게 연다: 노트 1만 개를 다시 색인하면 10초 넘게 멈춘다 (11/11 K-32).
+  /// 다시 만들기는 앱 시작 동기화(백그라운드)가 기본값으로 열면서 한다.
+  factory SearchIndex.open(Vault vault, {String? path, bool rebuildIfOld = true}) {
     final dbPath = path ?? vault.indexPath;
     Directory(p.dirname(dbPath)).createSync(recursive: true);
     Database db;
@@ -140,8 +143,11 @@ class SearchIndex {
     final index = SearchIndex._(vault, db);
     final version = db.select('pragma user_version').first.values.first as int;
     if (version < schemaVersion) {
-      index.rebuild();
-      db.execute('pragma user_version = $schemaVersion');
+      if (rebuildIfOld) {
+        index._rebuildIfStillOld();
+      } else {
+        index._isRebuildPending = true;
+      }
     }
     return index;
   }
@@ -272,6 +278,7 @@ class SearchIndex {
   }
 
   SyncResult _syncIfChanged(int now, Duration fullEvery) {
+    if (isRebuildPending) return const SyncResult(added: 0, updated: 0, removed: 0);
     _checkVaultExists();
     final last = _meta('synced_at');
     if (last == null || now - last > fullEvery.inMilliseconds) return sync();
@@ -309,11 +316,25 @@ class SearchIndex {
     if (_db.select('select 1 from docs limit 1').isNotEmpty) throw VaultMissingException(vault.root);
   }
 
+  bool _isRebuildPending = false;
+
+  /// 색인 버전이 낮은데 이 연결은 다시 만들지 않기로 열었다 ([SearchIndex.open]의 `rebuildIfOld: false`).
+  /// 그동안 [sync]·[syncIfStale]은 아무것도 하지 않고, 읽기는 옛 색인으로 한다. 쓰기(노트 저장)는 이렇게 연
+  /// 연결로 하지 않는다: 저장 뒤 확인이 색인에 기대므로 기본값으로 열어 다시 만들기를 기다리게 한다.
+  /// 다른 연결이 다시 만들면 다음 확인 때 풀린다.
+  bool get isRebuildPending {
+    if (!_isRebuildPending) return false;
+    final version = _db.select('pragma user_version').first.values.first as int;
+    if (version >= schemaVersion) _isRebuildPending = false;
+    return _isRebuildPending;
+  }
+
   /// [syncIfStale]이 마지막으로 폴더를 확인한 시각 (같은 프로세스 안에서만).
   int? _staleCheckedAt;
 
   SyncResult sync() {
     _staleCheckedAt = null;
+    if (isRebuildPending) return const SyncResult(added: 0, updated: 0, removed: 0);
     _checkVaultExists();
     final startedAt = DateTime.now().millisecondsSinceEpoch;
     final existing = {
@@ -359,7 +380,10 @@ class SearchIndex {
     var updated = 0;
     var removed = 0;
     final changed = <(int, Note)>[];
-    _db.execute('begin immediate'); // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
+    // [rebuild]가 연 트랜잭션 안에서 불리면 그 트랜잭션에 함께 들어간다.
+    final ownsTransaction = _db.autocommit;
+    // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
+    if (ownsTransaction) _db.execute('begin immediate');
     try {
       // 2) 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
       //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
@@ -420,17 +444,51 @@ class SearchIndex {
         'insert or replace into index_meta(key, value) values (?, ?)',
         ['synced_at', startedAt],
       );
-      _db.execute('commit');
+      if (ownsTransaction) _db.execute('commit');
       unreadable = skipped;
       return SyncResult(added: added, updated: updated, removed: removed);
+    } catch (_) {
+      if (ownsTransaction) _db.execute('rollback');
+      rethrow;
+    }
+  }
+
+  /// 색인을 지우고 처음부터 다시 만든다.
+  ///
+  /// 지우기부터 다시 채우기·버전 올리기까지 한 트랜잭션이다 (11/11 K-32). 예전에는 지우기가 먼저 확정돼
+  /// - 다시 만드는 동안 다른 프로세스(`brain find`·앱)가 빈 색인을 보고 "노트 없음"이라고 했고,
+  /// - 중간에 실패하면 빈 색인이 남았고,
+  /// - 지식 폴더가 없으면 지운 뒤라 폴더 확인을 지나쳐 빈 색인으로 끝났다.
+  SyncResult rebuild() {
+    _checkVaultExists();
+    _db.execute('begin immediate');
+    try {
+      final result = _rebuildInTransaction();
+      _db.execute('commit');
+      _isRebuildPending = false;
+      return result;
     } catch (_) {
       _db.execute('rollback');
       rethrow;
     }
   }
 
-  /// 색인을 지우고 처음부터 다시 만든다.
-  SyncResult rebuild() {
+  /// 열 때 버전이 낮으면 다시 만든다. 잠금을 잡은 뒤 버전을 다시 본다: 다른 프로세스·isolate가 먼저
+  /// 끝냈으면 또 하지 않는다 (앱 시작 때 백그라운드 작업 여럿이 한꺼번에 연다).
+  void _rebuildIfStillOld() {
+    _checkVaultExists();
+    _db.execute('begin immediate');
+    try {
+      final version = _db.select('pragma user_version').first.values.first as int;
+      if (version < schemaVersion) _rebuildInTransaction();
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
+  }
+
+  SyncResult _rebuildInTransaction() {
     _db.execute('delete from docs_fts');
     _db.execute('delete from docs');
     _db.execute('delete from doc_names');
@@ -440,6 +498,7 @@ class SearchIndex {
     _db.execute("delete from index_meta where key like 'layout_%'");
     final result = sync();
     _db.execute("insert into docs_fts(docs_fts) values('optimize')");
+    _db.execute('pragma user_version = $schemaVersion');
     return result;
   }
 

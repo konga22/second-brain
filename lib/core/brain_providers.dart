@@ -11,10 +11,13 @@ import 'background_tasks.dart';
 import 'claude_code.dart';
 
 /// 앱 전체가 쓰는 지식 폴더·색인·Claude Code 연동.
-final vaultProvider = Provider<Vault>((ref) => Vault.resolve()..ensure());
+/// 폴더를 여기서 만들지 않는다: 외장 디스크가 빠졌을 때 빈 폴더를 만들어 색인을 비웠다 (11/11 K-33).
+/// 폴더 확인·만들기는 [vaultStartProvider](vault_startup.dart)가 하고, 준비되기 전에는 앱 화면을 그리지 않는다.
+final vaultProvider = Provider<Vault>((ref) => Vault.resolve());
 
 final searchIndexProvider = Provider<SearchIndex>((ref) {
-  final index = SearchIndex.open(ref.watch(vaultProvider));
+  // 화면 스레드에서는 다시 만들지 않는다: 노트 1만 개면 10초 넘게 멈춘다. 시작 동기화(백그라운드)가 한다 (11/11 K-32).
+  final index = SearchIndex.open(ref.watch(vaultProvider), rebuildIfOld: false);
   ref.onDispose(index.close);
   return index;
 });
@@ -55,13 +58,12 @@ class VaultRevision extends Notifier<int> {
     ref.watch(searchIndexProvider);
     // 시작 때 동기화는 백그라운드에서 한다. 처음 색인(노트 1만 개 30초)에도 화면이 멈추지 않고,
     // 그동안은 지난 색인으로 보이다가 끝나면 번호를 올려 새로 그린다 (사이드바에 "색인 중" 표시).
+    // 폴더 감시·[bump]의 확인과 같은 줄에 세운다: 처음 색인(다시 만들기)이 도는 동안 또 열면 잠금을 5초 기다리다
+    // "database is locked"로 실패했다 (11/12 노트 1만 개 첫 실행 시험).
     Future(() async {
       ref.read(indexingProvider.notifier).set(true);
       try {
-        final changed = await syncIndexInBackground(vault.root, vault.indexPath);
-        if (changed > 0 && ref.mounted) state++;
-      } on Object catch (e) {
-        debugPrint('[색인] 시작 동기화 실패: $e');
+        await _syncInBackground();
       } finally {
         if (ref.mounted) ref.read(indexingProvider.notifier).set(false);
       }

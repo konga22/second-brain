@@ -13,7 +13,7 @@ Future<Map<String, int>> condensedSizesInBackground(
   List<String> paths,
 ) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
   try {
     final sessions = ClaudeSessions(cacheDb: index.db);
     final wanted = paths.toSet();
@@ -32,7 +32,7 @@ Future<List<ClaudeSession>> listSessionsInBackground(
   Duration since = const Duration(days: 90),
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
   try {
     return ClaudeSessions(cacheDb: index.db).list(vault: vault, since: since);
   } finally {
