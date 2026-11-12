@@ -61,7 +61,11 @@ class ClaudeSession {
     'userCount': userCount,
     'aiCount': aiCount,
     'toolCount': toolCount,
+    'v': summaryVersion,
   };
+
+  /// 요약을 만드는 규칙이 바뀌면 올린다. 다른 판으로 만든 캐시는 다시 읽는다 (2: 작업 알림 빼기, 11/12).
+  static const summaryVersion = 2;
 
   static ClaudeSession fromJson(Map<String, dynamic> json) => ClaudeSession(
     sessionId: json['sessionId'] as String,
@@ -141,9 +145,8 @@ class ClaudeSessions {
         [file.path, mtime, stat.size],
       );
       if (rows.isNotEmpty) {
-        return ClaudeSession.fromJson(
-          jsonDecode(rows.first['summary'] as String) as Map<String, dynamic>,
-        );
+        final json = jsonDecode(rows.first['summary'] as String) as Map<String, dynamic>;
+        if (json['v'] == ClaudeSession.summaryVersion) return ClaudeSession.fromJson(json);
       }
     }
     final (session, _) = _parse(file);
@@ -253,6 +256,7 @@ class ClaudeSessions {
       }
       final content = (record['message'] as Map<String, dynamic>?)?['content'];
       if (type == 'user') {
+        if (_isSystemTurn(record, content)) continue;
         final text = _userText(content);
         if (text == null) continue;
         users++;
@@ -301,6 +305,24 @@ class ClaudeSessions {
   }
 
   /// 사람이 쓴 문장만 남긴다. 명령 출력·도구 결과·시스템 알림은 뺀다.
+  /// 사람이 쓰지 않은 "user" 줄: 백그라운드 작업 알림, 다른 세션이 보낸 메시지, 예약 알림.
+  ///
+  /// Claude Code 2.1.x는 이것들을 `type: user`로 적고 `origin.kind`(`task-notification`·`peer`)와
+  /// `promptSource: system`으로 구분한다. 예전에는 사용자 문장으로 세어 축약본에 `[사용자]`로 나왔고(옛 기록 e080b491에서 25건),
+  /// 실수 노트 근거 검사(`--quote`가 사용자 발화에 있는가)도 이 글을 사용자 말로 볼 수 있었다 (11/12).
+  static bool _isSystemTurn(Map<String, dynamic> record, Object? content) {
+    final origin = record['origin'];
+    if (origin is Map && origin['kind'] != null && origin['kind'] != 'human') return true;
+    if (record['promptSource'] == 'system') return true;
+    // origin이 없던 옛 기록
+    final text = content is String
+        ? content
+        : content is List && content.isNotEmpty && content.first is Map
+        ? '${(content.first as Map)['text'] ?? ''}'
+        : '';
+    return text.trimLeft().startsWith('<task-notification>');
+  }
+
   String? _userText(Object? content) {
     String text;
     if (content is String) {
