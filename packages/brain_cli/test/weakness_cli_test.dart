@@ -259,6 +259,84 @@ void main() {
     });
   });
 
+  group('K-40 다 안 읽고 저장하면 일부 저장 (설계서 5.6 v1.3.37)', () {
+    late String home;
+
+    setUp(() {
+      home = p.join(temp.path, 'home');
+      final project = Directory(p.join(home, '.claude', 'projects', '-Users-me-shop'))..createSync(recursive: true);
+      final lines = StringBuffer();
+      for (var i = 0; i < 60; i++) {
+        final text = '$i번째 질문: 결제 웹훅이 실패하면 몇 번 다시 보내야 하는지, 간격은 어떻게 늘리는지 정리해 줘. ' * 10;
+        lines.writeln(jsonEncode({
+          'type': i.isEven ? 'user' : 'assistant',
+          'sessionId': 'cafe0002-bbbb',
+          'cwd': '/Users/me/shop',
+          'timestamp': '2026-11-01T11:${(i % 60).toString().padLeft(2, '0')}:00.000Z',
+          'message': {'role': i.isEven ? 'user' : 'assistant', 'content': i.isEven ? text : [{'type': 'text', 'text': text}]},
+        }));
+      }
+      File(p.join(project.path, 'cafe0002-bbbb.jsonl')).writeAsStringSync(lines.toString());
+    });
+
+    Future<String> addFromSession(String title) async {
+      final (code, out, err) = await brain(
+        ['add', '--draft', '--source-session', 'cafe0002', '--title', title, '--summary', '요약'],
+        stdin: '$title 본문.\n',
+        home: home,
+      );
+      expect(code, 0, reason: err);
+      return out;
+    }
+
+    Future<String> statusLine() async {
+      final (_, out, _) = await brain(['sessions', '--since', '3650d'], home: home);
+      return out.split('\n').firstWhere((l) => l.startsWith('cafe0002'), orElse: () => '');
+    }
+
+    test('앞 쪽만 읽고 저장 → 일부 저장, 다음에 안 읽은 곳부터, 다 읽고 저장하면 저장함', () async {
+      final (_, first, _) = await brain(['sessions', 'show', 'cafe0002'], home: home);
+      final total = int.parse(RegExp(r'전체 (\d+)자').firstMatch(first)!.group(1)!);
+      expect(first, isNot(contains('지난번에')), reason: '처음 읽을 때는 머리 안내가 없다');
+
+      final out = await addFromSession('웹훅 재시도 횟수');
+      final noteId = RegExp(r'n_\d{4}').firstMatch(out)!.group(0)!;
+      expect(out, contains('일부 저장'));
+      expect(await statusLine(), contains('일부 저장'));
+      final (_, unsaved, _) = await brain(['sessions', '--unsaved', '--since', '3650d'], home: home);
+      expect(unsaved, contains('cafe0002'), reason: '일부 저장은 처리가 안 끝난 세션');
+
+      // 다음 정리: 첫 쪽 머리에 지난번 노트와 이어 읽을 곳
+      final (_, again, _) = await brain(['sessions', 'show', 'cafe0002'], home: home);
+      expect(again, contains('지난번에'));
+      expect(again, contains(noteId));
+      expect(again, contains('아래는 12000자부터'));
+      expect(again, contains('--from 24000'), reason: '첫 쪽을 다시 주지 않고 안 읽은 쪽을 준다');
+      expect(first, contains('cafe0002 · '), reason: '축약본 첫머리(세션 id·날짜)는 첫 쪽에만 있다');
+      expect(again, isNot(contains('cafe0002 · ')), reason: '앞부분은 다시 안 보인다');
+
+      for (var from = 12000; from < total; from += 12000) {
+        await brain(['sessions', 'show', 'cafe0002', '--from', '$from'], home: home);
+      }
+      final out2 = await addFromSession('웹훅 간격 상한');
+      expect(out2, isNot(contains('일부 저장')));
+      expect(await statusLine(), contains('저장함'));
+      final (_, unsaved2, _) = await brain(['sessions', '--unsaved', '--since', '3650d'], home: home);
+      expect(unsaved2, isNot(contains('cafe0002')));
+    });
+
+    test('SessionEnd 훅은 일부 저장을 덮지 않고, 세션 묶음 되돌리기는 저장 안 함으로 돌린다', () async {
+      await brain(['sessions', 'show', 'cafe0002'], home: home);
+      await addFromSession('웹훅 재시도 횟수');
+      expect(await statusLine(), contains('일부 저장'));
+      await brain(['hook', 'session-end'], stdin: jsonEncode({'session_id': 'cafe0002-bbbb', 'cwd': '/Users/me/shop'}), home: home);
+      expect(await statusLine(), contains('일부 저장'));
+      final (code, _, err) = await brain(['undo', 's_cafe0002'], home: home);
+      expect(code, 0, reason: err);
+      expect(await statusLine(), contains('저장 안 함'));
+    });
+  });
+
   group('K-19(나)·S-5 실수 노트 바로 적용 전 안전 검사 (설계서 5.4 v1.3.35)', () {
     late String home;
     const sessionId = 'beef0002-bbbb';

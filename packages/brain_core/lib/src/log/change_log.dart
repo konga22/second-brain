@@ -194,7 +194,9 @@ int undoBatch(Vault vault, String batch) {
     final prefix = batch.substring(2);
     final registry = SessionRegistry(vault);
     for (final MapEntry(key: id, value: status) in registry.load().entries) {
-      if (id.startsWith(prefix) && status == SessionStatus.saved) registry.mark(id, SessionStatus.unsaved);
+      if (id.startsWith(prefix) && (status == SessionStatus.saved || status == SessionStatus.partial)) {
+        registry.mark(id, SessionStatus.unsaved);
+      }
     }
   }
   appendChangeLog(vault, 'undo', '$batch 파일 $count개', batch: 'undo');

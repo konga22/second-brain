@@ -243,6 +243,8 @@ class AddCommand extends Command<int> {
         if (s.trim().isNotEmpty) s.trim(),
     ];
     String? sessionId;
+    // 지난 세션을 다 읽지 않고 저장하면 "일부 저장"으로 적어 다음 정리 때 이어 읽게 한다 (K-40).
+    var isPartial = false;
     final sessionArg = args['source-session'] as String?;
     if (sessionArg != null) {
       final session = context.sessions.find(sessionArg, vault: context.vault);
@@ -251,7 +253,7 @@ class AddCommand extends Command<int> {
         return 1;
       }
       sessionId = session.sessionId;
-      warnUnreadSession(context, session);
+      isPartial = warnUnreadSession(context, session);
       sources.add(archiveSession(context.vault, context.sessions, session));
     } else {
       // 세션을 안 주면 지금 대화 세션을 연결한다. Claude Code가 Bash 도구에 CLAUDE_CODE_SESSION_ID를 넣어 준다.
@@ -282,10 +284,11 @@ class AddCommand extends Command<int> {
         batch: sessionId == null ? null : 's_${sessionId.substring(0, 8)}',
       );
       if (sessionId != null) {
-        context.registry.mark(sessionId, SessionStatus.saved, notes: [id]);
+        context.registry.mark(sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
       }
       stdout.writeln(
-        '$id 저장함${args['draft'] as bool ? ' (정리 대기)' : ''}  $path',
+        '$id 저장함${args['draft'] as bool ? ' (정리 대기)' : ''}  $path'
+        '${isPartial ? '\n세션 ${sessionId!.substring(0, 8)}은 다 읽지 않아 "일부 저장"으로 적었습니다. 다음 정리 때 안 읽은 곳부터 이어 읽습니다.' : ''}',
       );
       return 0;
     } on NoteStoreException catch (e) {

@@ -298,7 +298,8 @@ class HookCommand extends Command<int> {
     final cwd = input['cwd'] as String? ?? '';
     if (id == null || (cwd.isNotEmpty && context.vault.contains(cwd))) return;
     final current = context.registry.load()[id];
-    if (current?.isDone ?? false) return;
+    // 저장함·건너뜀·일부 저장(K-40)은 덮지 않는다. 일부 저장을 "저장 안 함"으로 덮으면 이어 읽을 단서가 사라진다.
+    if (current != null && current != SessionStatus.unsaved) return;
     context.registry.mark(
       id,
       SessionStatus.unsaved,
