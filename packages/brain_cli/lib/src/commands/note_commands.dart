@@ -4,6 +4,7 @@ import 'package:args/command_runner.dart';
 import 'package:brain_core/brain_core.dart';
 
 import '../brain_context.dart';
+import 'sessions_command.dart' show warnUnreadSession;
 
 /// `brain find <검색어>`: 제목·요약 최대 5줄 (설계서 5.1).
 class FindCommand extends Command<int> {
@@ -250,6 +251,7 @@ class AddCommand extends Command<int> {
         return 1;
       }
       sessionId = session.sessionId;
+      warnUnreadSession(context, session);
       sources.add(archiveSession(context.vault, context.sessions, session));
     } else {
       // 세션을 안 주면 지금 대화 세션을 연결한다. Claude Code가 Bash 도구에 CLAUDE_CODE_SESSION_ID를 넣어 준다.

@@ -28,12 +28,18 @@ void main() {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
-  Future<(int, String, String)> brain(List<String> args, {String? stdin}) async {
+  Future<(int, String, String)> brain(List<String> args, {String? stdin, String? home}) async {
     final process = await Process.start(
       Platform.resolvedExecutable,
       ['run', p.join('bin', 'brain.dart'), ...args],
       // 이 시험을 Claude Code 세션 안에서 돌리면 그 세션 id가 물려와 `brain add`가 실제 대화 기록을 시험 폴더에 복사했다.
-      environment: {'BRAIN_VAULT': vaultRoot, 'BRAIN_CONFIG': configPath, 'CLAUDE_CODE_SESSION_ID': ''},
+      environment: {
+        'BRAIN_VAULT': vaultRoot,
+        'BRAIN_CONFIG': configPath,
+        'CLAUDE_CODE_SESSION_ID': '',
+        // 세션 기록(~/.claude/projects)을 시험 폴더로
+        'HOME': ?home,
+      },
     );
     if (stdin != null) process.stdin.write(stdin);
     await process.stdin.close();
@@ -204,6 +210,52 @@ void main() {
       final context = (jsonDecode(out)['hookSpecificOutput']['additionalContext'] as String);
       final line = context.split('\n').firstWhere((l) => l.contains(id));
       expect(line, contains('[초안]'));
+    });
+  });
+
+  group('O-7 긴 세션 읽은 범위', () {
+    test('중간을 건너뛰면 끝 표시와 저장 때 안 읽은 곳을 알려 준다', () async {
+      final home = p.join(temp.path, 'home');
+      final project = Directory(p.join(home, '.claude', 'projects', '-Users-me-shop'))..createSync(recursive: true);
+      final lines = StringBuffer();
+      for (var i = 0; i < 60; i++) {
+        final text = '$i번째 질문: 결제 웹훅이 실패하면 몇 번 다시 보내야 하는지, 간격은 어떻게 늘리는지 정리해 줘. ' * 10;
+        lines.writeln(jsonEncode({
+          'type': i.isEven ? 'user' : 'assistant',
+          'sessionId': 'cafe0001-aaaa',
+          'cwd': '/Users/me/shop',
+          'timestamp': '2026-11-01T10:${(i % 60).toString().padLeft(2, '0')}:00.000Z',
+          'message': {'role': i.isEven ? 'user' : 'assistant', 'content': i.isEven ? text : [{'type': 'text', 'text': text}]},
+        }));
+      }
+      File(p.join(project.path, 'cafe0001-aaaa.jsonl')).writeAsStringSync(lines.toString());
+
+      final (_, first, _) = await brain(['sessions', 'show', 'cafe0001'], home: home);
+      final total = int.parse(RegExp(r'전체 (\d+)자').firstMatch(first)!.group(1)!);
+      expect(total, greaterThan(24000), reason: '세 쪽 넘게');
+      // 둘째 쪽을 건너뛰고 셋째 쪽부터
+      final (_, third, _) = await brain(['sessions', 'show', 'cafe0001', '--from', '24000'], home: home);
+      expect(third, contains('아직 안 읽은 곳: 12000~24000'));
+      final (code, _, err) = await brain(
+        ['add', '--draft', '--source-session', 'cafe0001', '--title', '웹훅 재시도 간격', '--summary', '세 번, 간격 늘림'],
+        stdin: '세 번까지 다시 보내고 간격을 늘린다.\n',
+        home: home,
+      );
+      expect(code, 0, reason: err);
+      expect(err, contains('주의: 세션 cafe0001을'));
+      expect(err, contains('12000~24000'));
+      // 마저 읽으면 경고가 없다
+      for (var from = 12000; from < total; from += 12000) {
+        await brain(['sessions', 'show', 'cafe0001', '--from', '$from'], home: home);
+      }
+      final (_, last, _) = await brain(['sessions', 'show', 'cafe0001', '--from', '${total - 10}'], home: home);
+      expect(last, contains('전체를 다 읽음'));
+      final (_, _, err2) = await brain(
+        ['add', '--draft', '--source-session', 'cafe0001', '--title', '웹훅 간격 상한', '--summary', '30분까지'],
+        stdin: '간격은 30분까지만 늘린다.\n',
+        home: home,
+      );
+      expect(err2, isNot(contains('주의')));
     });
   });
 }

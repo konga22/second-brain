@@ -26,6 +26,7 @@ export 'src/note/wiki_links.dart';
 export 'src/security/secret_mask.dart';
 export 'src/sessions/claude_sessions.dart';
 export 'src/sessions/session_archive.dart';
+export 'src/sessions/session_reads.dart';
 export 'src/sessions/session_registry.dart';
 export 'src/text/nfc.dart';
 export 'src/todos/todo_store.dart';
