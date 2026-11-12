@@ -11,6 +11,26 @@ import 'package:secondbrain/core/brain_providers.dart';
 /// 번호가 오를 때마다 점검·할 일 후보·목록·그래프가 다시 계산된다(노트 1만 개에서 점검만 약 2초).
 /// 예전에는 앱 안에서 노트를 한 번 저장하면 [bumpVault]로 한 번, 폴더 감시가 방금 쓴 노트·자동 목차·
 /// 변경 기록을 보고 한 번 더 올라 모든 계산이 두 번 돌았다.
+/// [revisions]가 [quiet] 동안 늘지 않을 때까지 기다린다 (최대 [limit]).
+Future<void> waitQuiet(
+  List<int> revisions, {
+  Duration quiet = const Duration(milliseconds: 1500),
+  Duration limit = const Duration(seconds: 20),
+}) async {
+  final watch = Stopwatch()..start();
+  var count = revisions.length;
+  var since = watch.elapsed;
+  while (watch.elapsed < limit) {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (revisions.length != count) {
+      count = revisions.length;
+      since = watch.elapsed;
+    } else if (watch.elapsed - since >= quiet) {
+      return;
+    }
+  }
+}
+
 void main() {
   late Directory tmp;
   late ProviderContainer container;
@@ -36,8 +56,10 @@ void main() {
       (_, next) => revisions.add(next),
       fireImmediately: true,
     );
-    // 시작 동기화와 폴더 감시가 자리 잡을 때까지
-    await Future<void>.delayed(const Duration(seconds: 2));
+    // 시작 동기화와 폴더 감시가 자리 잡을 때까지: 번호가 1.5초 동안 그대로일 때까지 (최대 20초).
+    // 예전에는 2초만 기다렸다. 시험을 한꺼번에 돌려 맥이 바쁘면 시작 동기화가 2초 뒤에 끝나 번호가 시험 안에서
+    // 한 번 더 올라 "한 번만 오른다"가 가끔 실패했다 (11/12 K-38, 전체 실행 1번 실패·단독 3번 통과).
+    await waitQuiet(revisions);
     revisions.clear();
   });
 
@@ -73,7 +95,10 @@ void main() {
       ..writeAsStringSync(
         '---\nid: n_0100\ntitle: "롤백 순서"\nsummary: "롤백 순서"\n---\n\n이전 버전으로 되돌린다.\n',
       );
-    await Future<void>.delayed(const Duration(seconds: 3));
+    // 폴더 감시 → 색인까지 걸리는 시간은 맥이 바쁠수록 길다. 3초 고정 대신 최대 15초까지 기다린다.
+    for (var i = 0; i < 150 && container.read(searchIndexProvider).byId('n_0100') == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
     expect(revisions, isNotEmpty);
     expect(container.read(searchIndexProvider).byId('n_0100'), isNotNull);
   });
@@ -87,7 +112,9 @@ void main() {
       cli,
     ).add(title: '롤백 순서', summary: '되돌리는 순서', body: '이전 버전으로 되돌린다.');
     cli.close();
-    await Future<void>.delayed(const Duration(seconds: 3));
+    for (var i = 0; i < 150 && revisions.isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
     expect(revisions, isNotEmpty);
   });
 }

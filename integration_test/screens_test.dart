@@ -19,7 +19,7 @@ import 'package:secondbrain/features/notes/note_panel.dart';
 /// 모든 화면을 돌며 예외 없이 그려지는지 본다. 노트를 하나 골라 오른쪽 패널, ⌘K 명령 창도 연다.
 /// 실제 지식 폴더를 쓰지 않도록 BRAIN_VAULT에 사본을 주고 돌린다.
 ///
-/// BRAIN_VAULT=<사본> flutter test integration_test/screens_test.dart -d macos \
+/// BRAIN_VAULT=<사본> BRAIN_CONFIG=<임시 파일> flutter test integration_test/screens_test.dart -d macos \
 ///   [--dart-define=SHOT_DIR=<캡처 폴더>]
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +44,9 @@ void main() {
   testWidgets('모든 화면이 예외 없이 그려진다', (tester) async {
     final vault = Platform.environment['BRAIN_VAULT'] ?? '';
     expect(vault, isNotEmpty, reason: '실제 지식 폴더 보호: BRAIN_VAULT에 사본을 주세요');
+    expect(Platform.environment['BRAIN_CONFIG'] ?? '', isNotEmpty, reason: '실제 설정 보호: BRAIN_CONFIG=<임시 파일>');
+    // 어디서 멈추는지 기록에 남긴다 (11/12 한 명령 실행에서 26분 멈춤, K-38).
+    void step(String name) => debugPrint('[단계] $name');
     tester.view.physicalSize = const Size(2880, 1800);
     tester.view.devicePixelRatio = 2;
     await tester.pumpWidget(const ProviderScope(child: SecondBrainApp()));
@@ -59,14 +62,17 @@ void main() {
       await settle(tester);
     }
 
+    step('홈 그래프');
     await shot(tester, '01_home_graph');
     for (final (i, label) in ['목록', '타임라인', '정리 보드'].indexed) {
+      step('홈 $label');
       await tester.tap(find.text(label).first);
       await settle(tester);
       await shot(tester, '0${i + 2}_home_$label');
     }
     final notes = container.read(notesProvider);
     if (notes.isNotEmpty) {
+      step('노트 패널');
       container.read(selectedNoteProvider.notifier).select(notes.first.id);
       await settle(tester);
       await shot(tester, '05_note_panel');
@@ -79,6 +85,7 @@ void main() {
         final note = Note.parse(file.readAsStringSync(), fallbackId: doc.id, fallbackTitle: doc.title);
         return note.sources.any((s) => s.startsWith('raw/sessions/') && File('$vaultRoot/$s').existsSync());
       }).firstOrNull;
+      step('출처 칸 ${fromSession?.id}');
       if (fromSession != null) {
         container.read(selectedNoteProvider.notifier).select(fromSession.id);
         await settle(tester);
@@ -106,6 +113,7 @@ void main() {
         container.read(selectedNoteProvider.notifier).select(notes.first.id);
         await settle(tester);
       }
+      step('목록 선택');
       // 목록에서 고른 노트의 연결 호, 주제를 눌렀을 때 주제 사이 호
       await tester.tap(find.text('목록').first);
       await settle(tester);
@@ -121,6 +129,7 @@ void main() {
       }
     }
     for (final page in AppPage.values.where((p) => p != AppPage.home)) {
+      step('화면 ${page.name}');
       router.go(page.path);
       await settle(tester);
       await shot(tester, '1${page.index}_${page.name}');
@@ -133,6 +142,7 @@ void main() {
         await shot(tester, '1${page.index}b_lessons_active');
       }
     }
+    step('⌘K');
     router.go(AppPage.home.path);
     await settle(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);

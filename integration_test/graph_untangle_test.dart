@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:brain_core/brain_core.dart';
@@ -13,6 +14,7 @@ import 'package:secondbrain/core/brain_providers.dart';
 /// (설계서 5.5 "꼬임 막기" v1.3.28, 11/11 사용자 "그래프 꼬인 거").
 ///
 /// 지식 폴더 사본과, 그 사본의 색인 자리에 "꼬인 위치가 저장된 색인" 사본을 두고 돌린다.
+/// 꼬인 색인이 없으면 시험이 섞은 순서의 원 배치를 저장해 만든다(`tool/run_integration.sh`로 한 명령 실행).
 /// 색인 자리는 ~/Library/Caches/com.konga22.secondbrain/<사본 경로 sha1 앞 12자>/index.db 다.
 ///
 /// BRAIN_VAULT=<지식 폴더 사본> BRAIN_CONFIG=<임시 파일> flutter test \
@@ -45,6 +47,17 @@ void main() {
     // 앱을 띄우기 전: 저장된 배치가 실제로 꼬여 있고 기록이 없는 상태인지 (빈 통과가 아니게).
     final vault = Vault.resolve();
     final before = SearchIndex.open(vault);
+    // 준비된 꼬인 색인이 없으면(새 사본, tool/run_integration.sh) 여기서 만든다: 노트를 섞은 순서로 원 위에 놓으면
+    // 연결선이 원 안을 가로질러 꼬인다. 배치 기록(base)은 남기지 않는다 = 예전 배치 (K-38, 11/12).
+    if (before.graphPositions().isEmpty || before.graphLayoutBase() != null) {
+      before.sync();
+      final ids = [for (final d in before.notes()) if (!d.isMerged) d.id]..shuffle(Random(7));
+      before.clearGraphLayout();
+      before.saveGraphPositions({
+        for (var i = 0; i < ids.length; i++)
+          ids[i]: Point(600 * cos(2 * pi * i / ids.length), 600 * sin(2 * pi * i / ids.length)),
+      });
+    }
     final storedBefore = before.graphPositions();
     final baseBefore = before.graphLayoutBase();
     final notesBefore = [for (final d in before.notes()) if (!d.isMerged) GraphNode(d.id, d.topic)];
