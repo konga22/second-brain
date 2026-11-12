@@ -124,12 +124,20 @@ class SearchIndex {
   /// [rebuildIfOld]가 false면 색인 버전이 낮아도 여기서 다시 만들지 않는다 ([isRebuildPending]).
   /// 앱의 화면 스레드 쪽이 이렇게 연다: 노트 1만 개를 다시 색인하면 10초 넘게 멈춘다 (11/11 K-32).
   /// 다시 만들기는 앱 시작 동기화(백그라운드)가 기본값으로 열면서 한다.
-  factory SearchIndex.open(Vault vault, {String? path, bool rebuildIfOld = true}) {
+  ///
+  /// [busyTimeout]: 다른 연결이 쓰는 중일 때 기다리는 시간. 기본 5초. 앱의 저장처럼 사용자가 기다리는 쓰기는
+  /// 길게 준다 — 처음 색인(노트 1만 개 12~20초)과 겹치면 5초 뒤 "database is locked"로 실패했다 (11/12).
+  factory SearchIndex.open(
+    Vault vault, {
+    String? path,
+    bool rebuildIfOld = true,
+    Duration busyTimeout = const Duration(seconds: 5),
+  }) {
     final dbPath = path ?? vault.indexPath;
     Directory(p.dirname(dbPath)).createSync(recursive: true);
     Database db;
     try {
-      db = _openDb(dbPath);
+      db = _openDb(dbPath, busyTimeout);
     } on SqliteException catch (e) {
       // 색인 파일이 깨졌으면(11 CORRUPT, 26 NOTADB) 지우고 새로 만든다. 색인은 원본(md)에서 언제든 다시 만들 수 있다
       // (설계서 5.7). 예전에는 앱이 예외 화면에서 멈췄다 (11/11 K-32). 그래프 위치·세션 요약 캐시는 다시 계산된다.
@@ -138,7 +146,7 @@ class SearchIndex {
         final file = File('$dbPath$suffix');
         if (file.existsSync()) file.deleteSync();
       }
-      db = _openDb(dbPath);
+      db = _openDb(dbPath, busyTimeout);
     }
     final index = SearchIndex._(vault, db);
     final version = db.select('pragma user_version').first.values.first as int;
@@ -152,10 +160,10 @@ class SearchIndex {
     return index;
   }
 
-  static Database _openDb(String dbPath) {
+  static Database _openDb(String dbPath, Duration busyTimeout) {
     final db = sqlite3.open(dbPath);
     try {
-      _createSchema(db);
+      _createSchema(db, busyTimeout);
       return db;
     } on Object {
       db.close();
@@ -163,10 +171,10 @@ class SearchIndex {
     }
   }
 
-  static void _createSchema(Database db) {
+  static void _createSchema(Database db, Duration busyTimeout) {
     // 기다리기 설정을 먼저 한다: journal_mode를 바꾸는 순간에도 다른 프로세스가 WAL을 복구하고 있으면
     // 기다리지 않고 BUSY_RECOVERY(261)로 실패했다 (11/12 동시 brain add 8개 시험).
-    db.execute('pragma busy_timeout = 5000');
+    db.execute('pragma busy_timeout = ${busyTimeout.inMilliseconds}');
     db.execute('pragma journal_mode = wal');
     db.execute('''
       create table if not exists docs (

@@ -24,7 +24,7 @@ Future<LayoutResult> layoutGraphInBackground(
 Future<int> syncIndexInBackground(String vaultRoot, String indexPath) =>
     Isolate.run(() {
       final vault = Vault(vaultRoot);
-      final index = SearchIndex.open(vault, path: indexPath);
+      final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
       try {
         final r = index.sync();
         return r.added + r.updated + r.removed;
@@ -77,6 +77,11 @@ Future<({List<Todo> candidates, List<Todo> fromNotes})> noteTodosInBackground(
 
 /// 앱 안 노트 저장 (편집 창 [저장]·[내 것으로 덮어쓰기]). 쓰기라 색인을 기본값으로 연다: 처음 색인 중이면
 /// 다시 만들기를 기다린다(저장 뒤 확인이 색인에 기댄다, 11/12).
+/// 사용자가 기다리는 쓰기·읽기(편집 창 열기·저장, 노트 패널 버튼)가 색인 잠금을 기다리는 시간.
+/// 처음 색인(다시 만들기)은 한 트랜잭션이라 노트 1만 개에서 12~20초 잠금을 쥔다. 기본 5초면 그사이 [저장]이
+/// "database is locked"로 실패했다 (11/12, 작업인계 0-4). 화면에는 "저장 중…"이 보인다.
+const userWriteWait = Duration(minutes: 2);
+
 /// 새 노트면 [id]가 null이다. 저장한 노트 id를 돌려준다.
 ///
 /// 저장은 쓰기 전·후에 색인을 맞추고 자동 목차를 다시 쓴다. 노트 1만 개에서 약 235ms라 화면 스레드에서 하면
@@ -95,7 +100,7 @@ Future<String> saveNoteInBackground(
   String? batch,
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
   try {
     final store = NoteStore(vault, index);
     if (id == null) {
@@ -133,7 +138,7 @@ Future<(IndexedDoc, Note, String)?> readNoteInBackground(
   String id,
 ) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
   try {
     return NoteStore(vault, index).read(id);
   } finally {
@@ -167,7 +172,7 @@ Future<void> changeNoteInBackground(
   String? batch,
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
-  final index = SearchIndex.open(vault, path: indexPath);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
   try {
     final store = NoteStore(vault, index);
     switch (change) {
