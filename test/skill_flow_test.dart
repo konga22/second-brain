@@ -42,6 +42,12 @@ void main() {
     expect(skill('brain-lint'), contains('규칙 후보'));
   });
 
+  test('설정 화면 자동 저장 설명도 선호·작업 규칙은 노트가 아니라 실수 노트 후보로 넘긴다고 말한다', () {
+    final text = File('lib/features/settings/settings_page.dart').readAsStringSync();
+    expect(text, isNot(contains('결정·문제 해결·작업 규칙 같은 지식')));
+    expect(text, contains('선호·작업 규칙은 실수 노트 후보로'));
+  });
+
   test('brain-verifier: 대화에서 나온 선호도 받고, 같은 규칙이면 --recorrected, 사용자 말이 없으면 승인 대기', () {
     final text = File('integrations/claude-code/agents/brain-verifier.md').readAsStringSync();
     final section = text.split('## A-2.').last.split('## B.').first;

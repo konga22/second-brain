@@ -225,7 +225,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
     return ShadCard(
       title: const Text('자동으로 지식 넣기'),
       description: const Text(
-        '대화를 하다 결정·문제 해결·작업 규칙 같은 지식이 생기면 묻지 않고 정리 대기에 초안으로 넣습니다. 확인은 노트·정리 보드에서 합니다.',
+        '대화를 하다 결정·문제 해결 같은 지식이 생기면 묻지 않고 정리 대기에 초안으로 넣습니다. 어느 프로젝트에서나 지킬 선호·작업 규칙은 실수 노트 후보로 넘깁니다. 확인은 노트·정리 보드에서 합니다.',
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: 12),

@@ -241,9 +241,12 @@ class HookCommand extends Command<int> {
   }
 
   /// 대화 중 자동 저장 안내 (설계서 5.6). 세션 id는 넣지 않는다 — brain add가 CLAUDE_CODE_SESSION_ID로 연결한다.
+  /// 어느 프로젝트에서나 지킬 선호·작업 규칙은 노트가 아니라 brain-verifier로 넘긴다 (설계서_프롬프트이후 11/13 추가:
+  /// 선호 → 실수 노트, brain-save 2-1). 노트는 요청 말이 맞을 때만 붙어 다른 프로젝트에서 안 붙었다.
   static const autoCaptureLine =
-      '· 자동 저장(켜짐): 오래 쓸 지식(결정과 이유, 문제와 해결, 작업 규칙, 쓸 만한 도구)이 확정되면 묻지 말고 '
+      '· 자동 저장(켜짐): 오래 쓸 지식(결정과 이유, 문제와 해결, 쓸 만한 도구)이 확정되면 묻지 말고 '
       'brain-save 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄을 붙인다. '
+      '일반 선호·작업 규칙은 brain-verifier에 넘긴다. '
       '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지. '
       '형식: brain add --draft --title "제목" --summary "60자 요약" --tags "a,b" --topic "주제" <<\'NOTE\' (본문 2~8줄) NOTE';
 

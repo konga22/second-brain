@@ -92,10 +92,15 @@ void main() {
     final rules = text.split('\n').where((l) => l.startsWith('  - L-')).toList();
     print('[토큰] 세션 시작 ${text.length}자 (세 줄 ${base.length}자 + 규칙 ${rules.length}줄)');
     // v1.3.22: 자동 저장 줄에 brain add 형식(약 100자)을 더해 400 → 500
-    expect(base.length, lessThanOrEqualTo(500));
+    // 11/13 선호 → 실수 노트: "일반 선호·작업 규칙은 brain-verifier에 넘긴다" +27자(목록의 "작업 규칙, " 7자를 빼고)로 500 → 520.
+    // 이 줄이 없으면 AI가 선호를 프로젝트마다 노트로 저장해 다른 프로젝트에서 안 붙는다 (brain-save 2-1). 바뀐 뒤 고정 글이라 캐시는 한 번만 깨진다.
+    expect(base.length, lessThanOrEqualTo(520));
     expect(base, contains('형식: brain add --draft'));
     expect(base, contains('· 주제:'));
     expect(base, contains('· 자동 저장(켜짐)'));
+    // (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트) 일반 선호·작업 규칙은 노트가 아니라 brain-verifier로 넘긴다
+    expect(base, isNot(contains('문제와 해결, 작업 규칙')));
+    expect(base, contains('선호·작업 규칙은 brain-verifier'));
     // 사용가치분석 8절 ②: brain 명령을 이어 붙이면 허용 목록 밖이라 거부된다
     expect(base, contains('하나씩 부른다'));
     // 사용가치분석 8절 ①: 적용 중 실수 노트 5개가 모두 한 줄씩 (요청 말과 상관없이 늘 보이게)
