@@ -36,6 +36,8 @@ class Lesson {
     this.kept = 0,
     this.recorrected = 0,
     this.lastSeen,
+    this.created,
+    this.recorrectedAt,
     this.body = '',
   });
 
@@ -56,6 +58,29 @@ class Lesson {
   final int kept;
   final int recorrected;
   final DateTime? lastSeen;
+
+  /// 만든 날과 마지막으로 다시 교정된 날 (설계서_프롬프트이후 4.5: 세션 시작 목록을 최근순으로 고른다).
+  /// 이 필드가 생기기 전에 만든 규칙은 null이다.
+  final DateTime? created;
+  final DateTime? recorrectedAt;
+
+  /// 만들었거나 다시 교정된 가장 늦은 날. 둘 다 없으면 null (가장 오래된 쪽으로 친다).
+  DateTime? get touched => switch ((created, recorrectedAt)) {
+    (final c?, final r?) => r.isAfter(c) ? r : c,
+    (final c, final r) => c ?? r,
+  };
+
+  /// 최근에 만들었거나 다시 교정된 것부터 (설계서_프롬프트이후 4.5). 날이 같거나 없으면 번호가 큰(나중에 만든) 것부터.
+  /// 파일에 적힌 값만 써서 규칙이 안 바뀌면 순서도 안 바뀐다 (세션 시작 안내는 프롬프트 캐시).
+  static int recentFirst(Lesson a, Lesson b) {
+    final ta = a.touched, tb = b.touched;
+    if (ta != tb) {
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return tb.compareTo(ta);
+    }
+    return b.id.compareTo(a.id);
+  }
 
   /// 교정 원문과 검증 에이전트 판단 기록.
   final String body;
@@ -80,6 +105,8 @@ class Lesson {
       kept: int.tryParse('${evidence['kept'] ?? 0}') ?? 0,
       recorrected: int.tryParse('${evidence['recorrected'] ?? 0}') ?? 0,
       lastSeen: DateTime.tryParse('${evidence['lastSeen'] ?? ''}'),
+      created: DateTime.tryParse('${meta['created'] ?? ''}'),
+      recorrectedAt: DateTime.tryParse('${evidence['recorrectedAt'] ?? ''}'),
       body: body,
     );
   }
@@ -89,7 +116,11 @@ class Lesson {
     final diffLines = diff.trim().isEmpty
         ? ['diff: ""']
         : ['diff: |', for (final l in diff.trimRight().split('\n')) '  $l'];
-    final seen = lastSeen == null ? '' : ', lastSeen: ${formatTime(lastSeen!).substring(0, 10)}';
+    String day(DateTime t) => formatTime(t).substring(0, 10);
+    final seen = [
+      if (lastSeen != null) ', lastSeen: ${day(lastSeen!)}',
+      if (recorrectedAt != null) ', recorrectedAt: ${day(recorrectedAt!)}',
+    ].join();
     return [
       '---',
       'id: $id',
@@ -100,6 +131,7 @@ class Lesson {
       'source: $source',
       ...diffLines,
       'tests: [${tests.join(', ')}]',
+      if (created != null) 'created: ${day(created!)}',
       'evidence: { kept: $kept, recorrected: $recorrected$seen }',
       '---',
       body.trim(),
@@ -113,6 +145,7 @@ class Lesson {
     int? kept,
     int? recorrected,
     DateTime? lastSeen,
+    DateTime? recorrectedAt,
     String? trigger,
     String? action,
     String? reason,
@@ -130,6 +163,8 @@ class Lesson {
     kept: kept ?? this.kept,
     recorrected: recorrected ?? this.recorrected,
     lastSeen: lastSeen ?? this.lastSeen,
+    created: created,
+    recorrectedAt: recorrectedAt ?? this.recorrectedAt,
     body: body ?? this.body,
   );
 }
