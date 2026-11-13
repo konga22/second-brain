@@ -21,6 +21,7 @@ export 'src/log/change_history.dart';
 export 'src/log/change_log.dart';
 export 'src/note/file_name.dart';
 export 'src/note/note.dart';
+export 'src/note/note_assets.dart';
 export 'src/note/note_origin.dart';
 export 'src/note/note_store.dart';
 export 'src/note/wiki_links.dart';

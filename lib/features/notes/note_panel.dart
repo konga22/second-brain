@@ -256,6 +256,9 @@ class _NoteDetail extends ConsumerWidget {
         const SizedBox(height: 12),
         MarkdownView(
           text: note.body.trim().isEmpty ? '(본문 없음)' : note.body.trim(),
+          // 사진 링크(assets/)는 노트 폴더 기준 상대 경로다 (설계서_프롬프트이후 5.5)
+          baseDir: p.dirname(file.path),
+          vaultRoot: ref.watch(vaultProvider).root,
           onLink: (title) {
             final target = index.byTitle(title);
             if (target != null) ref.read(selectedNoteProvider.notifier).select(target.id);

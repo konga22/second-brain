@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import '../note/note.dart';
+import '../note/note_assets.dart';
 import '../sessions/session_registry.dart';
 import '../vault/vault.dart';
 
@@ -175,10 +176,15 @@ int undoBatch(Vault vault, String batch) {
     final target = p.join(vault.root, entry['path'] as String);
     if (entry['existed'] == true) {
       final backup = File(p.join(dir, entry['backup'] as String));
-      writeFileAtomic(target, backup.readAsStringSync());
+      // 바이트로 되살린다: 첨부 사진(assets/)도 묶음에 들어온다 (설계서_프롬프트이후 5.5)
+      writeBytesAtomic(target, backup.readAsBytesSync());
     } else {
       final file = File(target);
       if (!file.existsSync()) continue;
+      // 이 묶음에서 새로 붙인 사진이라도 그사이 다른 노트가 같은 사진을 붙였으면 남긴다 (설계서_프롬프트이후 5.5).
+      // 항목을 거꾸로 돌아 이 묶음의 노트는 이미 치운 뒤다.
+      final rel = entry['path'] as String;
+      if (rel.startsWith('$assetsDirName/') && isAssetReferenced(vault, p.basename(rel))) continue;
       final trash = p.join(vault.metaDir, 'trash', trashName, entry['path'] as String);
       Directory(p.dirname(trash)).createSync(recursive: true);
       file.renameSync(trash);
