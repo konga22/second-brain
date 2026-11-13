@@ -24,9 +24,10 @@ int neuralPaintCount = 0;
 @visibleForTesting
 int neuralLastPaintMicros = 0;
 
-/// 시험용: 그린 이름표 글자·줄 수·글자 자리·밝힘 (이름표를 자르지 않는지, 고른 길 이름표가 겹치지 않는지 본다, 결정 6).
+/// 시험용: 그린 이름표 글자·줄 수·글자 자리·밝힘·말줄임 여부 (평소는 한 줄로 줄이고 마우스 올림·고른 길은 자르지
+/// 않는지, 고른 길 이름표가 겹치지 않는지 본다).
 @visibleForTesting
-final neuralLabelLog = <({String text, int lines, Rect rect, bool strong})>[];
+final neuralLabelLog = <({String text, int lines, Rect rect, bool strong, bool cut})>[];
 
 /// 시험용: 고른 길 층(정지 그림)을 그린 횟수. 빛이 흐르는 동안에는 늘지 않아야 한다 (11/13 검토 3).
 @visibleForTesting
@@ -408,6 +409,14 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                     child: RepaintBoundary(child: CustomPaint(painter: _PulsePainter(prepared, _pulse))),
                   ),
                 ),
+              // 이름표: 모든 선·빛 위 (선이 이름표를 가로지르지 않게). 고른 것·자리가 바뀔 때만 다시 그린다.
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: RepaintBoundary(
+                    child: CustomPaint(painter: _LabelPainter(layout: layout, geo: g, prepared: prepared, hover: hover)),
+                  ),
+                ),
+              ),
               Positioned.fill(
                 child: IgnorePointer(
                   child: CustomPaint(
@@ -504,8 +513,10 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
               ? const SizedBox.shrink()
               : Stack(
                   children: [
+                    // 노트·주제 이름표는 노드 오른쪽에 전체로 붙으니 상자는 마우스 왼쪽에 (이름표를 가리지 않게, 11/13 화면 검토)
                     Positioned(
-                      left: min(at.dx + 14, max(0.0, size.width - width - 8)),
+                      left: hover.layer == _Layer.input ? min(at.dx + 14, max(0.0, size.width - width - 8)) : null,
+                      right: hover.layer == _Layer.input ? null : min(size.width - at.dx + 14, size.width - width - 8),
                       top: min(at.dy + 14, max(0.0, size.height - 80)),
                       child: Container(
                         key: const ValueKey('neural-tooltip'),
@@ -602,7 +613,7 @@ class _Geo {
   /// 입력·주제 이름표가 바탕에 보이기 시작하는 간격.
   static const sideLabelGap = 13.0;
 
-  /// 은닉층 이름표 폭: 은닉층 → 주제 사이의 반쯤. 넘치면 줄을 바꾼다 (자르지 않음, 결정 6).
+  /// 은닉층 이름표 폭: 은닉층 → 주제 사이의 반쯤. 평소에는 한 줄로 줄이고, 마우스 올림·고른 길은 줄을 바꿔 전체.
   double get noteLabelWidth => max(80, (xOut - xH) * 0.6);
   double get inputLabelWidth => max(60, xIn - 20);
   double get topicLabelWidth => max(60, size.width - xOut - 18);
@@ -971,7 +982,7 @@ const _headerColor = Color(0xd9d6d3e8);
 double _nodeRadius(int count, int maxCount, double spacing) =>
     (3 + 5 * sqrt(count / max(1, maxCount))) * max(0.4, min(1.0, spacing / 16));
 
-/// 바탕: 층 머리말, 모든 선, 노드, (자리가 있으면) 이름표.
+/// 바탕: 층 머리말, 모든 선, 노드. 이름표는 [_LabelPainter].
 class _BasePainter extends CustomPainter {
   _BasePainter({required this.layout, required this.geo});
 
@@ -1070,27 +1081,7 @@ class _BasePainter extends CustomPainter {
     );
     canvas.restore();
 
-    // 이름표: 자리가 있을 때만. 겹치면 건너뛴다 (마우스를 올리면 위 층이 늘 단다).
-    if (g.sIn >= _Geo.sideLabelGap) {
-      _labelPass(canvas, [
-        for (var i = 0; i < layout.inputs.length; i++)
-          _LabelItem(layout.inputs[i].title, Offset(g.xIn - 12, g.yIn(i)), g.inputLabelWidth, TextAlign.right),
-      ]);
-    }
-    if (g.sOut >= _Geo.sideLabelGap) {
-      _labelPass(canvas, [
-        for (var t = 0; t < layout.topics.length; t++)
-          _LabelItem('${layout.topics[t].name}  ${layout.topics[t].count}', Offset(g.xOut + 12, g.yOut(t)),
-              g.topicLabelWidth, TextAlign.left),
-      ]);
-    }
-    if (g.showNoteLabels) {
-      _labelPass(canvas, [
-        for (var p = g.lo; p <= g.hi; p++)
-          if (g.inView(g.yNote(p)))
-            _LabelItem(layout.notes[p].title, Offset(g.xH + 9, g.yNote(p)), g.noteLabelWidth, TextAlign.left, box: true),
-      ]);
-    }
+    // 이름표는 [_LabelPainter]가 선 위 층에서 단다 (고른 길 선이 이름표를 가로지르지 않게).
     if (watch != null) neuralLastPaintMicros = watch.elapsedMicroseconds;
   }
 
@@ -1099,7 +1090,7 @@ class _BasePainter extends CustomPainter {
       old.layout != layout || old.geo.size != geo.size || old.geo.s != geo.s || old.geo.off != geo.off;
 }
 
-/// 고른 길 (정지 그림): 밝힌 선·노드·이름표. 고른 것이나 자리가 바뀔 때만 다시 그린다 —
+/// 고른 길 (정지 그림): 밝힌 선·노드. 고른 것이나 자리가 바뀔 때만 다시 그린다 —
 /// 빛이 흐르는 1.6초 동안 프레임마다 그리지 않는다 (11/13 검토 3).
 class _PathPainter extends CustomPainter {
   _PathPainter(this.prepared);
@@ -1174,52 +1165,157 @@ class _PathPainter extends CustomPainter {
     }
     canvas.restore();
 
-    // 고른 길에 바로 닿지 않은 밝힌 이름표: 자리가 있을 때(또는 몇 개 안 될 때)만, 겹치면 건너뛴다.
-    // 고른 길 이름표 자리는 피한다. 아주 많은 이름표를 배치하지 않게 간격으로 먼저 거른다 (11/13 검토 3).
-    final path = prepared.labels;
-    bool labelled(_Layer layer, int i) => path.keys.contains((layer: layer, i: i));
-    final avoid = path.rects;
-    if (g.sIn >= _Geo.sideLabelGap || lit.inputs.length <= 40) {
-      _labelPass(canvas, [
-        for (final i in lit.inputs)
-          if (!labelled(_Layer.input, i))
-            _LabelItem(layout.inputs[i].title, Offset(g.xIn - 12, g.yIn(i)), g.inputLabelWidth, TextAlign.right,
-                strong: true),
-      ], avoid: avoid);
-    }
-    final litTopics = {...lit.topics, ...lit.faintTopics};
-    if (g.sOut >= _Geo.sideLabelGap || litTopics.length <= 40) {
-      _labelPass(canvas, [
-        for (final t in litTopics)
-          if (!labelled(_Layer.topic, t))
-            _LabelItem('${layout.topics[t].name}  ${layout.topics[t].count}', Offset(g.xOut + 12, g.yOut(t)),
-                g.topicLabelWidth, TextAlign.left,
-                strong: lit.topics.contains(t)),
-      ], avoid: avoid);
-    }
-    if (g.showNoteLabels || visibleNotes.length <= 40) {
-      _labelPass(canvas, [
-        for (final i in visibleNotes)
-          if (!labelled(_Layer.note, i))
-            _LabelItem(layout.notes[i].title, Offset(g.xH + 9, g.yNote(i)), g.noteLabelWidth, TextAlign.left, box: true),
-      ], avoid: avoid);
-    }
-
-    // 고른 길 이름표: 모두 단다 (겹치지 않게 쌓아 둔 자리). 노드에서 밀려났으면 가는 선으로 잇는다.
+    // 고른 길 이름표가 노드에서 밀려났으면 가는 선으로 잇는다. 이름표 자체는 [_LabelPainter]가 이 위에 단다.
     final leader = Paint()
       ..strokeWidth = 1
       ..color = AppColors.graphAccent.withValues(alpha: 0.55);
-    for (final pl in path.placed) {
+    for (final pl in prepared.labels.placed) {
       if ((pl.edge.dy - pl.node.dy).abs() > 3) canvas.drawLine(pl.node, pl.edge, leader);
-      canvas.drawRRect(RRect.fromRectAndRadius(pl.box, const Radius.circular(4)), Paint()..color = const Color(0xe60e0c18));
-      pl.painter.paint(canvas, pl.textAt);
-      _logLabel(pl.text, pl.painter, pl.textAt, strong: true);
     }
   }
 
   @override
   bool shouldRepaint(_PathPainter old) => !identical(old.prepared, prepared);
 }
+
+/// 이름표 층: 모든 선 위에 단다 (선이 이름표를 가로지르지 않게, 11/13 화면 검토).
+/// 평소 은닉층 이름표는 한 줄로 줄이고, 밝힌·고른 길·마우스 올림 이름표는 전체를 보인다 (11/13 사용자 결정).
+/// 고른 것이 없으면 바탕 이름표만. 고르면 순서대로 ① 밝힌 이름표 자리를 먼저 잡고 ② 바탕 이름표는 어둡게 하되,
+/// 밝힌·고른 길·마우스 올림 이름표에 조금이라도 가리는 것은 아예 빼고(조각이 남지 않게) ③ 밝힌 이름표 ④ 고른 길
+/// 이름표를 불투명한 판 위에 단다. 고르기·마우스 올림·자리가 바뀔 때만 다시 그린다 (빛 프레임마다 그리지 않음, 11/13 검토 3).
+class _LabelPainter extends CustomPainter {
+  _LabelPainter({required this.layout, required this.geo, required this.prepared, required this.hover});
+
+  final NeuralLayout layout;
+  final _Geo geo;
+  final _Prepared? prepared;
+  final _At? hover;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _trimPainters();
+    final g = geo;
+    final prep = prepared;
+    String topicText(int t) => '${layout.topics[t].name}  ${layout.topics[t].count}';
+    _LabelItem input(int i, {bool strong = false}) =>
+        _LabelItem(layout.inputs[i].title, Offset(g.xIn - 12, g.yIn(i)), g.inputLabelWidth, TextAlign.right, strong: strong);
+    _LabelItem topic(int t, {bool strong = false}) =>
+        _LabelItem(topicText(t), Offset(g.xOut + 12, g.yOut(t)), g.topicLabelWidth, TextAlign.left, strong: strong);
+    // 평소 은닉층 이름표는 한 줄로 줄인다 (겹침을 줄임). 밝힌(고른 길) 노트는 전체.
+    _LabelItem note(int i, {bool short = true}) =>
+        _LabelItem(layout.notes[i].title, Offset(g.xH + 9, g.yNote(i)), g.noteLabelWidth, TextAlign.left, box: true, short: short);
+    // 마우스 올림 이름표(위 층이 전체를 단다)에 가리는 이름표는 조각이 남지 않게 뺀다.
+    final hoverItem = _hoverItem(layout, g, hover, prep);
+    final hoverRect = hoverItem == null
+        ? null
+        : _labelRect(hoverItem, _painter(hoverItem.text, hoverItem.maxWidth, hoverItem.strong)).inflate(2);
+    bool underHover((_LabelItem, TextPainter) placed) => hoverRect != null && _labelRect(placed.$1, placed.$2).overlaps(hoverRect);
+
+    // 바탕 이름표: 자리가 있을 때만, 겹치면 건너뛴다 (마우스를 올리거나 확대하면 보인다).
+    List<_LabelItem> baseInputs({Set<int> skip = const {}}) => [
+      if (g.sIn >= _Geo.sideLabelGap)
+        for (var i = 0; i < layout.inputs.length; i++)
+          if (!skip.contains(i)) input(i),
+    ];
+    List<_LabelItem> baseTopics({Set<int> skip = const {}}) => [
+      if (g.sOut >= _Geo.sideLabelGap)
+        for (var t = 0; t < layout.topics.length; t++)
+          if (!skip.contains(t)) topic(t),
+    ];
+    List<_LabelItem> baseNotes({Set<int> skip = const {}}) => [
+      if (g.showNoteLabels)
+        for (var p = g.lo; p <= g.hi; p++)
+          if (g.inView(g.yNote(p)) && !skip.contains(p)) note(p),
+    ];
+
+    if (prep == null) {
+      for (final items in [baseInputs(), baseTopics(), baseNotes()]) {
+        for (final placed in _placeLabels(items)) {
+          if (!underHover(placed)) _drawLabel(canvas, placed.$1, placed.$2);
+        }
+      }
+      return;
+    }
+
+    // ① 밝힌 이름표 자리 (고른 길 이름표 자리는 피한다). 아주 많으면 간격으로 먼저 거른다 (11/13 검토 3).
+    final lit = prep.lit;
+    final path = prep.labels;
+    bool labelled(_Layer layer, int i) => path.keys.contains((layer: layer, i: i));
+    final visibleNotes = lit.notesIn(g.lo, g.hi).where((i) => g.inView(g.yNote(i))).toList();
+    final litTopics = {...lit.topics, ...lit.faintTopics};
+    final litPlaced = [
+      if (g.sIn >= _Geo.sideLabelGap || lit.inputs.length <= 40)
+        ..._placeLabels([
+          for (final i in lit.inputs)
+            if (!labelled(_Layer.input, i)) input(i, strong: true),
+        ], avoid: path.rects),
+      if (g.sOut >= _Geo.sideLabelGap || litTopics.length <= 40)
+        ..._placeLabels([
+          for (final t in litTopics)
+            if (!labelled(_Layer.topic, t)) topic(t, strong: lit.topics.contains(t)),
+        ], avoid: path.rects),
+      if (g.showNoteLabels || visibleNotes.length <= 40)
+        ..._placeLabels([
+          for (final i in visibleNotes)
+            if (!labelled(_Layer.note, i)) note(i, short: false),
+        ], avoid: path.rects),
+    ]..removeWhere(underHover);
+
+    // ② 바탕 이름표: 위 이름표에 가리는 것은 뺀다. 고르기 전과 같은 자리에 두고(빠진 자리를 다른 것으로 채우지 않음) 어둡게.
+    final cover = [...path.rects, for (final (it, p) in litPlaced) _labelRect(it, p).inflate(2), ?hoverRect];
+    final dim = [
+      for (final items in [
+        baseInputs(skip: lit.inputs),
+        baseTopics(skip: litTopics),
+        baseNotes(skip: visibleNotes.toSet()),
+      ])
+        for (final placed in _placeLabels(items))
+          if (!cover.any(_labelRect(placed.$1, placed.$2).overlaps)) placed,
+    ];
+    // 판은 막(0x99) 아래에 있던 것처럼 어둡고 거의 불투명하게: 그 아래 선이 비치지 않는다.
+    for (final (it, p) in dim) {
+      if (it.box) {
+        canvas.drawRRect(RRect.fromRectAndRadius(_labelRect(it, p), const Radius.circular(4)), Paint()..color = const Color(0xf00c0a16));
+      }
+    }
+    canvas.saveLayer(null, Paint()..color = const Color(0x66000000));
+    for (final (it, p) in dim) {
+      p.paint(canvas, _textTopLeft(it, p));
+      _logLabel(it.text, p, _textTopLeft(it, p), strong: false);
+    }
+    canvas.restore();
+
+    // ③ 밝힌 이름표 ④ 고른 길 이름표: 불투명한 판 위에 자르지 않고 모두 (결정 6).
+    for (final (it, p) in litPlaced) {
+      _drawLabel(canvas, it, p);
+    }
+    final selText = switch (prep.sel.layer) {
+      _Layer.note => layout.notes[prep.sel.i].title,
+      _Layer.input => layout.inputs[prep.sel.i].title,
+      _Layer.topic => topicText(prep.sel.i),
+    };
+    for (final pl in path.placed) {
+      final box = RRect.fromRectAndRadius(pl.box, const Radius.circular(4));
+      canvas.drawRRect(box, Paint()..color = _solidBox);
+      canvas.drawRRect(
+        box,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = AppColors.graphAccent.withValues(alpha: pl.text == selText ? 0.9 : 0.35),
+      );
+      pl.painter.paint(canvas, pl.textAt);
+      _logLabel(pl.text, pl.painter, pl.textAt, strong: true);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LabelPainter old) =>
+      old.layout != layout || !identical(old.prepared, prepared) || !old.geo.same(geo) || old.hover != hover;
+}
+
+/// 밝힌 이름표의 불투명한 판 색 (아래 것이 비치지 않게).
+const _solidBox = Color(0xff16132a);
 
 /// 빛 흐름: 프레임마다 그린다. 미리 고른 표본 선(최대 [_pulseLineCap]개)을 한 번의 drawRawPoints로 긋고,
 /// 빛 머리 번짐은 [_pulseGlowCap]개까지만 그린다 (11/13 검토 3).
@@ -1328,26 +1424,14 @@ class _HoverPainter extends CustomPainter {
     final g = geo;
     final r = (g.s * 0.34).clamp(0.7, 4.2);
     // 고른 길 이름표로 이미 단 노드는 다시 달지 않는다 (같은 글이 두 번 겹쳐 보이지 않게)
-    final already = prepared?.labels.keys.contains(pick) ?? false;
-    final _LabelItem item;
-    switch (pick.layer) {
-      case _Layer.note:
-        final y = g.yNote(pick.i);
-        if (!g.inView(y)) return;
-        _glow(canvas, Offset(g.xH, y), max(3, r + 1) * 3, const Color(0xd9ffffff));
-        canvas.drawCircle(Offset(g.xH, y), max(2.2, r + 0.6), Paint()..color = const Color(0xffffffff));
-        item = _LabelItem(layout.notes[pick.i].title, Offset(g.xH + 9, y), g.noteLabelWidth, TextAlign.left,
-            box: true, strong: true);
-      case _Layer.input:
-        item = _LabelItem(layout.inputs[pick.i].title, Offset(g.xIn - 12, g.yIn(pick.i)), g.inputLabelWidth,
-            TextAlign.right,
-            box: true, strong: true);
-      case _Layer.topic:
-        item = _LabelItem('${layout.topics[pick.i].name}  ${layout.topics[pick.i].count}',
-            Offset(g.xOut + 12, g.yOut(pick.i)), g.topicLabelWidth, TextAlign.left,
-            box: true, strong: true);
+    if (pick.layer == _Layer.note) {
+      final y = g.yNote(pick.i);
+      if (!g.inView(y)) return;
+      _glow(canvas, Offset(g.xH, y), max(3, r + 1) * 3, const Color(0xd9ffffff));
+      canvas.drawCircle(Offset(g.xH, y), max(2.2, r + 0.6), Paint()..color = const Color(0xffffffff));
     }
-    if (!already) _drawLabel(canvas, item, _painter(item.text, item.maxWidth, item.strong));
+    final item = _hoverItem(layout, g, pick, prepared);
+    if (item != null) _drawLabel(canvas, item, _painter(item.text, item.maxWidth, item.strong));
   }
 
   @override
@@ -1407,8 +1491,23 @@ void _dotNode(Canvas canvas, Offset c, double r, Color color, {bool diamond = fa
   }
 }
 
+/// 마우스 올린 노드의 이름표: 이름 전체를 불투명한 판 위에. 고른 길 이름표로 이미 단 노드·화면 밖 노트는 null
+/// (같은 글이 두 번 겹쳐 보이지 않게).
+_LabelItem? _hoverItem(NeuralLayout layout, _Geo g, _At? pick, _Prepared? prepared) {
+  if (pick == null || (prepared?.labels.keys.contains(pick) ?? false)) return null;
+  return switch (pick.layer) {
+    _Layer.note when !g.inView(g.yNote(pick.i)) => null,
+    _Layer.note => _LabelItem(layout.notes[pick.i].title, Offset(g.xH + 9, g.yNote(pick.i)), g.noteLabelWidth, TextAlign.left,
+        box: true, strong: true),
+    _Layer.input => _LabelItem(layout.inputs[pick.i].title, Offset(g.xIn - 12, g.yIn(pick.i)), g.inputLabelWidth, TextAlign.right,
+        box: true, strong: true),
+    _Layer.topic => _LabelItem('${layout.topics[pick.i].name}  ${layout.topics[pick.i].count}', Offset(g.xOut + 12, g.yOut(pick.i)),
+        g.topicLabelWidth, TextAlign.left, box: true, strong: true),
+  };
+}
+
 class _LabelItem {
-  _LabelItem(this.text, this.at, this.maxWidth, this.align, {this.box = false, this.strong = false});
+  _LabelItem(this.text, this.at, this.maxWidth, this.align, {this.box = false, this.strong = false, this.short = false});
 
   final String text;
 
@@ -1420,25 +1519,33 @@ class _LabelItem {
   /// 뒤에 어두운 판을 깐다 (선 위에서도 읽히게).
   final bool box;
   final bool strong;
+
+  /// 한 줄로 줄인다 (평소 은닉층 이름표, 11/13 사용자 결정). 마우스 올림·고른 길은 전체.
+  final bool short;
 }
 
 Offset _textTopLeft(_LabelItem it, TextPainter painter) =>
     Offset(it.align == TextAlign.right ? it.at.dx - painter.width : it.at.dx, it.at.dy - painter.height / 2);
 
-/// 이름표를 위에서 아래로 단다. 앞 이름표나 [avoid](고른 길 이름표)와 겹치면 건너뛴다. 긴 제목은 줄을 바꿔 다 보인다.
-/// 받은 글자 배치는 그 자리에서 바로 그린다 (붙잡아 두었다가 나중에 그리지 않는다, 11/13 검토 2).
-void _labelPass(Canvas canvas, List<_LabelItem> items, {List<Rect> avoid = const []}) {
+/// 이름표 판 자리 (글자 둘레 3px).
+Rect _labelRect(_LabelItem it, TextPainter painter) => (_textTopLeft(it, painter) & painter.size).inflate(3);
+
+/// 이름표 자리를 위에서 아래로 잡는다 (그리지 않음). 앞 이름표나 [avoid](고른 길 이름표)와 겹치면 건너뛴다.
+/// 긴 제목은 줄을 바꿔 다 보인다. 받은 글자 배치는 같은 그리기 안에서 바로 쓴다 (붙잡아 두지 않는다, 11/13 검토 2).
+List<(_LabelItem, TextPainter)> _placeLabels(List<_LabelItem> items, {List<Rect> avoid = const []}) {
   items.sort((a, b) => a.at.dy.compareTo(b.at.dy));
+  final out = <(_LabelItem, TextPainter)>[];
   var lastBottom = double.negativeInfinity;
   for (final it in items) {
-    final painter = _painter(it.text, it.maxWidth, it.strong);
+    final painter = _painter(it.text, it.maxWidth, it.strong, short: it.short);
     final at = _textTopLeft(it, painter);
     if (at.dy < lastBottom + 1) continue;
     final rect = (at & painter.size).inflate(3);
     if (avoid.any(rect.overlaps)) continue;
-    _drawLabel(canvas, it, painter);
+    out.add((it, painter));
     lastBottom = at.dy + painter.height;
   }
+  return out;
 }
 
 void _drawLabel(Canvas canvas, _LabelItem it, TextPainter painter) {
@@ -1446,7 +1553,8 @@ void _drawLabel(Canvas canvas, _LabelItem it, TextPainter painter) {
   if (it.box) {
     canvas.drawRRect(
       RRect.fromRectAndRadius((topLeft & painter.size).inflate(3), const Radius.circular(4)),
-      Paint()..color = const Color(0xd90e0c18),
+      // 밝힌(마우스 올림 등) 이름표는 불투명한 판: 아래 이름표·선이 비치지 않게
+      Paint()..color = it.strong ? _solidBox : const Color(0xd90e0c18),
     );
   }
   painter.paint(canvas, topLeft);
@@ -1456,20 +1564,26 @@ void _drawLabel(Canvas canvas, _LabelItem it, TextPainter painter) {
 /// [strong]: 밝힌 이름표(고른 길·마우스 올림·밝힌 노드).
 void _logLabel(String text, TextPainter painter, Offset at, {required bool strong}) {
   if (kReleaseMode) return;
-  neuralLabelLog.add((text: text, lines: painter.computeLineMetrics().length, rect: at & painter.size, strong: strong));
+  neuralLabelLog.add((
+    text: text,
+    lines: painter.computeLineMetrics().length,
+    rect: at & painter.size,
+    strong: strong,
+    cut: painter.didExceedMaxLines,
+  ));
   if (neuralLabelLog.length > 2000) neuralLabelLog.removeRange(0, 1000);
 }
 
-/// 이름표 글자 배치 캐시 (배치가 그리기에서 가장 무겁다). 줄 수 제한·말줄임 없이 [maxWidth]에서 줄을 바꾼다.
+/// 이름표 글자 배치 캐시 (배치가 그리기에서 가장 무겁다). [maxWidth]에서 줄을 바꾸거나 한 줄로 줄인다.
 /// 오래 안 쓴 것부터 버린다(LRU). 버리기는 그리기를 시작할 때만([_trimPainters]) 한다: 예전에는 한 번의 그리기
 /// 도중 800개를 넘으면 전부 버려, 그 그리기가 나중에 그리려고 쥐고 있던 이름표가 이미 버려진 채로 그려졌다 (11/13 검토 2).
-final _painters = <(String, int, bool), TextPainter>{};
+final _painters = <(String, int, bool, bool), TextPainter>{};
 
-TextPainter _painter(String text, double maxWidth, bool strong) {
-  final key = (text, maxWidth.round(), strong);
+TextPainter _painter(String text, double maxWidth, bool strong, {bool short = false}) {
+  final key = (text, maxWidth.round(), strong, short);
   final hit = _painters.remove(key);
   if (hit != null) return _painters[key] = hit; // 맨 뒤(최근)로
-  return _painters[key] = _layoutLabel(text, key.$2.toDouble(), strong: strong);
+  return _painters[key] = _layoutLabel(text, key.$2.toDouble(), strong: strong, short: short);
 }
 
 /// 그리기 시작에만 부른다. 이번 그리기에서 받은 글자 배치는 다음 그리기 전까지 버리지 않는다.
@@ -1479,8 +1593,9 @@ void _trimPainters() {
   }
 }
 
-/// 이름표 글자 배치. 줄 수 제한·말줄임 없음 (결정 6).
-TextPainter _layoutLabel(String text, double maxWidth, {required bool strong}) => TextPainter(
+/// 이름표 글자 배치. [short]면 한 줄로 줄이고(평소 은닉층), 아니면 줄 수 제한·말줄임 없이 다 보인다
+/// (마우스 올림·고른 길, 11/13 사용자 결정 — 결정 6을 고침).
+TextPainter _layoutLabel(String text, double maxWidth, {required bool strong, bool short = false}) => TextPainter(
   text: TextSpan(
     text: text,
     style: TextStyle(
@@ -1493,6 +1608,8 @@ TextPainter _layoutLabel(String text, double maxWidth, {required bool strong}) =
     ),
   ),
   textDirection: TextDirection.ltr,
+  maxLines: short ? 1 : null,
+  ellipsis: short ? '…' : null,
 )..layout(maxWidth: maxWidth.roundToDouble());
 
 /// 층 머리말 같은 짧은 글 (가운데 맞춤).
