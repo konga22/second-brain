@@ -72,7 +72,30 @@ class AppConfig {
     this.autoTidySpentDay,
     this.autoTidySpentUsd = 0,
     this.isFirstRunDone = false,
+    this.legacy = const {},
   });
+
+  /// 프롬프트 이후(v2)에 바뀐 동작을 항목별로 이전 방식(v1)으로 되돌리는 스위치 (설계서_프롬프트이후 7.3).
+  /// 값은 [legacyDrafts]·[legacyLessons]·[legacyFolders]. 기본은 비어 있음 = 모두 새 방식.
+  final Set<String> legacy;
+
+  /// 4.1 초안 분리: 이전 방식이면 확인 전 초안도 AI 찾기·자동 주입에 나온다.
+  static const legacyDrafts = 'drafts';
+
+  /// 4.5 실수 노트 목록: 이전 방식이면 번호 순 앞 30개.
+  static const legacyLessons = 'lessons';
+
+  /// 5.1 폴더 구조: 이전 방식이면 구역 없이 `wiki/<주제>/`.
+  static const legacyFolders = 'folders';
+
+  /// [item]을 이전 방식으로 쓰는가. 환경변수 `BRAIN_LEGACY`(쉼표 구분, 빈 값 = 모두 새 방식)가 있으면 설정보다 먼저 본다 —
+  /// 측정에서 같은 실행 파일로 v1과 v2를 견주고, 시험이 사용자 설정을 타지 않게 한다.
+  bool usesLegacy(String item) => legacyItems(Platform.environment['BRAIN_LEGACY'], legacy).contains(item);
+
+  /// [env]가 null이면 [configured], 아니면 env의 쉼표 목록.
+  static Set<String> legacyItems(String? env, Set<String> configured) => env == null
+      ? configured
+      : {for (final s in env.split(',')) if (s.trim().isNotEmpty) s.trim()};
 
   /// 첫 실행 3단계 안내를 닫았는가 (설계서 3.0 E3).
   final bool isFirstRunDone;
@@ -128,6 +151,7 @@ class AppConfig {
         autoTidySpentDay: json['autoTidySpentDay'] as String?,
         autoTidySpentUsd: (json['autoTidySpentUsd'] as num?)?.toDouble() ?? 0,
         isFirstRunDone: json['firstRunDone'] == true,
+        legacy: {for (final item in (json['legacy'] as List?) ?? const []) '$item'},
       );
     } on FormatException {
       return const AppConfig();
@@ -147,6 +171,7 @@ class AppConfig {
     String? autoTidySpentDay,
     double? autoTidySpentUsd,
     bool? isFirstRunDone,
+    Set<String>? legacy,
   }) => AppConfig(
     vaultPath: vaultPath ?? this.vaultPath,
     lastBackupAt: lastBackupAt ?? this.lastBackupAt,
@@ -160,6 +185,7 @@ class AppConfig {
     autoTidySpentDay: autoTidySpentDay ?? this.autoTidySpentDay,
     autoTidySpentUsd: autoTidySpentUsd ?? this.autoTidySpentUsd,
     isFirstRunDone: isFirstRunDone ?? this.isFirstRunDone,
+    legacy: legacy ?? this.legacy,
   );
 
   void save() => writeFileAtomic(
@@ -177,6 +203,7 @@ class AppConfig {
       'autoTidySpentDay': ?autoTidySpentDay,
       'autoTidySpentUsd': autoTidySpentUsd,
       'firstRunDone': isFirstRunDone,
+      'legacy': [...legacy]..sort(),
     }),
   );
 }
