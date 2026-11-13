@@ -1,16 +1,36 @@
 /// 세컨드 브레인 앱과 brain CLI가 함께 쓰는 로직.
 library;
 
+export 'src/bench/lesson_bench.dart';
+export 'src/bench/search_bench.dart';
+export 'src/chat/chat_context.dart';
+export 'src/graph/force_layout.dart';
+export 'src/graph/layout_health.dart';
+export 'src/imports/text_import.dart';
 export 'src/index/bigram.dart';
+export 'src/index/match_strength.dart';
+export 'src/index/retrieval.dart';
 export 'src/index/search_index.dart';
 export 'src/index/sqlite_support.dart';
+export 'src/links/dismissed_links.dart';
+export 'src/lessons/lesson.dart';
+export 'src/lessons/lesson_safety.dart';
+export 'src/lessons/lesson_store.dart';
+export 'src/lint/linter.dart';
+export 'src/log/change_history.dart';
 export 'src/log/change_log.dart';
 export 'src/note/file_name.dart';
 export 'src/note/note.dart';
+export 'src/note/note_origin.dart';
 export 'src/note/note_store.dart';
+export 'src/note/wiki_links.dart';
 export 'src/security/secret_mask.dart';
 export 'src/sessions/claude_sessions.dart';
 export 'src/sessions/session_archive.dart';
+export 'src/sessions/session_reads.dart';
 export 'src/sessions/session_registry.dart';
+export 'src/text/nfc.dart';
+export 'src/todos/todo_store.dart';
 export 'src/vault/vault.dart';
 export 'src/vault/vault_access.dart';
+export 'src/vault/vault_summary.dart';

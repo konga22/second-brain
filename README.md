@@ -32,6 +32,19 @@ Supabase까지 붙여 실행하려면 `env/supabase.example.json`을 `env/supaba
 flutter run -d macos --dart-define-from-file=env/supabase.json
 ```
 
+`flutter run`은 디버그 빌드라 화면 이동이 5~8배 느리다. 평소에 쓰거나 시연할 때는 정식 빌드로 띄운다.
+
+```bash
+flutter build macos --release --dart-define-from-file=env/supabase.json
+open build/macos/Build/Products/Release/secondbrain.app
+```
+
+성능 측정(profile 모드, 시험용 설정·지식 폴더 사본으로):
+
+```bash
+BRAIN_CONFIG=<시험용 config.json> BRAIN_VAULT=<지식 폴더 사본> flutter drive --profile --driver=test_driver/integration_test.dart --target=integration_test/perf_test.dart -d macos
+```
+
 ```bash
 flutter test
 ```

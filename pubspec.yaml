@@ -13,6 +13,7 @@ workspace:
 dependencies:
   brain_core:
     path: packages/brain_core
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   flutter_localizations:
@@ -40,6 +41,9 @@ flutter:
     - integrations/claude-code/
     - integrations/claude-code/skills/second-brain/
     - integrations/claude-code/skills/brain-save/
+    - integrations/claude-code/skills/brain-ingest/
+    - integrations/claude-code/skills/brain-lint/
+    - integrations/claude-code/agents/
 
   # Pretendard v1.3.9 (OFL-1.1, assets/fonts/pretendard/LICENSE.txt). 쓰는 굵기 4개만 넣는다.
   fonts:

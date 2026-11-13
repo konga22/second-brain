@@ -7,8 +7,9 @@ import '../../core/brain_providers.dart';
 import '../../core/claude_code.dart';
 import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
+import '../../shared/safe_set_state.dart';
 
-/// 연동·설정: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
+/// 연동: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
   const ConnectPage({super.key});
 
@@ -18,7 +19,7 @@ class ConnectPage extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
-        Text('연동·설정', style: theme.textTheme.h4),
+        Text('연동', style: theme.textTheme.h4),
         const SizedBox(height: 24),
         const _ClaudeCodeCard(),
         const SizedBox(height: 16),
@@ -37,7 +38,7 @@ class _ClaudeCodeCard extends ConsumerStatefulWidget {
   ConsumerState<_ClaudeCodeCard> createState() => _ClaudeCodeCardState();
 }
 
-class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
+class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> with SafeSetState<_ClaudeCodeCard> {
   bool _isWorking = false;
   List<String> _log = const [];
   String? _error;
@@ -77,20 +78,26 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
       setState(() => _log = log);
     } on ClaudeCodeException catch (e) {
       setState(() => _error = e.message);
+    } on Object catch (e) {
+      setState(() => _error = '설치하지 못했습니다: $e');
     } finally {
       setState(() => _isWorking = false);
-      ref.invalidate(claudeCodeStatusProvider);
+      if (mounted) ref.invalidate(claudeCodeStatusProvider);
     }
   }
 
   Future<void> _onUninstall() async {
     setState(() => _isWorking = true);
-    await ref.read(claudeCodeProvider).uninstall();
-    setState(() {
-      _isWorking = false;
-      _log = const ['연동 해제함'];
-    });
-    ref.invalidate(claudeCodeStatusProvider);
+    try {
+      await ref.read(claudeCodeProvider).uninstall();
+      setState(() => _log = const ['연동 해제함']);
+    } on Object catch (e) {
+      // 실패해도 "…중"에 멈추지 않는다 (11/11 K-37)
+      setState(() => _error = '연동을 해제하지 못했습니다: $e');
+    } finally {
+      setState(() => _isWorking = false);
+      if (mounted) ref.invalidate(claudeCodeStatusProvider);
+    }
   }
 
   @override
@@ -100,7 +107,7 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
     return ShadCard(
       title: const Text('Claude Code'),
       description: const Text(
-        '스킬 2개(찾기·지식 저장)와 훅 2개를 플러그인으로 설치합니다. 우리 서버를 거치지 않습니다.',
+        '스킬 4개(찾기·지식 저장·원본 정리·점검), 검증 에이전트, 훅 3개를 플러그인으로 설치합니다. 우리 서버를 거치지 않습니다.',
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: 16),
@@ -123,7 +130,9 @@ class _ClaudeCodeCardState extends ConsumerState<_ClaudeCodeCard> {
                 isOk: s.isInstalled && s.isEnabled,
               ),
               const SizedBox(height: 12),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
                 children: [
                   ShadButton(
                     size: ShadButtonSize.sm,
@@ -191,7 +200,24 @@ class _PastSessionsCard extends ConsumerWidget {
             if (state.isLoaded && projects.isEmpty && !state.isRunning)
               Text('정리할 세션이 없습니다.', style: theme.textTheme.muted),
             if (projects.isNotEmpty) ...[
-              Text('정리할 프로젝트 (체크를 빼면 제외)', style: theme.textTheme.small),
+              Row(
+                children: [
+                  Text('정리할 프로젝트 (체크를 빼면 제외)', style: theme.textTheme.small),
+                  const Spacer(),
+                  ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    enabled: !state.isRunning,
+                    onPressed: () => controller.selectAll(true),
+                    child: const Text('전체 선택'),
+                  ),
+                  ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    enabled: !state.isRunning,
+                    onPressed: () => controller.selectAll(false),
+                    child: const Text('전체 해제'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 6),
               for (final entry in projects)
                 Padding(
@@ -214,6 +240,17 @@ class _PastSessionsCard extends ConsumerWidget {
                   style: theme.textTheme.muted,
                 ),
               const SizedBox(height: 12),
+              // E1 정리 비용 어림 (설계서 3.0)
+              Text(
+                state.targetChars == null
+                    ? '비용 어림 계산 중…'
+                    : state.targetChars == 0 && state.targets.isNotEmpty
+                    ? '비용 어림 못 함 (아래 오류 참고)'
+                    : '축약 약 ${(state.targetChars! / 10000).toStringAsFixed(1)}만 자 · 어림 \$${(state.targetChars! / 100000 * PastSessionsState.usdPer100kChars).toStringAsFixed(2)} '
+                          '(실측 10만 자당 약 \$1.4, 모델·세션에 따라 ±50%)',
+                style: theme.textTheme.small,
+              ),
+              const SizedBox(height: 4),
               Text(
                 '선택한 세션 ${state.targets.length}개를 정리합니다. 사용자의 Claude Code 사용량(토큰)을 씁니다. '
                 'Claude Code는 brain 명령만 쓸 수 있게 묶어서 실행합니다.',

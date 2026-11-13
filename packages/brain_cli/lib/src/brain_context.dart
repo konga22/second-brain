@@ -14,6 +14,8 @@ class BrainContext {
 
   NoteStore get notes => NoteStore(vault, index);
 
+  LessonStore get lessons => LessonStore(vault, index);
+
   ClaudeSessions get sessions => ClaudeSessions(cacheDb: index.db);
 
   SessionRegistry get registry => SessionRegistry(vault);

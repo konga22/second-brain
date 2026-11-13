@@ -61,7 +61,11 @@ class ClaudeSession {
     'userCount': userCount,
     'aiCount': aiCount,
     'toolCount': toolCount,
+    'v': summaryVersion,
   };
+
+  /// 요약을 만드는 규칙이 바뀌면 올린다. 다른 판으로 만든 캐시는 다시 읽는다 (2: 작업 알림 빼기, 11/12).
+  static const summaryVersion = 2;
 
   static ClaudeSession fromJson(Map<String, dynamic> json) => ClaudeSession(
     sessionId: json['sessionId'] as String,
@@ -113,10 +117,21 @@ class ClaudeSessions {
   }
 
   /// 앞 6자 이상으로 세션을 찾는다.
+  ///
+  /// 세션 파일 이름이 세션 id라서 이름으로 바로 찾는다. 목록(list)의 걸러 내기
+  /// (사용자 대화 2개 미만, 지식 폴더 안 세션)는 적용하지 않는다: 대화 중 자동 저장은
+  /// 첫 메시지에서도 그 세션을 근거로 남겨야 하기 때문이다 (사용기 #17).
   ClaudeSession? find(String idPrefix, {required Vault vault}) {
     if (idPrefix.length < 6) return null;
-    for (final session in list(vault: vault)) {
-      if (session.sessionId.startsWith(idPrefix)) return session;
+    final dir = Directory(projectsDir);
+    if (!dir.existsSync()) return null;
+    for (final project in dir.listSync().whereType<Directory>()) {
+      for (final file in project.listSync().whereType<File>()) {
+        final name = file.uri.pathSegments.last;
+        if (!name.endsWith('.jsonl') || !name.startsWith(idPrefix)) continue;
+        final session = _summary(file, file.statSync());
+        if (session != null) return session;
+      }
     }
     return null;
   }
@@ -130,9 +145,8 @@ class ClaudeSessions {
         [file.path, mtime, stat.size],
       );
       if (rows.isNotEmpty) {
-        return ClaudeSession.fromJson(
-          jsonDecode(rows.first['summary'] as String) as Map<String, dynamic>,
-        );
+        final json = jsonDecode(rows.first['summary'] as String) as Map<String, dynamic>;
+        if (json['v'] == ClaudeSession.summaryVersion) return ClaudeSession.fromJson(json);
       }
     }
     final (session, _) = _parse(file);
@@ -160,6 +174,15 @@ class ClaudeSessions {
       },
     );
     return maskSecrets([header, ...body].join('\n\n'));
+  }
+
+  /// 세션에서 사용자가 한 말만 (실수 노트 근거 검사용, 설계서 5.4 v1.3.35). 도구 결과·AI 답은 넣지 않는다.
+  List<String> userTexts(ClaudeSession session) {
+    final (_, lines) = _parse(File(session.path));
+    return [
+      for (final line in lines)
+        if (line.role == 'user') line.text,
+    ];
   }
 
   static String _date(DateTime time) {
@@ -233,6 +256,7 @@ class ClaudeSessions {
       }
       final content = (record['message'] as Map<String, dynamic>?)?['content'];
       if (type == 'user') {
+        if (_isSystemTurn(record, content)) continue;
         final text = _userText(content);
         if (text == null) continue;
         users++;
@@ -281,6 +305,24 @@ class ClaudeSessions {
   }
 
   /// 사람이 쓴 문장만 남긴다. 명령 출력·도구 결과·시스템 알림은 뺀다.
+  /// 사람이 쓰지 않은 "user" 줄: 백그라운드 작업 알림, 다른 세션이 보낸 메시지, 예약 알림.
+  ///
+  /// Claude Code 2.1.x는 이것들을 `type: user`로 적고 `origin.kind`(`task-notification`·`peer`)와
+  /// `promptSource: system`으로 구분한다. 예전에는 사용자 문장으로 세어 축약본에 `[사용자]`로 나왔고(옛 기록 e080b491에서 25건),
+  /// 실수 노트 근거 검사(`--quote`가 사용자 발화에 있는가)도 이 글을 사용자 말로 볼 수 있었다 (11/12).
+  static bool _isSystemTurn(Map<String, dynamic> record, Object? content) {
+    final origin = record['origin'];
+    if (origin is Map && origin['kind'] != null && origin['kind'] != 'human') return true;
+    if (record['promptSource'] == 'system') return true;
+    // origin이 없던 옛 기록
+    final text = content is String
+        ? content
+        : content is List && content.isNotEmpty && content.first is Map
+        ? '${(content.first as Map)['text'] ?? ''}'
+        : '';
+    return text.trimLeft().startsWith('<task-notification>');
+  }
+
   String? _userText(Object? content) {
     String text;
     if (content is String) {

@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:yaml/yaml.dart';
 
+import '../text/nfc.dart';
+
 /// 노트 상태 (설계서 4.1).
 enum NoteStatus {
   draft('draft', '정리 대기'),
@@ -34,6 +36,7 @@ class Note {
     this.updated,
     this.status = NoteStatus.active,
     this.extra = const {},
+    this.isFrontmatterBroken = false,
   });
 
   final String id;
@@ -50,6 +53,10 @@ class Note {
 
   /// 우리가 모르는 frontmatter 키. 다시 쓸 때 그대로 남긴다.
   final Map<String, Object?> extra;
+
+  /// frontmatter 블록은 있는데 YAML로 읽지 못했다 (예: `title: 결제: 재시도`, 중복 키).
+  /// 이런 노트를 다시 쓰면 제목·요약·태그·출처가 기본값으로 바뀌므로 쓰기를 거절한다 (11/11 K-21).
+  final bool isFrontmatterBroken;
 
   bool get isDraft => status == NoteStatus.draft;
 
@@ -74,15 +81,19 @@ class Note {
   }) {
     var meta = <String, Object?>{};
     var body = text;
+    var isBroken = false;
     final match = RegExp(r'^---\r?\n([\s\S]*?)\r?\n---\r?\n?').firstMatch(text);
     if (match != null) {
       try {
         final yaml = loadYaml(match.group(1)!);
         if (yaml is YamlMap) {
           meta = {for (final e in yaml.entries) '${e.key}': _plain(e.value)};
+        } else if (yaml != null) {
+          isBroken = true;
         }
       } on YamlException {
         meta = {};
+        isBroken = true;
       }
       body = text.substring(match.end);
     }
@@ -91,10 +102,10 @@ class Note {
         : (v == null || '$v'.isEmpty ? [] : ['$v']);
     return Note(
       id: '${meta['id'] ?? fallbackId}',
-      title: '${meta['title'] ?? fallbackTitle}',
+      title: toNfc('${meta['title'] ?? fallbackTitle}'),
       summary: '${meta['summary'] ?? ''}',
-      tags: list(meta['tags']),
-      aliases: list(meta['aliases']),
+      tags: list(meta['tags']).map(toNfc).toList(),
+      aliases: list(meta['aliases']).map(toNfc).toList(),
       source: '${meta['source'] ?? 'manual'}',
       sources: list(meta['sources']),
       created: DateTime.tryParse('${meta['created'] ?? ''}'),
@@ -105,6 +116,7 @@ class Note {
         for (final e in meta.entries)
           if (!_known.contains(e.key)) e.key: e.value,
       },
+      isFrontmatterBroken: isBroken,
     );
   }
 
@@ -137,12 +149,20 @@ class Note {
     return '${lines.join('\n')}\n${text.trimRight()}\n';
   }
 
-  Note copyWith({String? body, NoteStatus? status, DateTime? updated}) => Note(
+  Note copyWith({
+    String? body,
+    NoteStatus? status,
+    DateTime? updated,
+    String? title,
+    String? summary,
+    List<String>? tags,
+    List<String>? aliases,
+  }) => Note(
     id: id,
-    title: title,
-    summary: summary,
-    tags: tags,
-    aliases: aliases,
+    title: title ?? this.title,
+    summary: summary ?? this.summary,
+    tags: tags ?? this.tags,
+    aliases: aliases ?? this.aliases,
     source: source,
     sources: sources,
     created: created,
@@ -150,6 +170,7 @@ class Note {
     status: status ?? this.status,
     body: body ?? this.body,
     extra: extra,
+    isFrontmatterBroken: isFrontmatterBroken,
   );
 }
 

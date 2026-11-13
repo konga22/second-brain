@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+
+/* 앱과 같은 색 (lib/app/theme/app_colors.dart). 밝은·어두운 화면 모두 */
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --raised: #f4f4f6;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --muted: #52525b;
+  --faint: #a1a1aa;
+  --accent: #7c3aed;
+  --accent-text: #6d28d9;
+  --accent-soft: #7c3aed1a;
+  --graph-top: #171428;
+  --graph-bottom: #0b0a12;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e11;
+    --surface: #151519;
+    --raised: #1b1b20;
+    --border: #25252c;
+    --text: #ededf0;
+    --muted: #a1a1aa;
+    --faint: #6b6b75;
+    --accent: #8b5cf6;
+    --accent-text: #b39dfb;
+    --accent-soft: #8b5cf629;
+  }
+}
+
+@theme {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  word-break: keep-all;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}

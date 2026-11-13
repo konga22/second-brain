@@ -8,7 +8,10 @@ enum AppPage {
   chat('/chat', 'AI 질문', LucideIcons.messageSquare),
   lessons('/lessons', '배운 것', LucideIcons.lightbulb),
   todos('/todos', '할 일', LucideIcons.squareCheck),
-  connect('/connect', '연동·설정', LucideIcons.plug);
+  import_('/import', '가져오기', LucideIcons.fileInput),
+  connect('/connect', '연동', LucideIcons.plug),
+  pricing('/pricing', '요금제', LucideIcons.creditCard),
+  settings('/settings', '설정', LucideIcons.settings);
 
   const AppPage(this.path, this.label, this.icon);
 

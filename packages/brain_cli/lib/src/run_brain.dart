@@ -4,9 +4,12 @@ import 'package:args/command_runner.dart';
 import 'package:brain_core/brain_core.dart';
 
 import 'brain_context.dart';
+import 'commands/check_commands.dart';
 import 'commands/hook_command.dart';
+import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
 import 'commands/sessions_command.dart';
+import 'commands/todo_command.dart';
 
 /// brain 명령을 실행하고 종료 코드를 돌려준다 (설계서 5.1).
 Future<int> runBrain(List<String> arguments) async {
@@ -23,6 +26,12 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(SessionsCommand(context))
         ..addCommand(HookCommand(context))
         ..addCommand(IndexCommand(context))
+        ..addCommand(LessonCommand(context))
+        ..addCommand(UndoCommand(context))
+        ..addCommand(TodoCommand(context))
+        ..addCommand(LintCommand(context))
+        ..addCommand(BenchCommand(context))
+        ..addCommand(ReviewCommand(context))
         ..addCommand(_DoctorCommand(context));
   // `brain sessions [옵션]`은 `brain sessions list [옵션]`과 같다.
   final args = [...arguments];
@@ -32,6 +41,13 @@ Future<int> runBrain(List<String> arguments) async {
           args[1].startsWith('-') && args[1] != '-h' && args[1] != '--help')) {
     args.insert(1, 'list');
   }
+  // `brain lesson <상황>`은 `brain lesson find <상황>`과 같다.
+  if (args.length >= 2 &&
+      args.first == 'lesson' &&
+      !args[1].startsWith('-') &&
+      !LessonCommand.subcommandNames.contains(args[1])) {
+    args.insert(1, 'find');
+  }
   try {
     return await runner.run(args) ?? 0;
   } on UsageException catch (e) {
@@ -40,6 +56,9 @@ Future<int> runBrain(List<String> arguments) async {
   } on FormatException catch (e) {
     stderr.writeln(e.message);
     return 64;
+  } on VaultMissingException catch (e) {
+    stderr.writeln(e.message);
+    return 1;
   } finally {
     context.close();
   }
@@ -75,6 +94,10 @@ class _DoctorCommand extends Command<int> {
       stdout.writeln(
         '[통과] 색인 ${context.vault.indexPath} (노트 ${context.index.notes().length}개, 이번 갱신 $result)',
       );
+      // 읽지 못해 건너뛴 파일 (11/11 K-20). 색인은 나머지로 계속 돈다.
+      for (final (rel, reason) in context.index.unreadable) {
+        stdout.writeln('[주의] 읽을 수 없는 파일 $rel — UTF-8로 다시 저장하거나 지식 폴더 밖으로 ($reason)');
+      }
     }
     final sessionsDir = Directory(context.sessions.projectsDir).existsSync();
     stdout.writeln(
