@@ -8,6 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
+import 'neural_view.dart';
 
 /// 그래프 맞추기 횟수 (시험용: 화면 배율을 바꿔도 다시 맞추지 않는지 본다).
 @visibleForTesting
@@ -29,6 +30,11 @@ class _GraphViewState extends ConsumerState<GraphView> {
   bool _isLocal = false;
   /// 추천 연결을 그린다 (기본 켬). 끄면 고른 노드의 연결만 그린다.
   bool _showSuggested = true;
+
+  /// [그물 | 신경망] 중 신경망 보기 (설계서_프롬프트이후 5.3). 그물 보기는 그대로 두고 바꿔 보인다.
+  bool _isNeural = false;
+
+  Widget _viewToggle() => NeuralToggle(isNeural: _isNeural, onChanged: (v) => setState(() => _isNeural = v));
 
   /// 폴더(뇌) 하나만 보기. null이면 전체.
   String? _topic;
@@ -156,7 +162,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
         ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: layout.when(
+      child: _isNeural ? NeuralView(toggle: _viewToggle()) : layout.when(
         loading: () => const Center(
           child: Text('그래프 배치 중…', style: TextStyle(color: AppColors.graphLabel)),
         ),
@@ -365,6 +371,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
                       spacing: 4,
                       runSpacing: 4,
                       children: [
+                        _viewToggle(),
                         _ModeButton(label: '모든 폴더', isOn: _topic == null, onTap: () => setState(() => _topic = null)),
                         for (final t in topics)
                           _ModeButton(label: t, isOn: _topic == t, onTap: () => setState(() => _topic = _topic == t ? null : t)),

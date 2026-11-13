@@ -333,3 +333,48 @@ Future<MoveResult> moveNotesInBackground(
     index.close();
   }
 });
+
+/// 신경망 보기 층 배치 (설계서_프롬프트이후 5.3). 노트 출처(`sources:`)는 색인에 없어 노트 파일 머리말을 읽는다.
+/// 노트 1만 개에서 파일 열기만 약 0.3초라, 노트를 [_sourceReaders]덩어리로 나눠 isolate 여러 개에서 함께 읽고
+/// 배치는 isolate 하나에서 한다 (M8 첫 표시 1초 목표). 넘기는 것은 글자·참거짓 값뿐이다 (L-0004).
+Future<NeuralLayout> neuralLayoutInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links,
+) async {
+  final paths = [for (final n in notes) n.path];
+  final size = max(500, (paths.length / _sourceReaders).ceil());
+  final parts = await Future.wait([
+    for (var start = 0; start < paths.length; start += size)
+      _readSourcesInBackground(vaultRoot, paths.sublist(start, min(start + size, paths.length))),
+  ]);
+  return _neuralLayoutInBackground(vaultRoot, indexPath, notes, links, [for (final part in parts) ...part]);
+}
+
+const _sourceReaders = 4;
+
+Future<List<List<String>>> _readSourcesInBackground(String vaultRoot, List<String> paths) =>
+    Isolate.run(() => readNoteSources(vaultRoot, paths));
+
+/// 원본 문서 id·제목은 색인에서 읽고, 색인을 못 열면(처음 색인 중 잠김 등) 원본 파일 머리말로 대신한다.
+Future<NeuralLayout> _neuralLayoutInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links,
+  List<List<String>> sources,
+) => Isolate.run(() {
+  var rawDocs = const <String, ({String id, String title})>{};
+  try {
+    final index = SearchIndex.open(Vault(vaultRoot), path: indexPath, rebuildIfOld: false);
+    try {
+      rawDocs = {for (final d in index.docsOf('raw')) d.path: (id: d.id, title: d.title)};
+    } finally {
+      index.close();
+    }
+  } on Object {
+    // 원본 파일에서 읽는다
+  }
+  return neuralLayoutFromVault(vaultRoot, notes, links, rawDocs: rawDocs, sources: sources);
+});
