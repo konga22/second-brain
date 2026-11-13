@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../index/search_index.dart';
 import '../log/change_log.dart';
+import '../note/note.dart';
 import '../note/note_store.dart';
 import '../security/secret_mask.dart';
 import '../text/nfc.dart';
@@ -23,6 +24,10 @@ class LessonStore {
 
   /// 질문당 넣는 규칙 최대 개수.
   static const maxPerPrompt = 3;
+
+  /// 세션 시작 안내에 늘 넣는 적용 중 규칙 최대 개수 (설계서 5.4 안전장치). 넘으면 앱 [배운 것]이 합치기를 권한다
+  /// (설계서_프롬프트이후 4.5).
+  static const maxSessionLessons = 30;
 
   /// 검증 기준·회귀 시험 최대 개수. 넘으면 검증 에이전트가 비슷한 것을 합친다.
   static const maxChecklist = 30;
@@ -86,6 +91,7 @@ class LessonStore {
         source: source,
         status: status,
         tests: [?testId],
+        created: DateTime.now(),
         body: '',
       );
       final path = p.join(vault.lessonsDir, '$id.md');
@@ -168,9 +174,83 @@ class LessonStore {
         kept: lesson.kept + (kept ? 1 : 0),
         recorrected: lesson.recorrected + (kept ? 0 : 1),
         lastSeen: DateTime.now(),
+        // 다시 교정된 날은 세션 시작 목록에서 규칙을 앞으로 올린다 (설계서_프롬프트이후 4.5)
+        recorrectedAt: kept ? null : DateTime.now(),
       ),
       action: 'lesson-evidence',
       batch: batch,
+    );
+  }
+
+  /// 세션 시작 안내에 넣을 적용 중 규칙: 최근에 만들었거나 다시 교정된 것부터 [maxSessionLessons]개
+  /// (설계서_프롬프트이후 4.5, K-41: 번호 순이면 규칙 40개에서 최근 10개가 0/10 전달).
+  /// [legacy]면 이전 방식 그대로 번호 순 앞 30개 (7.3 "이전 방식" 스위치).
+  /// 돌려주는 두 번째 값은 목록에서 빠진 적용 중 규칙 수.
+  (List<Lesson>, int) sessionLessons({bool legacy = false}) {
+    final active = all(status: LessonStatus.active);
+    active.sort(legacy ? (a, b) => a.id.compareTo(b.id) : Lesson.recentFirst);
+    final rest = active.length - maxSessionLessons;
+    return (active.take(maxSessionLessons).toList(), rest > 0 ? rest : 0);
+  }
+
+  /// 비슷한 규칙 쌍 (설계서_프롬프트이후 4.5 "합치기 필요"). AI 없이 언제·무엇을의 단어 머리가 겹치는 비율로 본다:
+  /// 겹친 머리 2개 이상이고, 짧은 쪽 머리의 절반 이상이 겹치면 후보. 많이 겹친 쌍부터 [limit]개.
+  static List<(Lesson, Lesson, double)> similarPairs(List<Lesson> lessons, {int limit = 5}) {
+    final heads = [for (final l in lessons) wordHeads('${l.trigger} ${l.action}').toSet()];
+    final out = <(Lesson, Lesson, double)>[];
+    for (var i = 0; i < lessons.length; i++) {
+      for (var j = i + 1; j < lessons.length; j++) {
+        final shared = heads[i].intersection(heads[j]).length;
+        final smaller = heads[i].length < heads[j].length ? heads[i].length : heads[j].length;
+        if (shared < 2 || smaller == 0) continue;
+        final ratio = shared / smaller;
+        if (ratio >= matchRatio) out.add((lessons[i], lessons[j], ratio));
+      }
+    }
+    out.sort((a, b) => b.$3.compareTo(a.$3));
+    return out.take(limit).toList();
+  }
+
+  /// 두 규칙을 한 문장으로 합친다 (설계서_프롬프트이후 4.5). [keepId]는 새 문장으로 고쳐 남기고 [dropId]는 보관한다.
+  /// 지움이 아니라 보관이라 [배운 것]에서 복원할 수 있고, 같은 묶음이라 `brain undo`로 함께 되돌린다.
+  void merge(
+    String keepId,
+    String dropId, {
+    required String trigger,
+    required String action,
+    required String reason,
+    String? batch,
+  }) {
+    if (keepId == dropId) throw const NoteStoreException('같은 규칙끼리는 합칠 수 없습니다.');
+    for (final (name, value) in [('trigger', trigger), ('action', action), ('reason', reason)]) {
+      if (value.trim().isEmpty) throw NoteStoreException('$name이 비었습니다 (언제 → 무엇을 → 왜).');
+    }
+    final keep = read(keepId), drop = read(dropId);
+    if (keep == null) throw NoteStoreException('$keepId 실수 노트가 없습니다.');
+    if (drop == null) throw NoteStoreException('$dropId 실수 노트가 없습니다.');
+    final batchId = batch ?? newBatchId();
+    final day = formatTime(DateTime.now()).substring(0, 10);
+    String note(String body, String line) => [if (body.trim().isNotEmpty) body.trim(), line].join('\n');
+    save(
+      keep.copyWith(
+        trigger: maskSecrets(trigger.trim()),
+        action: maskSecrets(action.trim()),
+        reason: maskSecrets(reason.trim()),
+        // 지킴·다시 교정 횟수는 두 규칙 것을 더한다 (같은 규칙이었으므로)
+        kept: keep.kept + drop.kept,
+        recorrected: keep.recorrected + drop.recorrected,
+        body: note(keep.body, '- $day ${drop.id}와 합침 (앞 문장: ${keep.line})'),
+      ),
+      action: 'lesson-merge',
+      batch: batchId,
+    );
+    save(
+      drop.copyWith(
+        status: LessonStatus.archived,
+        body: note(drop.body, '- $day ${keep.id}로 합쳐 보관'),
+      ),
+      action: 'lesson-merge',
+      batch: batchId,
     );
   }
 
