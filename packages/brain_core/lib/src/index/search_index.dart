@@ -9,6 +9,7 @@ import 'package:sqlite3/sqlite3.dart';
 import '../graph/layout_health.dart';
 import '../lessons/lesson.dart';
 import '../note/note.dart';
+import '../note/note_assets.dart';
 import '../note/wiki_links.dart';
 import '../vault/vault.dart';
 import '../text/nfc.dart';
@@ -590,7 +591,8 @@ class SearchIndex {
     ).execute([
       newRowid,
       toBigrams(titleText),
-      toBigrams('${note.summary}\n${note.body}'),
+      // 사진 링크는 설명 글만 색인한다: 경로의 assets·png로 노트가 찾히지 않게 (설계서_프롬프트이후 5.5)
+      toBigrams('${note.summary}\n${note.body.replaceAllMapped(assetImageLink, (m) => m.group(1)!)}'),
     ]);
     if (kind == 'note') {
       for (final name in {linkKey(note.title), ...note.aliases.map(linkKey)}) {

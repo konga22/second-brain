@@ -353,7 +353,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
         const SizedBox(height: 16),
         ShadCard(
           title: const Text('백업·복원'),
-          description: const Text('지식 폴더를 폴더째 zip으로 내보냅니다. 색인은 다시 만들 수 있어 넣지 않습니다.'),
+          description: const Text('지식 폴더를 폴더째 zip으로 내보냅니다(첨부 사진 assets/ 포함). 색인은 다시 만들 수 있어 넣지 않습니다.'),
           child: Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Column(

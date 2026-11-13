@@ -9,6 +9,7 @@ import '../vault/persona.dart';
 import '../vault/vault.dart';
 import '../vault/vault_summary.dart';
 import 'file_name.dart';
+import 'note_assets.dart';
 import 'wiki_links.dart';
 import 'note.dart';
 
@@ -143,6 +144,7 @@ class NoteStore {
     List<String> sources = const [],
     List<String> aliases = const [],
     String? batch,
+    List<String> attachments = const [],
   }) {
     final cleanTitle = title.trim();
     if (cleanTitle.isEmpty) {
@@ -161,6 +163,10 @@ class NoteStore {
       throw const NoteStoreException('본문이 비었습니다 (표준 입력).');
     }
     checkForbidden(title: cleanTitle, summary: cleanSummary, body: body, tags: tags, aliases: aliases);
+    // 사진은 아무것도 쓰기 전에 모두 검사한다: 하나라도 틀리면 노트도 사진도 남기지 않는다 (설계서_프롬프트이후 5.5).
+    for (final path in attachments) {
+      checkAttachment(path);
+    }
     // 번호를 정하고 저장해 색인에 들어갈 때까지 다른 프로세스가 끼어들지 않게 (K-26(다)).
     return withVaultLock(vault, () {
       vault.ensure();
@@ -191,8 +197,18 @@ class NoteStore {
         topicDirName(topic ?? (note.tags.isEmpty ? null : note.tags.first)),
       );
       final path = uniqueNotePath(dir, note.title);
+      // 사진 링크는 가림을 거친 본문 뒤에 붙인다: 노트 폴더 기준 상대 경로라 파일 자리가 정해진 뒤에 만든다.
+      final assets = <String, bool>{}; // 경로 → 새로 만들었는가
+      final links = <String>[];
+      for (final source in attachments) {
+        final (assetRel, isNew) = storeAsset(vault, source, batch: batch);
+        if (assets.containsKey(assetRel)) continue; // 같은 사진 두 번 → 링크 하나
+        assets[assetRel] = isNew;
+        links.add(assetLink(vault, path, assetRel, p.basename(source)));
+      }
+      final saved = links.isEmpty ? note : note.copyWith(body: '${note.body.trimRight()}\n\n${links.join('\n\n')}\n');
       recordBeforeChange(vault, path, batch: batch);
-      writeFileAtomic(path, note.toMarkdown());
+      writeFileAtomic(path, saved.toMarkdown());
       final rel = p.relative(path, from: vault.root);
       appendChangeLog(
         vault,
@@ -200,6 +216,9 @@ class NoteStore {
         '$id ${note.status.value} $rel',
         batch: batch,
       );
+      for (final MapEntry(key: assetRel, value: isNew) in assets.entries) {
+        appendChangeLog(vault, 'attach', '$id $assetRel ${isNew ? '새 파일' : '이미 있음'}', batch: batch);
+      }
       _afterChange();
       // 색인에 안 들어갔으면 "저장함"이라고 하지 않는다 (찾을 수 없는 노트, 같은 id 재사용을 막는다).
       if (index.byId(id) == null) {

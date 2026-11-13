@@ -282,7 +282,9 @@ class AddCommand extends Command<int> {
       )
       ..addOption('aliases', help: '다른 표기·다른 이름, 쉼표로 구분 (예: 엑스코드,Xcode)', defaultsTo: '')
       ..addOption('source-session', help: '근거가 된 Claude Code 세션 id (앞 8자 이상)')
-      ..addOption('sources', help: '근거 원본 경로, 쉼표로 (예: raw/imports/2026-11-07-조사.md)', defaultsTo: '');
+      ..addOption('sources', help: '근거 원본 경로, 쉼표로 (예: raw/imports/2026-11-07-조사.md)', defaultsTo: '')
+      // 캡처 첨부 (설계서_프롬프트이후 5.5): 사진을 assets/<해시>.<확장자>로 복사하고 본문 끝에 링크를 붙인다.
+      ..addMultiOption('attach', help: '붙일 사진 (png·jpg·gif·webp·heic, 1장 20MB까지). 여러 번 줄 수 있다', splitCommas: false);
   }
 
   final BrainContext context;
@@ -368,7 +370,9 @@ class AddCommand extends Command<int> {
         aliases: (args['aliases'] as String).split(','),
         // 한 세션에서 저장한 노트는 한 묶음: brain undo s_<세션 앞 8자>로 통째로 되돌린다.
         batch: sessionId == null ? null : 's_${sessionId.substring(0, 8)}',
+        attachments: args['attach'] as List<String>,
       );
+      final attached = _attachedCount(id);
       if (sessionId != null) {
         context.registry.mark(sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
       }
@@ -378,6 +382,7 @@ class AddCommand extends Command<int> {
       }
       stdout.writeln(
         '$id 저장함${isDraft ? ' (정리 대기)' : ''}  $path'
+        '${attached == 0 ? '' : '\n사진 $attached장 붙임 (assets/, 같은 사진은 한 번만 저장)'}'
         '${isForcedDraft ? '\nAI 대화에서 저장한 노트는 사용자가 확인하기 전까지 초안이다 (찾기·자동 주입에 안 나옴).' : ''}'
         '${isPartial ? '\n세션 ${sessionId!.substring(0, 8)}은 다 읽지 않아 "일부 저장"으로 적었습니다. 다음 정리 때 안 읽은 곳부터 이어 읽습니다.' : ''}',
       );
@@ -426,6 +431,13 @@ class AddCommand extends Command<int> {
       '- 같은 결정에 더할 사실이거나 다른 지식이면: 같은 명령에 --new 를 붙여 다시 저장한다 (초안으로 저장된다).',
     );
     return 3;
+  }
+
+  /// 저장한 본문에 붙은 사진 링크 수 (같은 사진 두 번은 하나).
+  int _attachedCount(String id) {
+    if ((argResults!['attach'] as List<String>).isEmpty) return 0;
+    final body = context.notes.read(id)?.$2.body ?? '';
+    return {for (final m in assetImageLink.allMatches(body)) m.group(2)}.length;
   }
 }
 
