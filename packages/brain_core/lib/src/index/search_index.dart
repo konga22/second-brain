@@ -877,12 +877,16 @@ class SearchIndex {
   ///
   /// 모든 검색어가 맞는 결과가 [limit]개보다 적으면, 검색어 중 하나라도 맞는 결과로
   /// 뒤를 채운다 (자연어 질문은 노트에 없는 말이 섞이기 때문).
+  ///
+  /// [includeDrafts]가 false면 확인 전 초안을 뺀다 — AI에게 주는 찾기·자동 주입용 (설계서_프롬프트이후 4.1).
+  /// 사람이 보는 앱 검색은 초안도 보여야 해서 기본은 true다.
   List<IndexedDoc> search(
     String query, {
     int limit = 5,
     bool includeRaw = false,
     Set<String>? kinds,
     String? topic,
+    bool includeDrafts = true,
   }) {
     final strict = toBigramQuery(query);
     if (strict == null) return const [];
@@ -890,7 +894,7 @@ class SearchIndex {
     // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다.
     final prefix = topic == null ? null : 'wiki/$topic/';
     List<IndexedDoc> match(String q, int n) {
-      final found = _match(q, prefix == null ? n : n * 20, wanted);
+      final found = _match(q, prefix == null ? n : n * 20, wanted, includeDrafts: includeDrafts);
       return prefix == null
           ? found
           : found.where((d) => d.path.startsWith(prefix)).take(n).toList();
@@ -920,10 +924,12 @@ class SearchIndex {
     ]..sort();
   }
 
-  List<IndexedDoc> _match(String match, int limit, Set<String> kinds) => _db
+  /// 초안 거르기는 SQL 안에서 한다: 찾은 뒤 거르면 [limit]개를 못 채운다.
+  List<IndexedDoc> _match(String match, int limit, Set<String> kinds, {bool includeDrafts = true}) => _db
       .select(
         'select d.* from docs_fts f join docs d on d.rowid = f.rowid '
         'where docs_fts match ? and d.kind in (${kinds.map((_) => '?').join(', ')}) '
+        "${includeDrafts ? '' : "and d.status != 'draft' "}"
         'order by bm25(docs_fts, 3.0, 1.0) limit ?',
         [match, ...kinds, limit],
       )

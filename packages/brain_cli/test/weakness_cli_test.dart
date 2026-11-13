@@ -28,7 +28,13 @@ void main() {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
-  Future<(int, String, String)> brain(List<String> args, {String? stdin, String? home, String session = ''}) async {
+  Future<(int, String, String)> brain(
+    List<String> args, {
+    String? stdin,
+    String? home,
+    String session = '',
+    Map<String, String> env = const {},
+  }) async {
     final process = await Process.start(
       Platform.resolvedExecutable,
       ['run', p.join('bin', 'brain.dart'), ...args],
@@ -37,6 +43,10 @@ void main() {
         'BRAIN_VAULT': vaultRoot,
         'BRAIN_CONFIG': configPath,
         'CLAUDE_CODE_SESSION_ID': session,
+        // Claude Code 안에서 돌리면 CLAUDECODE=1이 물려와 brain add가 늘 초안이 된다 (설계서_프롬프트이후 4.1).
+        'CLAUDECODE': '',
+        'BRAIN_LEGACY': '',
+        ...env,
         // 세션 기록(~/.claude/projects)을 시험 폴더로
         'HOME': ?home,
       },
@@ -195,7 +205,8 @@ void main() {
       expect(lines[1], startsWith('--- 노트 내용 [${hash.substring(0, 6)}]'));
     });
 
-    test('훅이 미리 넣는 노트 줄은 제목을 한 줄로 펴고 초안을 표시한다', () async {
+    // v1.4.0부터 초안은 훅이 넣지 않는다(설계서_프롬프트이후 4.1). [초안] 표시는 "이전 방식"에서만 보인다.
+    test('훅이 미리 넣는 노트 줄은 제목을 한 줄로 펴고 초안을 표시한다 (이전 방식), 새 방식은 초안을 넣지 않는다', () async {
       final vault = Vault(vaultRoot);
       final index = SearchIndex.open(vault);
       final (id, _) = NoteStore(vault, index).add(
@@ -206,7 +217,10 @@ void main() {
         draft: true,
       );
       index.close();
-      final (_, out, _) = await brain(['hook', 'prompt'], stdin: jsonEncode({'prompt': '결제 웹훅 재시도 규칙이 뭐였지?', 'cwd': '/tmp/x'}));
+      final input = jsonEncode({'prompt': '결제 웹훅 재시도 규칙이 뭐였지?', 'cwd': '/tmp/x'});
+      final (_, now, _) = await brain(['hook', 'prompt'], stdin: input);
+      expect(now, isNot(contains(id)));
+      final (_, out, _) = await brain(['hook', 'prompt'], stdin: input, env: {'BRAIN_LEGACY': 'drafts'});
       final context = (jsonDecode(out)['hookSpecificOutput']['additionalContext'] as String);
       final line = context.split('\n').firstWhere((l) => l.contains(id));
       expect(line, contains('[초안]'));

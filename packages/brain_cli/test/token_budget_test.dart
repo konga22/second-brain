@@ -64,6 +64,9 @@ void main() {
         'BRAIN_CONFIG': configPath,
         // Claude Code 세션 안에서 돌릴 때 그 세션 기록을 시험 폴더로 가져오지 않게
         'CLAUDE_CODE_SESSION_ID': '',
+        // Claude Code 안에서 돌리면 CLAUDECODE=1이 물려와 brain add가 늘 초안이 된다 (설계서_프롬프트이후 4.1).
+        'CLAUDECODE': '',
+        'BRAIN_LEGACY': '',
       },
     );
     if (stdin != null) process.stdin.write(stdin);

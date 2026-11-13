@@ -19,6 +19,11 @@ class FindCommand extends Command<int> {
         negatable: false,
       )
       ..addFlag(
+        'drafts',
+        help: '확인 전 초안도 함께 찾는다. 기본은 뺀다 — 사용자가 확인하기 전이라 근거로 쓰지 않는다 (설계서_프롬프트이후 4.1).',
+        negatable: false,
+      )
+      ..addFlag(
         'brief',
         help: '짧게: id와 제목만, 약하게 맞은 것은 (약) 표시 (토큰 약 1/3, docs/토큰분석.md 6절).',
         negatable: false,
@@ -41,24 +46,32 @@ class FindCommand extends Command<int> {
     context.index.syncIfStale();
     final limit = int.tryParse(argResults!['limit'] as String) ?? 5;
     final topic = argResults!['topic'] as String?;
+    final drafts = argResults!['drafts'] as bool || AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     var hits = context.index.search(
       query,
       limit: limit,
       includeRaw: argResults!['raw'] as bool,
       topic: topic,
+      includeDrafts: drafts,
     );
     if (topic != null && hits.isEmpty) {
       stdout.writeln('($topic 폴더에 없어 전체에서 찾음)');
-      hits = context.index.search(query, limit: limit, includeRaw: argResults!['raw'] as bool);
+      hits = context.index.search(query, limit: limit, includeRaw: argResults!['raw'] as bool, includeDrafts: drafts);
     }
     if (hits.isEmpty) {
-      stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)');
+      stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)${drafts ? '' : _draftHint(query)}');
       return 0;
     }
     // E8 --here: 더 넓게 찾은 뒤 지금 폴더에서 나온 노트를 앞으로 (순서는 그 안에서 그대로)
     final hereIds = <String>{};
     if (argResults!['here'] as bool) {
-      final wide = context.index.search(query, limit: limit * 4, includeRaw: argResults!['raw'] as bool, topic: topic);
+      final wide = context.index.search(
+        query,
+        limit: limit * 4,
+        includeRaw: argResults!['raw'] as bool,
+        topic: topic,
+        includeDrafts: drafts,
+      );
       final pool = wide.isEmpty ? hits : wide;
       for (final doc in pool) {
         if (isFromFolder(context.vault, doc, Directory.current.path)) hereIds.add(doc.id);
@@ -72,7 +85,10 @@ class FindCommand extends Command<int> {
       // (토큰분석 6.2) 숨긴다. 제목·요약만 보면 다른 표현(저장 공간 ↔ 디스크)에서 정답까지 숨겨져 본문도 본다.
       final strong = [for (final d in hits) if (isRelevantMatch(query, d, noteBody(context.vault, d))) d];
       if (strong.isEmpty) {
-        stdout.writeln('확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. 다른 말로 다시 찾을 수 있음)');
+        stdout.writeln(
+          '확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. 다른 말로 다시 찾을 수 있음)'
+          '${drafts ? '' : _draftHint(query)}',
+        );
         return 0;
       }
       if (mode == RetrievalMode.r) {
@@ -117,6 +133,19 @@ class FindCommand extends Command<int> {
       stdout.writeln('${doc.id}  $draft${doc.title}$summary  ${doc.folder}');
     }
     return 0;
+  }
+
+  /// 확인된 노트가 없을 때만 붙이는 한 줄: 방금 저장한 초안을 AI가 "없다"고 단정하지 않게 (설계서_프롬프트이후 8.3).
+  /// 초안 내용은 보이지 않는다 — 수만 알린다.
+  String _draftHint(String query) {
+    // 단어 하나만 겹친 초안까지 세면 관계없는 초안으로 "있음"이 떴다(11/13 독립 검토) — 확실히 맞는 것만 센다.
+    final count = context.index
+        .search(query, limit: 20, includeRaw: argResults!['raw'] as bool)
+        .where((d) => d.isDraft && isStrongMatch(query, d))
+        .length;
+    return count == 0
+        ? ''
+        : '\n(확인 전 초안 $count개 있음. 사용자가 확인하기 전이라 근거로 쓰지 않는다. 사용자가 보자고 하면 brain find --drafts $query)';
   }
 }
 
@@ -174,13 +203,17 @@ class ShowCommand extends Command<int> {
   /// 이 노트와 이어진 노트 최대 5개. `[[링크]]`가 먼저, 추천은 `(추천)`.
   List<String> _linksOf(String id) {
     final dismissed = DismissedLinks(context.vault).load();
+    // 확인 전 초안의 제목은 AI에게 보이지 않는다 (설계서_프롬프트이후 4.1).
+    final drafts = AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     final out = <String>[];
     for (final link in context.index.links(dismissed: dismissed)) {
       final other = link.fromId == id
           ? link.toId
           : (link.toId == id ? link.fromId : null);
       if (other == null || out.any((l) => l.startsWith('$other '))) continue;
-      final title = context.index.byId(other)?.title ?? '';
+      final doc = context.index.byId(other);
+      if (doc != null && doc.isDraft && !drafts) continue;
+      final title = doc?.title ?? '';
       out.add('$other ${clip(title, 20)}${link.isSuggested ? ' (추천)' : ''}');
       if (out.length >= 5) break;
     }
@@ -269,6 +302,13 @@ class AddCommand extends Command<int> {
         }
       }
     }
+    // AI 세션(Claude Code가 넣는 CLAUDECODE·CLAUDE_CODE_SESSION_ID)에서 부른 저장은 --draft가 없어도 초안이다.
+    // 확인 단계를 스킬 문장으로만 지켜 AI가 건너뛸 수 있었다(기능검토 W3) — 명령이 막는다 (설계서_프롬프트이후 4.1).
+    final env = Platform.environment;
+    final isAiSession = env['CLAUDECODE'] == '1' || (env['CLAUDE_CODE_SESSION_ID'] ?? '').isNotEmpty;
+    final isForcedDraft =
+        !(args['draft'] as bool) && isAiSession && !AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
+    final isDraft = args['draft'] as bool || isForcedDraft;
     try {
       final (id, path) = context.notes.add(
         title: args['title'] as String,
@@ -276,7 +316,7 @@ class AddCommand extends Command<int> {
         body: body,
         tags: (args['tags'] as String).split(','),
         topic: args['topic'] as String?,
-        draft: args['draft'] as bool,
+        draft: isDraft,
         source: sessionId == null ? 'ai' : 'session',
         sources: sources,
         aliases: (args['aliases'] as String).split(','),
@@ -287,7 +327,8 @@ class AddCommand extends Command<int> {
         context.registry.mark(sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
       }
       stdout.writeln(
-        '$id 저장함${args['draft'] as bool ? ' (정리 대기)' : ''}  $path'
+        '$id 저장함${isDraft ? ' (정리 대기)' : ''}  $path'
+        '${isForcedDraft ? '\nAI 대화에서 저장한 노트는 사용자가 확인하기 전까지 초안이다 (찾기·자동 주입에 안 나옴).' : ''}'
         '${isPartial ? '\n세션 ${sessionId!.substring(0, 8)}은 다 읽지 않아 "일부 저장"으로 적었습니다. 다음 정리 때 안 읽은 곳부터 이어 읽습니다.' : ''}',
       );
       return 0;

@@ -173,6 +173,46 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
     );
   }
 
+  /// 프롬프트 이후 바뀐 동작을 항목별로 이전 방식(v1)으로 되돌린다 (설계서_프롬프트이후 7.3).
+  /// 새 방식이 더 나쁘면 그 항목만 끄고 견준다. `brain` 명령·AI 질문은 바로, 세션 시작 목록은 새 세션부터. 항목은 만든 것만 보인다(5.1은 만들 때 더함).
+  Widget _legacyCard(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final config = ref.watch(appConfigProvider);
+    const items = [
+      (AppConfig.legacyDrafts, '확인 전 초안도 AI 찾기·자동 주입·AI 질문 근거에 쓴다 (4.1 초안 분리를 끔)'),
+      (AppConfig.legacyLessons, '실수 노트 목록을 번호 순 앞 30개로 (4.5 최근순을 끔)'),
+    ];
+    return ShadCard(
+      title: const Text('이전 방식'),
+      description: const Text('11/13 교수님 프롬프트 뒤에 바뀐 동작을 하나씩 예전대로 돌립니다. 켜면 그 항목만 예전 방식입니다.'),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (item, label) in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    ShadSwitch(
+                      value: config.legacy.contains(item),
+                      onChanged: (on) => _save(
+                        config.copyWith(legacy: on ? {...config.legacy, item} : ({...config.legacy}..remove(item))),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(label)),
+                  ],
+                ),
+              ),
+            Text('찾기·AI 질문은 바로, 실수 노트 목록은 새 Claude Code 세션부터 적용됩니다.', style: theme.textTheme.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 자동으로 지식 넣기: 대화 중 자동 저장 + 자동 정리(안전망).
   Widget _autoCard(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -358,6 +398,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
         ),
         const SizedBox(height: 16),
         _autoCard(context),
+        const SizedBox(height: 16),
+        _legacyCard(context),
         if (_message != null)
           Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!, style: theme.textTheme.muted)),
       ],

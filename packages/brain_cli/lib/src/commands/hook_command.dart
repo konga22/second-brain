@@ -202,14 +202,16 @@ class HookCommand extends Command<int> {
 
   /// 요청과 관련된 노트 최대 3개. 요청의 단어 머리가 제목·요약·태그에 2개 이상 들어 있어야
   /// 후보로 본다 (단어 하나만 맞는 약한 후보로 토큰을 쓰지 않게).
-  static List<IndexedDoc> relatedNotes(SearchIndex index, String prompt) {
+  ///
+  /// 확인 전 초안은 넣지 않는다: 틀린 초안이 다음 대화의 근거가 됐다(설계서_프롬프트이후 4.1, M2 이전 방식 10/10).
+  static List<IndexedDoc> relatedNotes(SearchIndex index, String prompt, {bool includeDrafts = false}) {
     index.syncIfStale();
     final heads = LessonStore.wordHeads(prompt)
         .where((h) => !_buildWords.contains(h))
         .toList();
     if (heads.isEmpty) return const [];
     final out = <IndexedDoc>[];
-    for (final doc in index.search(prompt, limit: 8)) {
+    for (final doc in index.search(prompt, limit: 8, includeDrafts: includeDrafts)) {
       final text = toNfc('${doc.title} ${doc.summary} ${doc.tags}').toLowerCase();
       final matched = heads.where(text.contains).length;
       // 비율 기준(맞은 단어 ÷ 요청 단어)은 11/09에 재 보고 넣지 않았다: 엉뚱한 노트를 넣는 값은 약 100~200토큰,
@@ -245,12 +247,13 @@ class HookCommand extends Command<int> {
     final isCorrection = _correction.hasMatch(prompt) && !context.vault.contains(cwd);
     // 만들기·구현 요청이면 관련 지식을 먼저 검토하고 도입을 제안하게 한다 (11/07 사용자 요청).
     final isBuild = _buildIntent.hasMatch(prompt) && !context.vault.contains(cwd);
-    final related = isBuild ? relatedNotes(context.index, prompt) : const <IndexedDoc>[];
+    final drafts = AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
+    final related = isBuild ? relatedNotes(context.index, prompt, includeDrafts: drafts) : const <IndexedDoc>[];
     // R2: 만들기 요청이 아니어도 질문과 확실히 맞는 노트가 있으면 미리 넣는다. 맞으면 AI가 찾기 턴을 쓰지 않는다
     // (턴 하나가 맥락 약 3만 토큰, 토큰분석 6.2). 지식 폴더 안 세션·교정 신호일 때는 넣지 않는다.
     final mode = RetrievalMode.current;
     final known = !isBuild && !isCorrection && mode != RetrievalMode.base && !context.vault.contains(cwd)
-        ? relatedNotes(context.index, prompt)
+        ? relatedNotes(context.index, prompt, includeDrafts: drafts)
         : const <IndexedDoc>[];
     final knownLines = <String>[];
     for (final doc in known) {
