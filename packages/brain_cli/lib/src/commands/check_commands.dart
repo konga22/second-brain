@@ -12,7 +12,7 @@ class LintCommand extends Command<int> {
   LintCommand(this.context) {
     argParser
       ..addFlag('fix-safe', help: '형식 누락(id·요약)만 자동으로 채운다.', negatable: false)
-      ..addOption('type', help: '이 유형만 모두 보기 (dead, orphan, duplicate, stale, format, long, suspicious)');
+      ..addOption('type', help: '이 유형만 모두 보기 (dead, orphan, duplicate, stale, format, long, suspicious, rule)');
   }
 
   final BrainContext context;
@@ -21,7 +21,7 @@ class LintCommand extends Command<int> {
   String get name => 'lint';
 
   @override
-  String get description => '지식 폴더를 점검한다 (죽은 링크·고아·중복·신선도·형식·길이·의심 지시문).';
+  String get description => '지식 폴더를 점검한다 (죽은 링크·고아·중복·신선도·형식·길이·의심 지시문·규칙 후보).';
 
   static const _typeNames = {
     'dead': LintType.deadLink,
@@ -31,6 +31,8 @@ class LintCommand extends Command<int> {
     'format': LintType.format,
     'long': LintType.tooLong,
     'suspicious': LintType.suspicious,
+    // 일반 선호·작업 규칙처럼 보이는 정리된 노트 (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트)
+    'rule': LintType.ruleCandidate,
   };
 
   @override

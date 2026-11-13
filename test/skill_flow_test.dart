@@ -31,6 +31,26 @@ void main() {
     expect(text, contains('--new-topic'));
   });
 
+  // (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트) 같은 선호가 프로젝트마다 노트로 저장돼 다른 프로젝트에서 안 붙었다.
+  // 프로젝트 이름을 빼도 맞는 선호·작업 규칙은 노트가 아니라 검증 에이전트로 넘겨 실수 노트로 만든다.
+  test('brain-save·brain-ingest: 일반 선호·작업 규칙은 노트로 저장하지 않고 brain-verifier에 넘긴다', () {
+    final save = skill('brain-save');
+    expect(save, isNot(contains('- 사용자 선호·작업 규칙 ("앞으로 ~할 때는 ~한다")\n')));
+    expect(save, allOf(contains('2-1. 사용자 선호·작업 규칙 → 실수 노트'), contains('프로젝트 이름을 빼도 맞')));
+    expect(save, contains('한반도감 홈은 한지 느낌')); // 프로젝트에만 맞는 선호는 노트로 남는다
+    expect(skill('brain-ingest'), contains('brain-verifier'));
+    expect(skill('brain-lint'), contains('규칙 후보'));
+  });
+
+  test('brain-verifier: 대화에서 나온 선호도 받고, 같은 규칙이면 --recorrected, 사용자 말이 없으면 승인 대기', () {
+    final text = File('integrations/claude-code/agents/brain-verifier.md').readAsStringSync();
+    final section = text.split('## A-2.').last.split('## B.').first;
+    expect(section, contains('brain lesson evidence <id> --recorrected'));
+    expect(section, contains('--status pending'));
+    expect(section, contains('--quote'));
+    expect(text.split('\n').firstWhere((l) => l.startsWith('description:')), contains('선호'));
+  });
+
   test('brain-save: 지난 세션을 정리하며 옛 노트를 고치면 brain write에 --source-session을 붙인다', () {
     final text = skill('brain-save');
     expect(RegExp(r'brain write <id> --expect-hash <해시> --source-session').hasMatch(text), isTrue);
