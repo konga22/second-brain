@@ -160,6 +160,9 @@ enum NoteChange {
 
   /// 추천 연결을 확정한다: 본문 끝에 `관련: [[linkTitle]]`.
   appendLink,
+
+  /// 초안을 정리된 노트([targetId])에 합친다 (설계서_프롬프트이후 4.2).
+  mergeInto,
 }
 
 Future<void> changeNoteInBackground(
@@ -169,6 +172,7 @@ Future<void> changeNoteInBackground(
   required String id,
   String? topic,
   String? linkTitle,
+  String? targetId,
   String? batch,
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
@@ -176,6 +180,8 @@ Future<void> changeNoteInBackground(
   try {
     final store = NoteStore(vault, index);
     switch (change) {
+      case NoteChange.mergeInto:
+        store.mergeDraftInto(id, targetId!, batch: batch);
       case NoteChange.delete:
         store.delete(id, batch: batch);
       case NoteChange.confirm:
@@ -201,3 +207,16 @@ Future<void> changeNoteInBackground(
     index.close();
   }
 });
+
+/// 정리 대기 초안마다 비슷한 정리된 노트 최대 2개 (설계서_프롬프트이후 4.2). 초안마다 파일을 읽고 FTS 질의를 몇 번 해
+/// 초안이 많으면 화면 스레드에서 멈칫한다. 보드가 떠 있을 때만 계산한다.
+Future<Map<String, List<SimilarNote>>> draftSimilarInBackground(String vaultRoot, String indexPath) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+      try {
+        return NoteStore(vault, index).similarForDrafts();
+      } finally {
+        index.close();
+      }
+    });

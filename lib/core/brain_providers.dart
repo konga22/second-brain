@@ -246,6 +246,13 @@ final lintIssuesProvider = FutureProvider<List<LintIssue>>((ref) {
   return lintInBackground(vault.root, vault.indexPath);
 });
 
+/// 정리 대기 카드의 비슷한 정리된 노트 (설계서_프롬프트이후 4.2). 보드를 볼 때만 백그라운드에서 계산한다.
+final draftSimilarProvider = FutureProvider.autoDispose<Map<String, List<SimilarNote>>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final vault = ref.watch(vaultProvider);
+  return draftSimilarInBackground(vault.root, vault.indexPath);
+});
+
 /// 할 일 화면: 할 일 목록·AI 추천(자기 파일만 읽어 가벼움).
 final todoViewProvider = Provider<({List<Todo> todos, List<Todo> suggestions})>((ref) {
   ref.watch(vaultRevisionProvider);

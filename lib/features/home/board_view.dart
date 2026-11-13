@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/background_tasks.dart';
 import '../../core/brain_providers.dart';
 
 /// 정리 보드 (설계서 3.3): 원본 → 정리 대기 → 정리됨 → 점검 필요.
@@ -16,6 +17,8 @@ class BoardView extends ConsumerWidget {
     final raw = ref.watch(rawDocsProvider);
     final issues = ref.watch(lintIssuesProvider).value ?? const <LintIssue>[];
     final byId = {for (final d in notes) d.id: d};
+    final similarAsync = ref.watch(draftSimilarProvider);
+    final similar = similarAsync.value ?? const <String, List<SimilarNote>>{};
     final issueByNote = <String, List<LintIssue>>{};
     for (final i in issues) {
       if (i.type == LintType.orphan) continue; // 고아는 너무 흔해서 보드에선 뺀다
@@ -35,10 +38,24 @@ class BoardView extends ConsumerWidget {
           ),
           _Column(
             title: '정리 대기',
-            hint: 'AI 초안 — 확인하면 정리됨',
+            hint: similarAsync.hasError
+                ? 'AI 초안 — 비슷한 노트를 찾지 못함 (${similarAsync.error})'
+                : 'AI 초안 — 확인하면 정리됨, 이미 있는 지식이면 합치기',
             cards: [
               for (final d in notes)
-                if (d.isDraft) _CardData(d.id, d.title, d.summary),
+                if (d.isDraft)
+                  _CardData(
+                    d.id,
+                    d.title,
+                    d.summary,
+                    extra: similar[d.id] == null
+                        ? null
+                        : DraftSimilarList(
+                            similar: similar[d.id]!,
+                            onOpen: open,
+                            onMerge: (s) => _merge(context, ref, d, s.doc),
+                          ),
+                  ),
             ],
             onOpen: open,
           ),
@@ -68,14 +85,105 @@ class BoardView extends ConsumerWidget {
       ),
     );
   }
+
+  /// [합치기] (설계서_프롬프트이후 4.2): 묻고, 초안 본문을 [target] 끝에 붙이고 초안은 "합쳐짐"으로 남긴다.
+  Future<void> _merge(BuildContext context, WidgetRef ref, IndexedDoc draft, IndexedDoc target) async {
+    final isOk = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text('초안을 합칠까요?'),
+        description: Text(
+          '${draft.title}의 본문을 ${target.title} 끝에 붙입니다. 초안은 지우지 않고 "합쳐짐"으로 남아 그 노트를 가리킵니다. '
+          '설정 → 되돌리기에서 한 번에 되돌릴 수 있습니다.',
+        ),
+        actions: [
+          ShadButton.outline(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
+          ShadButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('합치기')),
+        ],
+      ),
+    );
+    if (isOk != true || !context.mounted) return;
+    final vault = ref.read(vaultProvider);
+    final revision = ref.read(vaultRevisionProvider.notifier);
+    final toaster = ShadToaster.maybeOf(context);
+    try {
+      await changeNoteInBackground(
+        vault.root,
+        vault.indexPath,
+        change: NoteChange.mergeInto,
+        id: draft.id,
+        targetId: target.id,
+        batch: newBatchId(),
+      );
+      toaster?.show(ShadToast(description: Text('${target.title}에 합쳤습니다.')));
+    } on Object catch (e) {
+      toaster?.show(ShadToast.destructive(description: Text('합치지 못했습니다: ${e is NoteStoreException ? e.message : e}')));
+    } finally {
+      revision.bump(); // 실패해도 일부(충돌 사본 등)가 바뀌었을 수 있다
+    }
+  }
+}
+
+/// 정리 대기 카드의 "비슷한 정리된 노트" 줄 (설계서_프롬프트이후 4.2): 제목, [옆에 열기], [합치기].
+/// 이미 있는 내용인지 사용자가 직접 찾지 않게 한다. 점수는 추천 연결과 같은 핵심 단어 겹침이다(AI 호출 없음).
+class DraftSimilarList extends StatelessWidget {
+  const DraftSimilarList({super.key, required this.similar, required this.onOpen, required this.onMerge});
+
+  final List<SimilarNote> similar;
+  final void Function(String id) onOpen;
+  final void Function(SimilarNote similar) onMerge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('비슷한 정리된 노트', style: theme.textTheme.muted.copyWith(fontSize: 11)),
+          for (final s in similar.take(2))
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${s.doc.title}  (${s.shared}/${s.terms})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                ShadButton.ghost(
+                  size: ShadButtonSize.sm,
+                  height: 22,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  onPressed: () => onOpen(s.doc.id),
+                  child: const Text('옆에 열기', style: TextStyle(fontSize: 11)),
+                ),
+                ShadButton.outline(
+                  size: ShadButtonSize.sm,
+                  height: 22,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  onPressed: () => onMerge(s),
+                  child: const Text('합치기', style: TextStyle(fontSize: 11)),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CardData {
-  const _CardData(this.id, this.title, this.detail);
+  const _CardData(this.id, this.title, this.detail, {this.extra});
 
   final String id;
   final String title;
   final String detail;
+
+  /// 카드 아래에 붙는 줄 (비슷한 노트, 점검 버튼).
+  final Widget? extra;
 }
 
 class _Column extends ConsumerWidget {
@@ -142,6 +250,7 @@ class _Column extends ConsumerWidget {
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.muted.copyWith(fontSize: 11),
                                     ),
+                                  ?card.extra,
                                 ],
                               ),
                             ),

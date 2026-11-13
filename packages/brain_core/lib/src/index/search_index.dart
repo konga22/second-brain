@@ -71,6 +71,15 @@ class IndexedDoc {
   );
 }
 
+/// 비슷한 정리된 노트 한 개 ([SearchIndex.similarNotes]). [shared]는 핵심 단어 [terms]개 중 겹친 수.
+class SimilarNote {
+  const SimilarNote({required this.doc, required this.shared, required this.terms});
+
+  final IndexedDoc doc;
+  final int shared;
+  final int terms;
+}
+
 /// 노트 사이 연결 한 개 (설계서 4.2 `links`). manual = `[[제목]]`, suggested = 추천.
 class NoteLink {
   const NoteLink({
@@ -239,6 +248,16 @@ class SearchIndex {
 
   /// 노트당 추천 연결 최대 개수 (설계서 5.5).
   static const suggestLimit = 5;
+
+  /// 정리 대기 카드에 비슷한 노트를 보이는 문턱: 핵심 단어 5개 중 겹친 수 (설계서_프롬프트이후 4.2, 측정 M5).
+  /// 11/13 시험 묶음(similar_notes_test): 2는 중복 아닌 초안 20개 중 3개에 떴고, 3은 중복 10/10 표시·오표시 1/20,
+  /// 4는 중복 9/10·오표시 0/20. 놓치는 중복이 더 아까워 3.
+  static const similarShowMin = 3;
+
+  /// `brain add`가 저장을 한 번 멈추는 "강하게 맞음" 문턱 (설계서_프롬프트이후 4.4).
+  /// 같은 묶음에서 3은 바꾼 결정 9/10 멈춤·같은 주제 다른 지식 0/10, 4는 바꾼 결정 4/10뿐이었다 —
+  /// 결정을 바꾼 노트는 숫자·이름이 바뀌어 핵심 단어가 덜 겹친다.
+  static const similarStrongMin = 3;
 
   final Vault vault;
   final Database _db;
@@ -640,6 +659,49 @@ class SearchIndex {
     }
   }
 
+  /// [note]와 비슷한 **정리된** 노트 (설계서_프롬프트이후 4.2·4.4). 점수는 추천 연결과 같다:
+  /// [note]의 핵심 단어 5개 중 상대 노트에 나오는 수. AI 호출이 없다.
+  ///
+  /// 초안·합쳐짐은 뺀다: 정리 대기 카드에 "이미 있는 지식"으로, `brain add`에 "고칠 옛 노트"로 보여 주는 것이라
+  /// 확인 전 초안을 근거로 쓰면 안 된다(4.1). [topic]을 주면 그 주제 폴더 안에서만 찾는다.
+  /// 저장 전 노트([note]가 색인에 없음)에도 쓴다: 핵심 단어 수만큼 FTS 질의라 1만 개에서도 빠르다.
+  List<SimilarNote> similarNotes(
+    Note note, {
+    String? excludeId,
+    String? topic,
+    int minShared = similarShowMin,
+    int limit = 3,
+  }) {
+    final terms = keyTerms(note);
+    if (terms.isEmpty) return const [];
+    final shared = <int, int>{};
+    for (final term in terms) {
+      for (final row in _stmt(
+        'select f.rowid as rowid from docs_fts f join docs d on d.rowid = f.rowid '
+        "where docs_fts match ? and d.kind = 'note' and d.status = 'active' limit 500",
+      ).select(['"$term"'])) {
+        final rowid = row['rowid'] as int;
+        shared.update(rowid, (n) => n + 1, ifAbsent: () => 1);
+      }
+    }
+    final out = <SimilarNote>[];
+    for (final MapEntry(key: rowid, value: count) in shared.entries) {
+      if (count < minShared) continue;
+      final rows = _stmt('select * from docs where rowid = ?').select([rowid]);
+      if (rows.isEmpty) continue;
+      final doc = IndexedDoc.fromRow(rows.first);
+      if (doc.id == excludeId || doc.id == note.id) continue;
+      if (topic != null && doc.topic != topic) continue;
+      out.add(SimilarNote(doc: doc, shared: count, terms: terms.length));
+    }
+    // 점수가 같으면 최근에 고친 노트가 먼저 (지금 쓰는 결정일 가능성이 크다)
+    out.sort((a, b) {
+      final byShared = b.shared.compareTo(a.shared);
+      return byShared != 0 ? byShared : b.doc.mtime.compareTo(a.doc.mtime);
+    });
+    return out.take(limit).toList();
+  }
+
   /// 노트의 핵심 조각 상위 [limit]개 (tf × log(N/df)).
   List<String> keyTerms(Note note, {int limit = 5}) {
     final text = '${note.title}\n${note.summary}\n${note.body}';
@@ -924,12 +986,13 @@ class SearchIndex {
     ]..sort();
   }
 
-  /// 초안 거르기는 SQL 안에서 한다: 찾은 뒤 거르면 [limit]개를 못 채운다.
+  /// 초안·합쳐짐 거르기는 SQL 안에서 한다: 찾은 뒤 거르면 [limit]개를 못 채운다.
   List<IndexedDoc> _match(String match, int limit, Set<String> kinds, {bool includeDrafts = true}) => _db
       .select(
         'select d.* from docs_fts f join docs d on d.rowid = f.rowid '
         'where docs_fts match ? and d.kind in (${kinds.map((_) => '?').join(', ')}) '
-        "${includeDrafts ? '' : "and d.status != 'draft' "}"
+        // 합쳐진 노트도 뺀다: [옛 노트 보관]·[합치기] 뒤에도 AI가 옛 내용을 찾으면 소용이 없다 (설계서_프롬프트이후 4.4)
+        "${includeDrafts ? '' : "and d.status not in ('draft', 'merged') "}"
         'order by bm25(docs_fts, 3.0, 1.0) limit ?',
         [match, ...kinds, limit],
       )

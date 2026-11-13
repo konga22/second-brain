@@ -418,6 +418,66 @@ class NoteStore {
     _afterChange();
   }
 
+  /// 노트를 "합쳐짐"으로 남기고 [into]를 가리키게 한다 (`redirect:`, 설계서 5.8 중복 후보).
+  /// 지우지 않는다: 되돌릴 수 있고, 옛 링크·대화 속 id가 어디로 갔는지 따라갈 수 있다 (설계서_프롬프트이후 4.2·4.4).
+  void markMerged(String id, {required String into, String? batch}) {
+    if (id == into) throw NoteStoreException('$id 노트를 자기 자신에 합칠 수 없습니다.');
+    final (doc, note, _) = _readForChange(id);
+    if (index.byId(into) == null) throw NoteStoreException('$into 노트가 없습니다.');
+    recordBeforeChange(vault, fileOf(doc).path, batch: batch);
+    writeFileAtomic(
+      fileOf(doc).path,
+      note
+          .copyWith(status: NoteStatus.merged, updated: DateTime.now(), extra: {...note.extra, 'redirect': into})
+          .toMarkdown(),
+    );
+    appendChangeLog(vault, 'merge', '$id → $into ${doc.path}', batch: batch);
+    _afterChange();
+  }
+
+  /// 정리 대기 초안마다 비슷한 정리된 노트 최대 [perDraft]개 (설계서_프롬프트이후 4.2). 초안 id → 점수 높은 순.
+  /// 초안이 아주 많아도 보드가 늦게 뜨지 않게 앞 [maxDrafts]개만 본다 (보드도 최근 순으로 보인다).
+  Map<String, List<SimilarNote>> similarForDrafts({int perDraft = 2, int maxDrafts = 200}) {
+    final out = <String, List<SimilarNote>>{};
+    for (final doc in index.notes().where((d) => d.isDraft).take(maxDrafts)) {
+      final String text;
+      try {
+        text = fileOf(doc).readAsStringSync();
+      } on FileSystemException {
+        continue; // 그사이 지워졌거나 읽을 수 없는 초안은 건너뛴다
+      }
+      final note = Note.parse(text, fallbackId: doc.id, fallbackTitle: doc.title);
+      final similar = index.similarNotes(note, excludeId: doc.id, limit: perDraft);
+      if (similar.isNotEmpty) out[doc.id] = similar;
+    }
+    return out;
+  }
+
+  /// 정리 대기 카드의 [합치기] (설계서_프롬프트이후 4.2): 초안 본문을 정리된 노트 끝에 붙이고, 초안은 "합쳐짐"으로 남긴다.
+  /// 두 파일을 한 묶음으로 바꿔 한 번에 되돌린다. 반환: 묶음 id.
+  String mergeDraftInto(String draftId, String targetId, {String? batch}) {
+    final batchId = batch ?? newBatchId();
+    final (_, draft, _) = _readForChange(draftId);
+    if (!draft.isDraft) throw NoteStoreException('$draftId 노트는 초안이 아니라 합치지 않습니다.');
+    final (targetDoc, target, hash) = _readForChange(targetId);
+    if (targetDoc.status != NoteStatus.active) {
+      throw NoteStoreException('$targetId 노트는 정리된 노트가 아니라 합치지 않습니다 (${targetDoc.status.label}).');
+    }
+    final date = formatTime(DateTime.now()).substring(0, 10);
+    update(
+      targetId,
+      expectHash: hash,
+      title: target.title,
+      summary: target.summary,
+      body: '${target.body.trimRight()}\n\n## 합친 초안: ${draft.title} ($date, $draftId)\n\n${draft.body.trim()}\n',
+      tags: target.tags,
+      aliases: target.aliases,
+      batch: batchId,
+    );
+    markMerged(draftId, into: targetId, batch: batchId);
+    return batchId;
+  }
+
   /// 색인을 맞추고 목차·온보딩 요약을 다시 만든다.
   void _afterChange() {
     index.sync();
