@@ -62,6 +62,9 @@ void main() {
 
     test('ssh 형식은 그대로 둔다', () {
       expect(maskRemoteUrl('git@github.com:x/y.git'), 'git@github.com:x/y.git');
+      // 비밀번호에 @가 있어도 호스트 앞까지 가린다 (11/13 검토)
+      expect(maskRemoteUrl('https://u:p@ss@github.com/x/y.git'), isNot(contains('ss@')));
+      expect(remoteHost('https://u:p@ss@github.com/x/y.git'), 'github.com');
       expect(remoteHost('git@github.com:x/y.git'), 'github.com');
       expect(remoteHost('ssh://git@github.com:22/x/y.git'), 'github.com');
       expect(remoteHost('/Volumes/백업/y.git'), '로컬 경로');

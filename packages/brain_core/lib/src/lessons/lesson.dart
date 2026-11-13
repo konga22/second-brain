@@ -74,12 +74,11 @@ class Lesson {
   /// 파일에 적힌 값만 써서 규칙이 안 바뀌면 순서도 안 바뀐다 (세션 시작 안내는 프롬프트 캐시).
   static int recentFirst(Lesson a, Lesson b) {
     final ta = a.touched, tb = b.touched;
-    if (ta != tb) {
-      if (ta == null) return 1;
-      if (tb == null) return -1;
-      return tb.compareTo(ta);
-    }
-    return b.id.compareTo(a.id);
+    if (ta == null && tb != null) return 1;
+    if (tb == null && ta != null) return -1;
+    // `!=`는 UTC 여부까지 비교해 같은 시각이 0을 돌려 번호 순 비교를 건너뛸 수 있었다 → compareTo로 (11/13 검토)
+    final byTime = ta == null || tb == null ? 0 : tb.compareTo(ta);
+    return byTime != 0 ? byTime : b.id.compareTo(a.id);
   }
 
   /// 교정 원문과 검증 에이전트 판단 기록.

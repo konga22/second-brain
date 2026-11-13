@@ -40,7 +40,8 @@ GitRemoteExposure? findGitRemoteExposure(String vaultRoot) {
   final vault = _canonical(vaultRoot);
   for (var dir = vault; ; dir = p.dirname(dir)) {
     final gitDir = _gitDirOf(dir);
-    if (gitDir != null) {
+    // config가 없는 `.git`(만들다 만 저장소)에서 멈추면 바깥 저장소의 원격을 못 봤다 (11/13 검토)
+    if (gitDir != null && (File(p.join(gitDir, 'config')).existsSync() || File(p.join(gitDir, 'commondir')).existsSync())) {
       final remotes = _remotesOf(gitDir);
       if (remotes.isEmpty || _isIgnored(dir, vault)) return null;
       return GitRemoteExposure(repoRoot: dir, remotes: remotes);
@@ -51,7 +52,8 @@ GitRemoteExposure? findGitRemoteExposure(String vaultRoot) {
 
 /// 주소에서 사용자·토큰을 가린다. `git@host:경로`(ssh) 형식은 비밀이 아니라 그대로 둔다.
 String maskRemoteUrl(String url) {
-  final masked = url.replaceFirstMapped(RegExp(r'^([a-z][a-z0-9+.\-]*://)([^/@]+)@', caseSensitive: false), (m) {
+  // 사용자 정보는 호스트 앞 마지막 `@`까지다: 비밀번호에 `@`가 있으면 첫 `@`에서 끊겨 뒷부분이 보였다 (11/13 검토).
+  final masked = url.replaceFirstMapped(RegExp(r'^([a-z][a-z0-9+.\-]*://)([^/]+)@', caseSensitive: false), (m) {
     final isSshUser = m[1]!.toLowerCase().contains('ssh') && !m[2]!.contains(':');
     return isSshUser ? m[0]! : '${m[1]}[가림]@';
   });
@@ -60,7 +62,7 @@ String maskRemoteUrl(String url) {
 
 /// 원격 주소의 호스트. 로컬 폴더를 원격으로 둔 경우는 '로컬 경로'.
 String remoteHost(String url) {
-  final scheme = RegExp(r'^([a-z][a-z0-9+.\-]*)://(?:[^/@]*@)?([^/:]*)', caseSensitive: false).firstMatch(url);
+  final scheme = RegExp(r'^([a-z][a-z0-9+.\-]*)://(?:[^/]*@)?([^/:]*)', caseSensitive: false).firstMatch(url);
   if (scheme != null) {
     return scheme[1]!.toLowerCase() == 'file' || scheme[2]!.isEmpty ? '로컬 경로' : scheme[2]!;
   }
@@ -167,11 +169,26 @@ String _configValue(String raw) {
 bool _isIgnored(String repoRoot, String vault) {
   if (vault == repoRoot) return false;
   final rel = p.relative(vault, from: repoRoot);
+  // 개발자 도구가 없는 맥의 /usr/bin/git은 설치 창을 띄운다 — 그때는 부르지 않고 경고를 남긴다 (11/13 검토).
+  if (Platform.isMacOS && !_hasDeveloperTools()) return false;
+  // GIT_DIR·GIT_WORK_TREE가 물려오면(git 훅 안에서 doctor 실행 등) 다른 저장소를 본다 → GIT_로 시작하는 값은 빼고 부른다.
+  final env = {for (final e in Platform.environment.entries) if (!e.key.startsWith('GIT_')) e.key: e.value};
+  ProcessResult git(List<String> args) =>
+      Process.runSync('git', ['-C', repoRoot, ...args], environment: env, includeParentEnvironment: false);
   try {
-    final ignored = Process.runSync('git', ['-C', repoRoot, 'check-ignore', '-q', '--', rel]);
+    final ignored = git(['check-ignore', '-q', '--', rel]);
     if (ignored.exitCode != 0) return false;
-    final tracked = Process.runSync('git', ['-C', repoRoot, 'ls-files', '--', rel]);
+    final tracked = git(['ls-files', '--', rel]);
     return tracked.exitCode == 0 && (tracked.stdout as String).trim().isEmpty;
+  } on ProcessException {
+    return false;
+  }
+}
+
+/// `xcode-select -p`는 개발자 도구가 없어도 창을 띄우지 않고 실패만 한다.
+bool _hasDeveloperTools() {
+  try {
+    return Process.runSync('xcode-select', ['-p']).exitCode == 0;
   } on ProcessException {
     return false;
   }

@@ -30,13 +30,16 @@ class SystemCheck {
       gitExposure != null;
 }
 
+GitRemoteExposure? _gitExposure(String vaultPath) => findGitRemoteExposure(vaultPath);
+
 final systemCheckProvider = FutureProvider<SystemCheck>((ref) async {
   final vaultPath = defaultVaultPath();
   final check = SystemCheck(
     sqlite: checkSqliteSupport(),
     vault: await checkVaultAccess(vaultPath),
     isSupabaseReachable: await checkSupabaseReachable(),
-    gitExposure: findGitRemoteExposure(vaultPath),
+    // git을 부를 수 있어 화면 스레드 밖에서 (설계서_프롬프트이후 4.6, 11/13 검토). 최상위 함수 + 문자열만 넘긴다 (L-0004)
+    gitExposure: await compute(_gitExposure, vaultPath),
   );
   debugPrint(
     '[점검] SQLite ${check.sqlite.version} ${check.sqlite.items} / '

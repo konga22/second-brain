@@ -25,6 +25,8 @@ class TimelineView extends ConsumerWidget {
     'lesson-status': '실수 노트 상태',
     'lesson-evidence': '규칙 근거',
     'lesson-update': '실수 노트 고침',
+    'lesson-edit': '실수 노트 고침',
+    'lesson-merge': '실수 노트 합침',
     'verifier-add': '검사 기준',
     'todo-add': '할 일',
     'todo-done': '할 일 끝',

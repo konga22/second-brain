@@ -225,9 +225,25 @@ class LessonStore {
     for (final (name, value) in [('trigger', trigger), ('action', action), ('reason', reason)]) {
       if (value.trim().isEmpty) throw NoteStoreException('$name이 비었습니다 (언제 → 무엇을 → 왜).');
     }
+    // 잠금 안에서 읽고 쓴다: 그사이 훅의 `lesson evidence`가 같은 규칙을 고치면 그 기록이 사라졌다 (11/13 검토).
+    withVaultLock(vault, () => _merge(keepId, dropId, trigger: trigger, action: action, reason: reason, batch: batch));
+  }
+
+  void _merge(
+    String keepId,
+    String dropId, {
+    required String trigger,
+    required String action,
+    required String reason,
+    String? batch,
+  }) {
     final keep = read(keepId), drop = read(dropId);
     if (keep == null) throw NoteStoreException('$keepId 실수 노트가 없습니다.');
     if (drop == null) throw NoteStoreException('$dropId 실수 노트가 없습니다.');
+    // 이미 보관된 규칙을 다시 합치면 횟수가 두 번 더해지고, 남길 쪽이 보관돼 있으면 둘 다 목록에서 빠졌다.
+    for (final l in [keep, drop]) {
+      if (l.status != LessonStatus.active) throw NoteStoreException('${l.id}는 적용 중이 아니라 합칠 수 없습니다 (화면을 새로 보세요).');
+    }
     final batchId = batch ?? newBatchId();
     final day = formatTime(DateTime.now()).substring(0, 10);
     String note(String body, String line) => [if (body.trim().isNotEmpty) body.trim(), line].join('\n');

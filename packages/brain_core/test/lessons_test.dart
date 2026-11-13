@@ -218,6 +218,10 @@ void main() {
       expect(dropped.body, contains('$b로 합쳐 보관'));
       expect(() => lessons.merge(a, a, trigger: 't', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
       expect(() => lessons.merge(a, b, trigger: ' ', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
+      // 이미 보관된 규칙을 다시 합치면 횟수가 두 번 더해졌다 (11/13 검토) → 거절하고 그대로 둔다
+      final keptBefore = lessons.read(b)!.kept;
+      expect(() => lessons.merge(b, a, trigger: 't', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
+      expect(lessons.read(b)!.kept, keptBefore);
       undoBatch(vault, 'b_merge');
       index.sync();
       expect(lessons.read(b)!.line, 'push할 때 → 허락을 받는다');
