@@ -20,15 +20,17 @@ NeuralLayout neuralLayoutFromVault(
   List<NeuralNoteRow> notes,
   List<(String, String)> links, {
   Map<String, ({String id, String title})> rawDocs = const {},
+  List<List<String>>? sources,
 }) {
+  final read = sources ?? readNoteSources(vaultRoot, [for (final n in notes) n.path]);
   final specs = [
-    for (final n in notes)
+    for (var i = 0; i < notes.length; i++)
       NeuralNoteSpec(
-        id: n.id,
-        title: n.title,
-        topic: n.topic,
-        isDraft: n.isDraft,
-        sources: frontmatterList(_readHead(p.join(vaultRoot, n.path)), 'sources'),
+        id: notes[i].id,
+        title: notes[i].title,
+        topic: notes[i].topic,
+        isDraft: notes[i].isDraft,
+        sources: read[i],
       ),
   ];
   final titles = <String, String>{};
@@ -51,6 +53,12 @@ NeuralLayout neuralLayoutFromVault(
   }
   return layoutNeural(specs, links, inputTitles: titles, inputRawIds: rawIds);
 }
+
+/// 노트 파일들의 `sources:` ([paths]는 지식 폴더 기준, 같은 순서로 돌려준다). 파일 열기가 대부분이라
+/// 앱은 노트를 몇 덩어리로 나눠 여러 isolate에서 함께 부른다 (1만 개 약 0.3초 → 나눠서 줄임).
+List<List<String>> readNoteSources(String vaultRoot, List<String> paths) => [
+  for (final path in paths) frontmatterList(_readHead(p.join(vaultRoot, path)), 'sources'),
+];
 
 /// 파일 앞부분. 머리말이 이보다 길면(드묾) 파일 전체를 읽는다.
 String _readHead(String path, [int bytes = 4096]) {

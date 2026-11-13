@@ -184,7 +184,9 @@ void main() {
     expect(container.read(selectedNoteProvider), 'n_5');
   });
 
-  testWidgets('M8: 노트 1만 개 첫 표시 시간 (파일 읽기·배치 isolate + 첫 그리기)', (tester) async {
+  // 시간을 재는 시험이라 따로 돌린다: `flutter test` 전체는 시험 파일을 함께 돌려 같은 일이 0.5초 → 14초까지 늘었다
+  // (11/13). NEURAL_M8=1 flutter test test/neural_view_test.dart --plain-name M8
+  testWidgets('M8: 노트 1만 개 첫 표시 시간 (파일 읽기·배치 isolate + 첫 그리기)', skip: Platform.environment['NEURAL_M8'] == null, (tester) async {
     final dir = Directory.systemTemp.createTempSync('neural_m8_');
     addTearDown(() => dir.deleteSync(recursive: true));
     final data = syntheticNeural(10000, inputs: 160, topics: 13, seed: 5);
@@ -223,6 +225,7 @@ void main() {
         '(flutter test 기록 시간 — 실제 GPU 그리기는 앱에서 따로)');
     expect(big.notes.length, 10000);
     expect(find.text('대화·문서 160 · 노트 10000 · 주제 13'), findsOneWidget);
-    expect(total.elapsedMilliseconds, lessThan(3000), reason: '목표 1초의 3배를 넘으면 크게 느려진 것');
+    // 합격선: 목표 1초의 3배 (디버그·JIT 기준, 단독 실행). 목표와 견주는 숫자는 위 출력으로 본다.
+    expect(total.elapsedMilliseconds, lessThan(3000), reason: '첫 표시가 크게 느려짐');
   });
 }

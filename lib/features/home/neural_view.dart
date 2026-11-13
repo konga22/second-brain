@@ -185,7 +185,11 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
     if (pick != null && (id == null || id == before)) _restartPulse();
   }
 
-  void _zoomAt(double factor, double y, _Geo g) {
+  /// 한 프레임에 휠 이벤트가 여럿 와도 앞 이벤트가 바꾼 값 위에서 셈하도록, 빌드 때 잡은 자리 대신 지금 값으로 다시 잰다.
+  _Geo _now(NeuralLayout layout) => _Geo(_size!, layout, _k, _off);
+
+  void _zoomAt(double factor, double y, NeuralLayout layout) {
+    final g = _now(layout);
     final k = (_k * factor).clamp(1.0, g.kMax);
     final idx = (y - g.top - g.off) / g.s;
     setState(() {
@@ -194,7 +198,8 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
     });
   }
 
-  void _panBy(double dy, _Geo g) {
+  void _panBy(double dy, NeuralLayout layout) {
+    final g = _now(layout);
     setState(() => _off = _Geo.clampOff(g.off + dy, g.lh, g.n * g.s));
   }
 
@@ -269,13 +274,13 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                   // 마우스 휠: 은닉층 확대. 트랙패드: 두 손가락 끌기는 이동, 벌리기는 확대 (그물 보기와 같은 손버릇)
                   onPointerSignal: (event) {
                     if (event is PointerScrollEvent) {
-                      _zoomAt(exp(-event.scrollDelta.dy / 300), event.localPosition.dy, g);
+                      _zoomAt(exp(-event.scrollDelta.dy / 300), event.localPosition.dy, layout);
                     }
                   },
                   onPointerPanZoomUpdate: (event) {
-                    if (event.panDelta.dy != 0) _panBy(event.panDelta.dy, g);
+                    if (event.panDelta.dy != 0) _panBy(event.panDelta.dy, layout);
                     if ((event.scale - _lastScale).abs() > 0.001) {
-                      _zoomAt(event.scale / _lastScale, event.localPosition.dy, g);
+                      _zoomAt(event.scale / _lastScale, event.localPosition.dy, layout);
                       _lastScale = event.scale;
                     }
                   },
@@ -294,7 +299,7 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                         _focus.requestFocus();
                         _select(g.hit(details.localPosition), layout);
                       },
-                      onVerticalDragUpdate: (details) => _panBy(details.delta.dy, g),
+                      onVerticalDragUpdate: (details) => _panBy(details.delta.dy, layout),
                       // 바탕(모든 선·노드)은 배치·확대·이동이 바뀔 때만 그린다. 고르기·마우스 올림·빛 흐름은 위 층이 그린다.
                       child: RepaintBoundary(
                         child: CustomPaint(
@@ -350,9 +355,9 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                 bottom: 10,
                 child: Column(
                   children: [
-                    _ToolButton(label: '+', onTap: () => _zoomAt(1.25, g.top + g.lh / 2, g)),
+                    _ToolButton(label: '+', onTap: () => _zoomAt(1.25, g.top + g.lh / 2, layout)),
                     const SizedBox(height: 4),
-                    _ToolButton(label: '−', onTap: () => _zoomAt(0.8, g.top + g.lh / 2, g)),
+                    _ToolButton(label: '−', onTap: () => _zoomAt(0.8, g.top + g.lh / 2, layout)),
                   ],
                 ),
               ),
