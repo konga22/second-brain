@@ -187,12 +187,25 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
   static const _fitTop = 84.0;
   static const _fitBottom = 46.0;
 
+  /// 위 폴더 칩 묶음. 주제가 많으면 칩이 여러 줄로 감겨 [_fitTop]보다 높아진다.
+  final _chipsKey = GlobalKey();
+
+  /// 위 도구 줄이 실제로 차지하는 높이 (칩 묶음 아래 끝 + 여백). [맞추기]가 그래프를 이 아래에 둔다.
+  /// 노트 1만 개·주제 40개에서 칩이 다섯 줄(약 180px)이 되자, 84px로 못박은 자리 때문에 그래프 윗부분과
+  /// 그 연결선이 칩 뒤로 들어갔다 (설계서_프롬프트이후 5.6, 11/14 실제 앱에서 발견).
+  double _toolbarHeight() {
+    final box = _chipsKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return _fitTop;
+    return max(_fitTop, 10 + box.size.height + 10); // Positioned top 10 + 칩 + 아래 여백 10
+  }
+
   /// [smooth]: [맞추기] 버튼은 부드럽게, 처음 열 때·보는 대상이 바뀔 때는 바로 맞춘다 (처음 열 때 움직임 없음, 5.6).
   void _fit(Rect bounds, Size viewport, {bool smooth = false}) {
     graphFitCount++;
     // 영역이 낮으면 비워 두지 않는다 (그래프가 지나치게 작아진다).
     final hasRoom = viewport.height > 360;
-    final top = hasRoom ? _fitTop : 0.0;
+    // 도구 줄이 영역의 40%를 넘으면(창이 낮고 주제가 아주 많음) 그래프가 지나치게 작아지지 않게 거기서 멈춘다.
+    final top = hasRoom ? min(_toolbarHeight(), viewport.height * 0.4) : 0.0;
     final usable = viewport.height - top - (hasRoom ? _fitBottom : 0.0);
     final scale = min(
       viewport.width / max(bounds.width, 1),
@@ -650,6 +663,7 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
                     left: 10,
                     right: 330,
                     child: Wrap(
+                      key: _chipsKey,
                       spacing: 4,
                       runSpacing: 4,
                       children: [

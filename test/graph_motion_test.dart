@@ -359,6 +359,32 @@ void main() {
     });
   });
 
+  // 11/14 실제 앱에서 발견 (설계서_프롬프트이후 5.6): 노트 1만 개·주제 40개에서 노드를 끈 캡처에 연결선이 그래프 위로
+  // 솟아 주제 칩 뒤로 들어갔다. 끌기 좌표는 맞았다(끈 노드가 손 밑 0.00px). 맨 위 노드가 칩 뒤에 놓인 것이 원인:
+  // [맞추기]가 위 도구 줄 높이를 칩 두 줄(84px)로 못박아, 주제가 많아 칩이 다섯 줄이 되면 그래프 윗부분이 칩 뒤로 갔다.
+  testWidgets('주제 칩이 여러 줄이어도 [맞추기]는 맨 위 노드를 칩 아래에 둔다 (11/14 실제 앱에서 발견)', (tester) async {
+    final manyNotes = [for (var i = 0; i < 40; i++) doc('t$i', '주제${i.toString().padLeft(2, '0')}')];
+    final manyLayout = {
+      // 세로로 긴 배치: 높이에 맞춰지므로 위 여백이 곧 도구 줄 자리다 (실제 앱 1만 개도 높이에 맞춰졌다)
+      for (var i = 0; i < 40; i++) 't$i': Point((i % 4) * 90.0, (i ~/ 4) * 160.0),
+    };
+    await pump(tester, const GraphView(), withNotes: manyNotes, withLinks: const [], withLayout: manyLayout);
+    final chips = find.ancestor(of: find.text('주제39'), matching: find.byType(Wrap));
+    final chipsBottom = tester.getRect(chips).bottom;
+    expect(chipsBottom - tester.getRect(find.byType(InteractiveViewer)).top, greaterThan(120), reason: '칩이 세 줄 넘게 감겨야 시험이 된다');
+    final viewer = tester.getRect(find.byType(InteractiveViewer));
+    final ys = manyLayout.values.map((q) => q.y);
+    final xs = manyLayout.values.map((q) => q.x);
+    final top = manyLayout.values.reduce((a, b) => a.y <= b.y ? a : b);
+    final local = Offset(top.x - (xs.reduce(min) - 80 - graphDragRoom), top.y - (ys.reduce(min) - 60 - graphDragRoom));
+    final screenTop = viewer.top + MatrixUtils.transformPoint(controller(tester).value, local).dy;
+    expect(screenTop, greaterThan(chipsBottom), reason: '맨 위 노드가 주제 칩 뒤에 가리면 안 된다');
+    // [맞추기] 버튼도 같은 자리
+    await tester.tap(find.text('맞추기'));
+    await tester.pumpAndSettle();
+    expect(viewer.top + MatrixUtils.transformPoint(controller(tester).value, local).dy, greaterThan(chipsBottom));
+  });
+
   // 끝난 기준 (5.6): 노트 1만 개에서 끌기 중 한 프레임 시간. 시간을 재는 시험이라 따로 돌린다:
   // GRAPH_DRAG_FRAME=1 flutter test test/graph_motion_test.dart --plain-name 프레임
   // flutter test(디버그·JIT)의 빌드·배치·그리기 기록 시간이다. 실제 GPU 그리기(래스터)는 앱에서 따로 잰다.
