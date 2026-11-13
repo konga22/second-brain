@@ -43,6 +43,7 @@ export 'src/text/line_diff.dart';
 export 'src/text/nfc.dart';
 export 'src/todos/todo_store.dart';
 export 'src/vault/persona.dart';
+export 'src/vault/project_context.dart';
 export 'src/vault/vault.dart';
 export 'src/vault/vault_access.dart';
 export 'src/vault/vault_summary.dart';

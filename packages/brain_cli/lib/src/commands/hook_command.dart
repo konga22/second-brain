@@ -71,6 +71,8 @@ class HookCommand extends Command<int> {
       lines.add(config.usesLegacy(AppConfig.legacyFolders) ? autoCaptureLine : autoCaptureZoneLine);
     }
     lines.addAll(lessonLines(context.lessons, legacy: config.usesLegacy(AppConfig.legacyLessons)));
+    // 프로젝트 폴더 안이면 그 프로젝트의 지금 상태·다음 할 일 (설계서_프롬프트이후 5.4). 밖이면 0자라 평소와 같다.
+    lines.addAll(projectLines(context.vault, cwd));
     // 압축 직후에만 덧붙인다. 평소 시작(startup·resume·clear)은 지금과 한 글자도 같아야 세션 캐시가 산다 (compact_hook_test).
     final extra = input['source'] == 'compact'
         ? compactLines(input['transcript_path'], legacy: config.usesLegacy(AppConfig.legacyLessons))
@@ -85,6 +87,18 @@ class HookCommand extends Command<int> {
         },
       }),
     );
+  }
+
+  /// 작업 폴더 [cwd]가 속한 프로젝트 문맥 줄 (설계서_프롬프트이후 5.4). `wiki/프로젝트/*/_project.md`만 읽고 AI를 부르지 않는다.
+  /// 프로젝트 밖·두 절이 빔·읽기 실패면 빈 목록 — 훅은 나머지 안내를 그대로 낸다. 안내 스위치와 따로 둔다: 사용자가 직접 만든 페이지다.
+  static List<String> projectLines(Vault vault, String cwd) {
+    if (cwd.isEmpty) return const [];
+    try {
+      return ProjectContext(vault).find(cwd)?.sessionLines() ?? const [];
+    } on Object catch (e) {
+      stderr.writeln('프로젝트 문맥을 읽지 못해 뺐습니다: $e');
+      return const [];
+    }
   }
 
   /// PreCompact 훅 stdout (설계서_프롬프트이후 11/13 추가: 압축 훅). 종료 코드 0이면 Claude Code가 압축 요약 지침으로 쓴다

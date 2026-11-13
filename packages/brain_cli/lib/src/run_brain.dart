@@ -9,6 +9,7 @@ import 'commands/folder_commands.dart';
 import 'commands/hook_command.dart';
 import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
+import 'commands/project_command.dart';
 import 'commands/sessions_command.dart';
 import 'commands/todo_command.dart';
 
@@ -29,6 +30,7 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(AddCommand(context))
         ..addCommand(WriteCommand(context))
         ..addCommand(TopicsCommand(context))
+        ..addCommand(ProjectCommand(context))
         ..addCommand(MoveCommand(context))
         ..addCommand(SessionsCommand(context))
         ..addCommand(HookCommand(context))

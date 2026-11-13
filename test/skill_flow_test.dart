@@ -57,6 +57,14 @@ void main() {
     expect(text.split('\n').firstWhere((l) => l.startsWith('description:')), contains('선호'));
   });
 
+  // (설계서_프롬프트이후 5.4) 프로젝트 문맥은 사용자가 진행을 확인했을 때만 두 절을 고치고, 등록·경로는 사용자가 한다.
+  test('second-brain·brain-save: 프로젝트 문맥은 확인된 진행만 brain project set --state/--next로, 경로는 사용자', () {
+    final find = skill('second-brain');
+    expect(find, allOf(contains('사용자가 진행을 확인했을 때만'), contains('brain project set --state'), contains('--next -')));
+    expect(find, contains('등록·경로(`--path`)는 사용자만'));
+    expect(skill('brain-save'), contains('brain project set --state'));
+  });
+
   test('brain-save: 지난 세션을 정리하며 옛 노트를 고치면 brain write에 --source-session을 붙인다', () {
     final text = skill('brain-save');
     expect(RegExp(r'brain write <id> --expect-hash <해시> --source-session').hasMatch(text), isTrue);
