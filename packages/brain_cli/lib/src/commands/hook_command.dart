@@ -70,7 +70,10 @@ class HookCommand extends Command<int> {
     if (!config.isAutoCaptureOff) {
       lines.add(config.usesLegacy(AppConfig.legacyFolders) ? autoCaptureLine : autoCaptureZoneLine);
     }
-    lines.addAll(lessonLines(context.lessons, legacy: config.usesLegacy(AppConfig.legacyLessons)));
+    final (shown, rest) = context.lessons.sessionLessons(legacy: config.usesLegacy(AppConfig.legacyLessons));
+    lines.addAll(lessonLinesOf(shown, rest));
+    // 이 세션이 전체 문장으로 본 규칙을 적어 둔다: 요청 훅이 같은 문장을 되풀이하지 않게 (설계서_프롬프트이후 6.4)
+    SessionLessonState(context.vault).record(input['session_id'], shown.where(isFullyShown));
     // 프로젝트 폴더 안이면 그 프로젝트의 지금 상태·다음 할 일 (설계서_프롬프트이후 5.4). 밖이면 0자라 평소와 같다.
     lines.addAll(projectLines(context.vault, cwd));
     // 압축 직후에만 덧붙인다. 평소 시작(startup·resume·clear)은 지금과 한 글자도 같아야 세션 캐시가 산다 (compact_hook_test).
@@ -174,14 +177,26 @@ class HookCommand extends Command<int> {
   /// 최근 10개가 하나도 안 갔다, K-41). [legacy]면 이전 방식(번호 순). 행동은 120자에서 자른다. 적용 중 규칙이 없으면 빈 목록 (0자).
   static List<String> lessonLines(LessonStore store, {bool legacy = false}) {
     final (shown, rest) = store.sessionLessons(legacy: legacy);
+    return lessonLinesOf(shown, rest);
+  }
+
+  /// 목록 한 줄에서 자르는 길이. 넘는 규칙은 목록에 일부만 보인다 ([isFullyShown]).
+  static const sessionTriggerMax = 60;
+  static const sessionActionMax = 120;
+
+  static List<String> lessonLinesOf(List<Lesson> shown, int rest) {
     if (shown.isEmpty) return const [];
     return [
       '· 지킬 규칙(사용자가 고쳐 준 실수 — 해당하는 작업이면 계획에 넣고 따른다):',
       for (final lesson in shown)
-        '  - ${lesson.id} ${clip(lesson.trigger, 60)} → ${clip(lesson.action, 120)}',
+        '  - ${lesson.id} ${clip(lesson.trigger, sessionTriggerMax)} → ${clip(lesson.action, sessionActionMax)}',
       if (rest > 0) '  (그 밖 $rest개는 해당 요청 때 붙는다)',
     ];
   }
+
+  /// 세션 시작 목록에 상황·행동이 잘리지 않고 다 보이는 규칙인가. 잘린 규칙은 요청 훅이 계속 전체 문장으로 넣는다.
+  static bool isFullyShown(Lesson lesson) =>
+      clip(lesson.trigger, sessionTriggerMax) == lesson.trigger && clip(lesson.action, sessionActionMax) == lesson.action;
 
   /// PreToolUse (설계서 5.2 v1.3.22): AI가 `brain show n_0042 2>&1 | head -60`처럼 이으면 허용 목록
   /// (`Bash(brain *)`) 밖이라 거부되거나 매번 허락을 묻는다. 안내 문장만으로는 안 지켜져서(한반도감 세션 3번)
@@ -356,10 +371,20 @@ class HookCommand extends Command<int> {
     // 백그라운드 작업 알림 같은 시스템 입력은 사용자 요청이 아니라 건너뛴다 (사용기 #13).
     if (_systemInput.hasMatch(prompt)) return;
     final cwd = input['cwd'] as String? ?? '';
+    // 이 세션이 세션 시작 목록에서 같은 문장을 이미 본 규칙은 번호만 알린다 (설계서_프롬프트이후 6.4). 본 적이 없거나
+    // (세션 기록 없음·목록에서 잘림·그 뒤 고침) 방식이 full이면 지금까지처럼 전체 문장이다.
+    final remind = LessonRemind.current;
+    final seen = remind == LessonRemind.full
+        ? const <String, String>{}
+        : SessionLessonState(context.vault).shown(input['session_id']);
+    final matched = context.lessons.match(prompt);
     final lines = <String>[
-      for (final lesson in context.lessons.match(prompt))
-        '- ${lesson.id} ${lesson.line} (이유: ${clip(lesson.reason, 40)})',
+      for (final lesson in matched)
+        if (!SessionLessonState.isShown(seen, lesson)) '- ${lesson.id} ${lesson.line} (이유: ${clip(lesson.reason, 40)})',
     ];
+    final seenIds = remind == LessonRemind.ids
+        ? [for (final lesson in matched) if (SessionLessonState.isShown(seen, lesson)) lesson.id]
+        : const <String>[];
     final isCorrection = _correction.hasMatch(prompt) && !context.vault.contains(cwd);
     // 만들기·구현 요청이면 관련 지식을 먼저 검토하고 도입을 제안하게 한다 (11/07 사용자 요청).
     final isBuild = _buildIntent.hasMatch(prompt) && !context.vault.contains(cwd);
@@ -382,9 +407,10 @@ class HookCommand extends Command<int> {
         knownLines.add('- ${doc.id} ${clip(doc.title, 80)}${doc.isDraft ? ' [초안]' : ''} — ${clip(doc.summary, 60)}');
       }
     }
-    if (lines.isEmpty && !isCorrection && !isBuild && knownLines.isEmpty) return;
+    if (lines.isEmpty && seenIds.isEmpty && !isCorrection && !isBuild && knownLines.isEmpty) return;
     final text = [
       if (lines.isNotEmpty) ...['사용자의 실수 노트 (이번 요청에 적용):', ...lines],
+      if (seenIds.isNotEmpty) seenLessonsLine(seenIds),
       if (isBuild) ...[
         '만들기 요청이다. 시작 전에 second-brain 스킬대로 세컨드 브레인에서 관련 지식(비슷한 시도·쓸 만한 도구·레포·결정)을 '
             '다른 표현으로도 2~3번 찾고, 쓸 만한 게 있으면 먼저 "세컨드 브레인에 ○○가 있다 → 도입하면 장점 / 안 하면 예상 결과 / 추천"으로 제안한 뒤 진행한다.',
@@ -410,6 +436,9 @@ class HookCommand extends Command<int> {
       }),
     );
   }
+
+  /// 세션 시작 목록에 있는 규칙을 번호로만 다시 알리는 한 줄 (설계서_프롬프트이후 6.4).
+  static String seenLessonsLine(List<String> ids) => '세션 시작 안내의 지킬 규칙 가운데 이번 요청에 해당: ${ids.join(', ')}';
 
   /// 세션 id만 "저장 안 한 세션"으로 적는다. 지식 폴더 안 세션은 뺀다.
   void _sessionEnd(Map<String, dynamic> input) {

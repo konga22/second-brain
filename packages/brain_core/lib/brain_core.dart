@@ -19,6 +19,7 @@ export 'src/links/dismissed_links.dart';
 export 'src/lessons/lesson.dart';
 export 'src/lessons/lesson_safety.dart';
 export 'src/lessons/lesson_store.dart';
+export 'src/lessons/session_lesson_state.dart';
 export 'src/lint/decision_check.dart';
 export 'src/lint/linter.dart';
 export 'src/log/ai_edits.dart';
