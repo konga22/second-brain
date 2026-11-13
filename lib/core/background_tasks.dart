@@ -256,3 +256,45 @@ Future<int> revertAiEditInBackground(String vaultRoot, String indexPath, AiEdit 
     index.close();
   }
 });
+
+/// 주 1회 옛 결정 점검 (설계서_프롬프트이후 4.4 (나)). 최근 7일 노트마다 비슷한 노트를 찾아 노트 1만 개(최근 300개)에서
+/// 약 2초라 백그라운드에서 하고, 진행을 [onProgress](본 수, 전체 수)로 알린다.
+Future<List<DecisionPair>> decisionCheckInBackground(
+  String vaultRoot,
+  String indexPath, {
+  required void Function(int done, int total) onProgress,
+}) async {
+  final port = ReceivePort();
+  final subscription = port.listen((message) {
+    if (message case [final int done, final int total]) onProgress(done, total);
+  });
+  try {
+    return await _decisionCheck(vaultRoot, indexPath, port.sendPort);
+  } finally {
+    await subscription.cancel();
+    port.close();
+  }
+}
+
+/// 따로 둔 까닭: 위 함수의 [onProgress] 클로저까지 isolate로 보내려다 실패하지 않게 (실수 노트 L-0004).
+Future<List<DecisionPair>> _decisionCheck(String vaultRoot, String indexPath, SendPort progress) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return DecisionCheck(vault, index).run(onProgress: (done, total) => progress.send([done, total]));
+  } finally {
+    index.close();
+  }
+});
+
+/// [옛 노트 보관]: 옛 노트를 합쳐짐으로 바꾸고 새 노트를 가리키게 한다 (되돌리기 묶음 하나).
+Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, DecisionPair pair, String batch) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+      try {
+        DecisionCheck(vault, index).archiveOld(NoteStore(vault, index), pair, batch: batch);
+      } finally {
+        index.close();
+      }
+    });

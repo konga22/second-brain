@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:secondbrain/app/theme/app_theme.dart';
 import 'package:secondbrain/features/home/board_view.dart';
+import 'package:secondbrain/features/home/decision_check_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 /// 정리 보드 카드 (설계서_프롬프트이후 4.2·4.3·4.4). 화면 자체는 사람이 봐야 해서, 여기서는 보이는 글과 버튼이 넘기는 값만 본다.
@@ -99,5 +100,37 @@ void main() {
     expect(find.text('- 액세스 15분'), findsOneWidget);
     expect(find.text('+ 액세스 30분'), findsOneWidget);
     expect(find.text('  제목'), findsOneWidget);
+  });
+
+  testWidgets('4.4 (나) 점검 줄: 마지막 점검·진행·오류, 도는 중에는 [지금 점검]이 눌리지 않는다', (tester) async {
+    var runs = 0;
+    await pump(tester, DecisionCheckBar(state: DecisionCheckState(lastRunAt: DateTime(2026, 11, 13)), onRun: () => runs++));
+    expect(find.text('옛 결정 점검: 11/13 (주 1회)'), findsOneWidget);
+    await tester.tap(find.text('지금 점검'));
+    expect(runs, 1);
+
+    await pump(tester, DecisionCheckBar(state: const DecisionCheckState(isRunning: true, done: 120, total: 300), onRun: () => runs++));
+    expect(find.text('옛 결정 점검 중 120/300'), findsOneWidget);
+    await tester.tap(find.text('지금 점검'), warnIfMissed: false);
+    expect(runs, 1, reason: '도는 중에는 다시 돌리지 않는다');
+
+    await pump(tester, DecisionCheckBar(state: const DecisionCheckState(error: 'database is locked'), onRun: () {}));
+    expect(find.text('옛 결정 점검 실패: database is locked'), findsOneWidget);
+  });
+
+  testWidgets('4.4 (나) 옛 결정일 수 있음: [옛 노트 보관]·[둘 다 맞음]·[열어 보기]', (tester) async {
+    final pressed = <String>[];
+    await pump(
+      tester,
+      OldDecisionActions(
+        onArchive: () => pressed.add('archive'),
+        onKeepBoth: () => pressed.add('keep'),
+        onOpen: () => pressed.add('open'),
+      ),
+    );
+    await tester.tap(find.text('옛 노트 보관'));
+    await tester.tap(find.text('둘 다 맞음'));
+    await tester.tap(find.text('열어 보기'));
+    expect(pressed, ['archive', 'keep', 'open']);
   });
 }

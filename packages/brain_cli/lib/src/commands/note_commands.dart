@@ -251,6 +251,11 @@ class AddCommand extends Command<int> {
       ..addOption('tags', help: '쉼표로 구분', defaultsTo: '')
       ..addOption('topic', help: '주제 폴더 (없으면 첫 태그, 그것도 없으면 미분류)')
       ..addFlag('draft', help: '정리 대기로 저장', negatable: false)
+      ..addFlag(
+        'new',
+        help: '비슷한 정리된 노트가 있어도 새 노트로 저장한다 (결정이 바뀐 것이면 옛 노트를 brain write로 고친다, 설계서_프롬프트이후 4.4).',
+        negatable: false,
+      )
       ..addOption('aliases', help: '다른 표기·다른 이름, 쉼표로 구분 (예: 엑스코드,Xcode)', defaultsTo: '')
       ..addOption('source-session', help: '근거가 된 Claude Code 세션 id (앞 8자 이상)')
       ..addOption('sources', help: '근거 원본 경로, 쉼표로 (예: raw/imports/2026-11-07-조사.md)', defaultsTo: '');
@@ -271,6 +276,12 @@ class AddCommand extends Command<int> {
       usageException('본문을 표준 입력으로 주세요 (예: brain add ... <<\'EOF\').');
     }
     final args = argResults!;
+    final env = Platform.environment;
+    final isAiSession = isAiSessionEnv(env);
+    if (!AppConfig.load().usesLegacy(AppConfig.legacyDecisions)) {
+      final stop = _checkSimilar(body, isAiSession: isAiSession);
+      if (stop != null) return stop;
+    }
     final sources = <String>[
       for (final s in (argResults!['sources'] as String).split(','))
         if (s.trim().isNotEmpty) s.trim(),
@@ -304,8 +315,6 @@ class AddCommand extends Command<int> {
     }
     // AI 세션(Claude Code가 넣는 CLAUDECODE·CLAUDE_CODE_SESSION_ID)에서 부른 저장은 --draft가 없어도 초안이다.
     // 확인 단계를 스킬 문장으로만 지켜 AI가 건너뛸 수 있었다(기능검토 W3) — 명령이 막는다 (설계서_프롬프트이후 4.1).
-    final env = Platform.environment;
-    final isAiSession = env['CLAUDECODE'] == '1' || (env['CLAUDE_CODE_SESSION_ID'] ?? '').isNotEmpty;
     final isForcedDraft =
         !(args['draft'] as bool) && isAiSession && !AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     final isDraft = args['draft'] as bool || isForcedDraft;
@@ -326,6 +335,10 @@ class AddCommand extends Command<int> {
       if (sessionId != null) {
         context.registry.mark(sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
       }
+      if (_similarLines.isNotEmpty) {
+        // 멈출 만큼은 아니어도 알린다: 관련이면 본문 끝에 `관련: [[제목]]`으로 이을 수 있다.
+        stdout.writeln('비슷한 정리된 노트 (관련이면 brain write로 잇거나 고친다):\n${_similarLines.join('\n')}');
+      }
       stdout.writeln(
         '$id 저장함${isDraft ? ' (정리 대기)' : ''}  $path'
         '${isForcedDraft ? '\nAI 대화에서 저장한 노트는 사용자가 확인하기 전까지 초안이다 (찾기·자동 주입에 안 나옴).' : ''}'
@@ -336,6 +349,43 @@ class AddCommand extends Command<int> {
       stderr.writeln(e.message);
       return 1;
     }
+  }
+
+  /// 저장 전에 찾은 비슷한 정리된 노트 줄 (저장 뒤 알림용).
+  List<String> _similarLines = const [];
+
+  /// 저장 전 비슷한 정리된 노트 찾기 (설계서_프롬프트이후 4.4 (가)). 결정을 바꿨는데 새 노트만 쌓이면
+  /// AI가 다음 대화에서 옛 결정을 믿는다(B4). K-42 측정: 옛 노트가 AI 눈앞에 오면 고쳤고, 안 오면 둘 다 남았다.
+  ///
+  /// - 최대 3줄(id, 제목, 해시)을 모은다: AI가 바로 `brain show`·`brain write`로 이어 갈 수 있게.
+  /// - AI 대화에서 강하게 맞으면([SearchIndex.similarStrongMin]) 저장하지 않고 3으로 끝낸다. `--new`면 그대로 저장.
+  ///   사람이 터미널에서 부를 때는 멈추지 않는다(4.1 초안 강제와 같은 기준).
+  /// 핵심 단어 5개만큼 FTS 질의라 노트 1만 개에서도 약 5ms다 (similar_bench_test).
+  int? _checkSimilar(String body, {required bool isAiSession}) {
+    final args = argResults!;
+    context.index.syncIfStale();
+    final draft = Note(
+      id: '',
+      title: args['title'] as String,
+      summary: args['summary'] as String,
+      body: body,
+    );
+    final similar = context.index.similarNotes(draft, minShared: SearchIndex.suggestMinShared, limit: 3);
+    _similarLines = [
+      for (final s in similar)
+        '${s.doc.id}  ${clip(s.doc.title, 40)} — ${clip(s.doc.summary, 40)} · 핵심 단어 ${s.shared}/${s.terms} 겹침 · 해시 ${s.doc.hash}',
+    ];
+    final isStrong = similar.isNotEmpty && similar.first.shared >= SearchIndex.similarStrongMin;
+    if (!isStrong || !isAiSession || args['new'] as bool) return null;
+    final top = similar.first.doc;
+    stderr.writeln(
+      '저장하지 않음: 비슷한 정리된 노트가 있습니다 (결정이 바뀐 것이면 새 노트 대신 옛 노트를 고친다).\n'
+      '${_similarLines.join('\n')}\n'
+      '- 같은 결정을 바꾼 것이면: brain show ${top.id} 로 읽고 brain write ${top.id} --expect-hash <해시> '
+      '--title "…" --summary "…" 로 제목·요약까지 고친다 (본문을 바꾸면 전체를 heredoc으로).\n'
+      '- 다른 지식이면: 같은 명령에 --new 를 붙여 다시 저장한다.',
+    );
+    return 3;
   }
 }
 

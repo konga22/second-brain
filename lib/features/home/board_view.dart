@@ -6,6 +6,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/background_tasks.dart';
 import '../../core/brain_providers.dart';
+import 'decision_check_provider.dart';
 
 /// 정리 보드 (설계서 3.3): 원본 → 정리 대기 → 정리됨 → 점검 필요.
 class BoardView extends ConsumerWidget {
@@ -21,6 +22,8 @@ class BoardView extends ConsumerWidget {
     final similar = similarAsync.value ?? const <String, List<SimilarNote>>{};
     final aiEditsAsync = ref.watch(aiEditsProvider);
     final aiEdits = aiEditsAsync.value ?? const <AiEdit>[];
+    final pairs = ref.watch(decisionPairsProvider);
+    final check = ref.watch(decisionCheckProvider);
     final issueByNote = <String, List<LintIssue>>{};
     for (final i in issues) {
       if (i.type == LintType.orphan) continue; // 고아는 너무 흔해서 보드에선 뺀다
@@ -74,7 +77,8 @@ class BoardView extends ConsumerWidget {
             title: '점검 필요',
             hint: aiEditsAsync.hasError
                 ? 'AI가 고친 노트를 읽지 못함 (${aiEditsAsync.error}) · brain lint'
-                : 'AI가 고친 노트 · brain lint (고아 노트 제외)',
+                : 'AI가 고친 노트 · 옛 결정 · brain lint (고아 노트 제외)',
+            header: DecisionCheckBar(state: check, onRun: () => ref.read(decisionCheckProvider.notifier).run()),
             cards: [
               for (final edit in aiEdits)
                 _CardData(
@@ -85,10 +89,18 @@ class BoardView extends ConsumerWidget {
                     edit: edit,
                     onShowDiff: () => _showDiff(context, ref, edit),
                     onRevert: () => _revert(context, ref, edit),
-                    onAcknowledge: () {
-                      AiEditReview(ref.read(vaultProvider), ref.read(searchIndexProvider)).acknowledge(edit);
-                      bumpVault(ref);
-                    },
+                    onAcknowledge: () => _acknowledge(context, ref, edit),
+                  ),
+                ),
+              for (final pair in pairs)
+                _CardData(
+                  pair.newId,
+                  '옛 결정일 수 있음: ${pair.oldTitle}',
+                  '${pair.oldId}(옛)과 ${pair.newId} ${pair.newTitle}(최근)이 같은 주제 ${pair.topic}에서 비슷함 · 핵심 단어 ${pair.shared}/5',
+                  extra: OldDecisionActions(
+                    onArchive: () => _archiveOld(context, ref, pair),
+                    onKeepBoth: () => _keepBoth(context, ref, pair),
+                    onOpen: () => open(pair.oldId),
                   ),
                 ),
               for (final e in issueByNote.entries)
@@ -103,6 +115,41 @@ class BoardView extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// [확인함] (설계서_프롬프트이후 4.3): 작은 파일 하나라 바로 쓴다. `_meta`는 폴더 감시가 보지 않아 직접 새로 고친다.
+  void _acknowledge(BuildContext context, WidgetRef ref, AiEdit edit) {
+    try {
+      AiEditReview(ref.read(vaultProvider), ref.read(searchIndexProvider)).acknowledge(edit);
+    } on Object catch (e) {
+      ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text('확인함을 남기지 못했습니다: $e')));
+    }
+    ref.invalidate(aiEditsProvider);
+  }
+
+  /// [옛 노트 보관] (설계서_프롬프트이후 4.4 (나)): 옛 노트를 합쳐짐으로 바꾸고 새 노트를 가리키게 한다. 지우지 않는다.
+  Future<void> _archiveOld(BuildContext context, WidgetRef ref, DecisionPair pair) async {
+    final vault = ref.read(vaultProvider);
+    final revision = ref.read(vaultRevisionProvider.notifier);
+    final toaster = ShadToaster.maybeOf(context);
+    try {
+      await archiveOldDecisionInBackground(vault.root, vault.indexPath, pair, newBatchId());
+      toaster?.show(ShadToast(description: Text('${pair.oldTitle}을 보관했습니다 (합쳐짐 → ${pair.newId}). 설정 → 되돌리기에서 되돌릴 수 있습니다.')));
+    } on Object catch (e) {
+      toaster?.show(ShadToast.destructive(description: Text('보관하지 못했습니다: ${e is NoteStoreException ? e.message : e}')));
+    } finally {
+      revision.bump();
+    }
+  }
+
+  /// [둘 다 맞음]: 이 짝은 다시 묻지 않는다.
+  void _keepBoth(BuildContext context, WidgetRef ref, DecisionPair pair) {
+    try {
+      DecisionCheck(ref.read(vaultProvider), ref.read(searchIndexProvider)).keepBoth(pair);
+    } on Object catch (e) {
+      ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text('남기지 못했습니다: $e')));
+    }
+    ref.invalidate(decisionPairsProvider);
   }
 
   /// [바뀐 내용 보기] (설계서_프롬프트이후 4.3): AI가 처음 고치기 전과 지금의 줄 차이.
@@ -300,6 +347,82 @@ class DiffLines extends StatelessWidget {
   }
 }
 
+/// "점검 필요" 칸 위 옛 결정 점검 줄 (설계서_프롬프트이후 4.4 (나)): 마지막 점검, 진행, 오류, [지금 점검].
+class DecisionCheckBar extends StatelessWidget {
+  const DecisionCheckBar({super.key, required this.state, required this.onRun});
+
+  final DecisionCheckState state;
+  final VoidCallback onRun;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final colors = AppColors.of(context);
+    final last = state.lastRunAt?.toLocal();
+    final String label;
+    if (state.isRunning) {
+      label = state.total == 0 ? '옛 결정 점검 중…' : '옛 결정 점검 중 ${state.done}/${state.total}';
+    } else if (state.error != null) {
+      label = '옛 결정 점검 실패: ${state.error}';
+    } else {
+      label = last == null ? '옛 결정 점검: 아직 안 함 (주 1회)' : '옛 결정 점검: ${last.month}/${last.day} (주 1회)';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.muted.copyWith(fontSize: 11, color: state.error == null ? null : colors.danger),
+            ),
+          ),
+          ShadButton.outline(
+            size: ShadButtonSize.sm,
+            height: 22,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            onPressed: state.isRunning ? null : onRun,
+            child: const Text('지금 점검', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "옛 결정일 수 있음" 카드의 버튼 (설계서_프롬프트이후 4.4 (나)): [옛 노트 보관], [둘 다 맞음], [열어 보기].
+class OldDecisionActions extends StatelessWidget {
+  const OldDecisionActions({super.key, required this.onArchive, required this.onKeepBoth, required this.onOpen});
+
+  final VoidCallback onArchive;
+  final VoidCallback onKeepBoth;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(String label, VoidCallback onPressed, {bool outline = false}) => (outline ? ShadButton.outline : ShadButton.ghost)(
+      size: ShadButtonSize.sm,
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      onPressed: onPressed,
+      child: Text(label, style: const TextStyle(fontSize: 11)),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        spacing: 2,
+        children: [
+          button('옛 노트 보관', onArchive, outline: true),
+          button('둘 다 맞음', onKeepBoth),
+          button('열어 보기', onOpen),
+        ],
+      ),
+    );
+  }
+}
+
 /// 정리 대기 카드의 "비슷한 정리된 노트" 줄 (설계서_프롬프트이후 4.2): 제목, [옆에 열기], [합치기].
 /// 이미 있는 내용인지 사용자가 직접 찾지 않게 한다. 점수는 추천 연결과 같은 핵심 단어 겹침이다(AI 호출 없음).
 class DraftSimilarList extends StatelessWidget {
@@ -363,10 +486,13 @@ class _CardData {
 }
 
 class _Column extends ConsumerWidget {
-  const _Column({required this.title, required this.hint, required this.cards, required this.onOpen});
+  const _Column({required this.title, required this.hint, required this.cards, required this.onOpen, this.header});
 
   final String title;
   final String hint;
+
+  /// 설명 줄 아래에 붙는 줄 (점검 버튼).
+  final Widget? header;
   final List<_CardData> cards;
   final void Function(String id) onOpen;
 
@@ -398,6 +524,7 @@ class _Column extends ConsumerWidget {
               overflow: TextOverflow.ellipsis,
             ),
             Text(hint, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.muted.copyWith(fontSize: 11)),
+            ?header,
             const SizedBox(height: 8),
             Expanded(
               child: cards.isEmpty

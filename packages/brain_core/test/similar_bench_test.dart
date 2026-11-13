@@ -70,4 +70,15 @@ void main() {
     // 시험(JIT)은 앱·CLI(AOT)보다 느리다. brain add 전체(시작+저장)에 더해지는 몫이라 작아야 한다.
     expect(average, lessThan(30));
   }, timeout: const Timeout(Duration(minutes: 5)));
+
+  test('주간 점검: 노트 1만 개(최근 $recentCount개)에서 10초 안, 진행 표시가 끝까지 간다', () {
+    final progress = <(int, int)>[];
+    final watch = Stopwatch()..start();
+    DecisionCheck(vault, index).run(onProgress: (d, t) => progress.add((d, t)));
+    final ms = watch.elapsedMilliseconds;
+    // ignore: avoid_print
+    print('주간 점검 (1만 개, 최근 $recentCount개): ${ms}ms');
+    expect(progress.last, (recentCount, recentCount));
+    expect(ms, lessThan(10000));
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }

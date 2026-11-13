@@ -5,7 +5,7 @@ import 'package:brain_core/brain_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// 정리 보드 점검의 CLI 쪽 (설계서_프롬프트이후 4.3 AI가 고친 노트).
+/// 정리 보드 점검의 CLI 쪽 (설계서_프롬프트이후 4.3 AI가 고친 노트, 4.4 (가) 저장 때 안내).
 /// 실제 `brain`을 프로세스로 실행한다 (draft_separation_test와 같은 방식).
 void main() {
   late Directory temp;
@@ -104,6 +104,72 @@ void main() {
         expect(store.read(id)!.$2.body, original);
         expect(review.pending(), isEmpty);
       });
+    });
+  });
+
+  group('4.4 (가) 저장 때 안내', () {
+    // 정리된 노트 몇 개 (점수의 드문 정도가 뜻이 있게 서로 다른 주제로)
+    const seeds = [
+      ('결제', '결제 웹훅 재시도 규칙', '웹훅 실패 시 3번까지 간격을 늘려 재시도한다',
+          '결제 웹훅이 실패하면 1분·5분·30분 간격으로 3번까지 다시 보낸다.\n\n- 이유: 결제사 서버 일시 장애가 대부분 30분 안에 풀렸다.'),
+      ('배포', '배포 요일 규칙', '배포는 화·목만, 금요일 배포 금지', '운영 배포는 화요일과 목요일에만 한다. 금요일 배포는 하지 않는다.\n'),
+      ('인증', '로그인 토큰 만료 시간', '액세스 토큰 15분, 리프레시 토큰 14일', '액세스 토큰은 15분, 리프레시 토큰은 14일 뒤 만료된다.\n'),
+      ('디자인', '앱 기본 글꼴', '본문은 Pretendard 14px', '앱 본문 글꼴은 Pretendard 14px, 코드 블록은 JetBrains Mono 13px.\n'),
+      ('백업', '지식 폴더 백업 주기', '매일 밤 11시 zip 백업, 30일 보관', '지식 폴더를 매일 밤 11시에 zip으로 백업하고 30일 동안 보관한다.\n'),
+      ('알림', '할 일 알림 시각', '할 일 알림은 평일 오전 9시', '할 일 알림은 평일 오전 9시에 한 번 보낸다. 주말에는 보내지 않는다.\n'),
+      ('검색', '검색 제목 가중치', '찾기는 제목 일치에 3배 가중치', 'FTS5 bm25 순위에서 제목 열에 3배, 본문 열에 1배 가중치를 준다.\n'),
+      ('빌드', 'macOS 최소 버전', '앱의 최소 macOS 버전은 13.0', 'macOS 배포 대상(deployment target)은 13.0으로 둔다.\n'),
+    ];
+    const changedArgs = ['add', '--title', '결제 웹훅 재시도 5번으로 변경', '--summary', '웹훅 재시도를 3번에서 5번으로 늘렸다', '--topic', '결제'];
+    const changedBody = '결제 웹훅 재시도를 3번에서 5번으로 늘린다. 간격은 1분·5분·30분·2시간·6시간.\n\n- 이유: 결제사 점검이 30분을 넘긴 날 웹훅을 잃었다.\n';
+
+    List<String> seed() => withStore(
+      (store, _, _) => [for (final (topic, t, s, b) in seeds) store.add(title: t, summary: s, body: b, topic: topic).$1],
+    );
+
+    int noteCount() => withStore((_, _, index) => index.notes().length);
+
+    test('AI 대화에서 결정을 바꾼 노트를 저장하면 한 번 멈추고 옛 노트(id·해시)와 할 일을 알린다. --new면 저장한다', () async {
+      final ids = seed();
+      final before = noteCount();
+      final (code, out, err) = await brain(changedArgs, stdin: changedBody, ai: true);
+      expect(code, 3, reason: '강하게 맞으면 저장하지 않고 멈춘다\n$out$err');
+      expect(noteCount(), before, reason: '멈췄으면 저장하지 않는다');
+      expect(err, contains(ids[0]));
+      expect(err, contains('해시 ${hashOf(ids[0])}'));
+      expect(err, contains('brain write ${ids[0]}'));
+      expect(err, contains('--new'));
+
+      final (code2, out2, err2) = await brain([...changedArgs, '--new'], stdin: changedBody, ai: true);
+      expect(code2, 0, reason: err2);
+      expect(out2, contains('저장함'));
+      expect(noteCount(), before + 1);
+    });
+
+    test('관계만 있는 노트는 멈추지 않고 저장한다', () async {
+      seed();
+      final (code, out, err) = await brain(
+        ['add', '--title', '결제 영수증 메일 형식', '--summary', '영수증 메일에 주문 번호·금액·카드 끝 4자리', '--topic', '결제'],
+        stdin: '결제가 끝나면 영수증 메일을 보낸다. 주문 번호, 금액, 결제 수단 끝 4자리를 넣는다.\n',
+        ai: true,
+      );
+      expect(code, 0, reason: '$out$err');
+      expect(out, contains('저장함'));
+    });
+
+    test('사람이 터미널에서 부르거나 이전 방식(BRAIN_LEGACY=decisions)이면 멈추지 않는다', () async {
+      seed();
+      final (human, humanOut, humanErr) = await brain(changedArgs, stdin: changedBody);
+      expect(human, 0, reason: humanErr);
+      expect(humanOut, contains('비슷한 정리된 노트'), reason: '멈추지는 않아도 옛 노트는 알린다');
+      final (legacy, legacyOut, legacyErr) = await brain(
+        [...changedArgs.sublist(0, 2), '결제 웹훅 재시도 5번 (이전 방식)', ...changedArgs.sublist(3)],
+        stdin: changedBody,
+        ai: true,
+        env: {'BRAIN_LEGACY': 'decisions'},
+      );
+      expect(legacy, 0, reason: legacyErr);
+      expect(legacyOut, isNot(contains('비슷한 정리된 노트')));
     });
   });
 }
