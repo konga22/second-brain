@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -103,5 +105,56 @@ void main() {
     expect(find.text('200/1000 옮기는 중…'), findsOneWidget);
     expect(find.text('· n_0009: n_0009 노트가 없습니다.'), findsOneWidget);
     await tester.tap(find.text('고른 3개 옮기기'), warnIfMissed: false); // 잠긴 버튼이라 눌리지 않는다
+  });
+  group('실행 (창과 따로 돈다, 11/13 검토)', () {
+    List<FolderMove> moves(int n) => [for (var i = 0; i < n; i++) FolderMove(id: 'n_$i', topic: '개발 지식/모음')];
+
+    MoveResult ok(List<FolderMove> chunk) => MoveResult(
+      batch: 'b_t',
+      moved: [for (final m in chunk) (id: m.id, from: 'wiki/a/${m.id}.md', to: 'wiki/개발 지식/모음/${m.id}.md')],
+      errors: const [],
+    );
+
+    test('화면이 없어도(창을 닫음) 남은 덩어리를 모두 옮기고 마지막 덩어리에서만 색인을 맞춘다', () async {
+      final calls = <(int, bool)>[];
+      final outcome = await runFolderTidy(
+        moves(450),
+        moveChunk: (chunk, {required syncAfter}) async {
+          calls.add((chunk.length, syncAfter));
+          return ok(chunk);
+        },
+      );
+      expect(calls, [(200, false), (200, false), (50, true)]);
+      expect((outcome.moved, outcome.done, outcome.isStopped, outcome.failure), (450, 450, false, null));
+    });
+
+    test('멈추면 그 덩어리까지 옮기고 색인·자동 목차를 한 번 맞춘다', () async {
+      final calls = <(int, bool)>[];
+      final outcome = await runFolderTidy(
+        moves(450),
+        isStopping: () => true,
+        moveChunk: (chunk, {required syncAfter}) async {
+          calls.add((chunk.length, syncAfter));
+          return ok(chunk);
+        },
+      );
+      expect(calls, [(200, false), (0, true)]);
+      expect((outcome.moved, outcome.done, outcome.isStopped), (200, 200, true));
+    });
+
+    test('덩어리가 실패해도 맞추기는 하고, 실패와 옮긴 수를 돌려준다', () async {
+      final calls = <(int, bool)>[];
+      final outcome = await runFolderTidy(
+        moves(450),
+        moveChunk: (chunk, {required syncAfter}) async {
+          calls.add((chunk.length, syncAfter));
+          if (calls.length == 2) throw const FileSystemException('디스크가 빠짐');
+          return ok(chunk);
+        },
+      );
+      expect(calls, [(200, false), (200, false), (0, true)]);
+      expect(outcome.moved, 200);
+      expect(outcome.failure, isA<FileSystemException>());
+    });
   });
 }

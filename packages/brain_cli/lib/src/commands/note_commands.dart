@@ -281,6 +281,12 @@ class AddCommand extends Command<int> {
       )
       ..addFlag('draft', help: '정리 대기로 저장', negatable: false)
       ..addFlag(
+        'new-topic',
+        help: '그 구역에 맞는 주제가 없어 새 주제를 만든다. AI 대화에서 없는 주제로 저장하면 한 번 멈추고 그 구역의 주제 전체를 보인다 '
+            '(설계서_프롬프트이후 5.1).',
+        negatable: false,
+      )
+      ..addFlag(
         'new',
         help: '비슷한 정리된 노트가 있어도 새 노트로 저장한다 (결정이 바뀐 것이면 옛 노트를 brain write로 고친다, 설계서_프롬프트이후 4.4).',
         negatable: false,
@@ -328,7 +334,11 @@ class AddCommand extends Command<int> {
     if (context.notes.isZoned && (topicArg != null || isAiSession)) {
       try {
         final topicPath = resolveTopicPath(topicArg ?? '', context.index.zoneTopics);
-        if (!Directory(p.join(context.vault.wikiDir, topicPath)).existsSync()) newTopic = topicPath;
+        if (!Directory(p.join(context.vault.wikiDir, topicPath)).existsSync()) {
+          final stop = _checkNewTopic(topicPath, isAiSession: isAiSession);
+          if (stop != null) return stop;
+          newTopic = topicPath;
+        }
       } on UnknownZoneException catch (e) {
         stderr.writeln(e.message);
         return 1;
@@ -417,6 +427,27 @@ class AddCommand extends Command<int> {
       stderr.writeln(e.message);
       return 1;
     }
+  }
+
+  /// 없는 주제로 저장하기 전 한 번 멈춤 (설계서_프롬프트이후 5.1-4, 11/13 검토): AI는 새 주제를 만들기 전에 그 구역의
+  /// 기존 주제 **전체**를 본다. 예전에는 바로 만들고 뒤에 다른 주제를 알려, 맞는 주제가 있어도 주제가 늘었다.
+  ///
+  /// - AI 대화에서만 멈추고 3으로 끝낸다(4.4 멈춤과 같은 모양). `--new-topic`이면 만든다. 사람이 부르면 멈추지 않는다
+  /// - 구역에 주제가 하나도 없으면 볼 것이 없어 멈추지 않는다 (턴 하나를 아낀다)
+  /// - 띄어쓰기·대소문자·문장부호만 다른 이름은 [resolveTopicPath]가 이미 기존 주제로 맞췄다 ([topicKey])
+  int? _checkNewTopic(String topicPath, {required bool isAiSession}) {
+    if (!isAiSession || argResults!['new-topic'] as bool) return null;
+    final zone = topicPath.split('/').first;
+    final topics = context.index.zoneTopics(zone);
+    if (topics.isEmpty) return null;
+    stderr.writeln(
+      '저장하지 않음: $topicPath 주제가 아직 없습니다. 새 주제를 만들기 전에 이 구역의 주제 전체를 봅니다.\n'
+      '$zone 구역의 주제 ${topics.length}개: ${topics.join(', ')}\n'
+      '- 맞는 주제가 있으면: --topic "$zone/<그 주제>"로 바꿔 다시 저장한다.\n'
+      '- 맞는 주제가 없으면: 같은 명령에 --new-topic 을 붙여 다시 저장한다.\n'
+      '$zonePlacementRule',
+    );
+    return 3;
   }
 
   /// 저장 전에 찾은 비슷한 정리된 노트 줄 (저장 뒤 알림용).

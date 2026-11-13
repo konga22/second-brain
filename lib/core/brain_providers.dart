@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import 'app_config_provider.dart';
 import 'background_tasks.dart';
 import 'claude_code.dart';
 
@@ -22,8 +23,15 @@ final searchIndexProvider = Provider<SearchIndex>((ref) {
   return index;
 });
 
+/// 설정 [이전 방식]의 5.1 폴더 구조 스위치를 지켜본다 (설계서_프롬프트이후 5.1, 11/13 검토): 예전에는 처음 만들 때 한 번만
+/// 설정 파일을 읽어, 스위치를 바꿔도 앱을 다시 켜기 전까지 새 노트·주제 만들기가 옛 방식이었다.
+/// 백그라운드 저장([saveNoteInBackground] 등)은 저장할 때마다 설정 파일을 새로 읽어 따로 맞출 것이 없다.
 final noteStoreProvider = Provider<NoteStore>(
-  (ref) => NoteStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
+  (ref) => NoteStore(
+    ref.watch(vaultProvider),
+    ref.watch(searchIndexProvider),
+    zoned: !ref.watch(appConfigProvider.select((c) => c.usesLegacy(AppConfig.legacyFolders))),
+  ),
 );
 
 final lessonStoreProvider = Provider<LessonStore>(

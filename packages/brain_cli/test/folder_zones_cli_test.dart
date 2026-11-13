@@ -57,8 +57,14 @@ void main() {
 
   const ai = {'CLAUDECODE': '1'};
 
-  Future<(int, String, String)> add(String title, String? topic, {Map<String, String> env = ai, String tags = ''}) => brain(
-    ['add', '--title', title, '--summary', '요약', if (tags.isNotEmpty) ...['--tags', tags], if (topic != null) ...['--topic', topic]],
+  Future<(int, String, String)> add(
+    String title,
+    String? topic, {
+    Map<String, String> env = ai,
+    String tags = '',
+    List<String> extra = const [],
+  }) => brain(
+    ['add', '--title', title, '--summary', '요약', if (tags.isNotEmpty) ...['--tags', tags], if (topic != null) ...['--topic', topic], ...extra],
     stdin: '$title 본문이다.\n',
     env: env,
   );
@@ -86,12 +92,39 @@ void main() {
 
   test('구역/주제로 저장: 짧은 이름 파일, 새 주제를 만들면 같은 구역의 기존 주제를 알린다', () async {
     expect((await add('플러터 첫 노트', '개발 지식/Flutter')).$1, 0);
-    final (code, out, _) = await add('SQLite 여러 프로세스 동시 열기- busy_timeout을 WAL 설정보다 먼저', '개발 지식/SQLite');
+    final (code, out, _) = await add(
+      'SQLite 여러 프로세스 동시 열기- busy_timeout을 WAL 설정보다 먼저',
+      '개발 지식/SQLite',
+      extra: ['--new-topic'],
+    );
     expect(code, 0);
     expect(out, contains('wiki/개발 지식/SQLite/SQLite 여러 프로세스 동시 열기.md'));
     expect(out, allOf(contains('새 주제'), contains('Flutter')));
     final (_, again, _) = await add('플러터 두 번째', '개발 지식/Flutter');
     expect(again, isNot(contains('새 주제')));
+  });
+
+  test('AI 저장: 구역에 주제가 있는데 없는 주제로 저장하면 한 번 멈추고 그 구역의 주제 전체를 보인다 (--new-topic으로 만든다)', () async {
+    // 빈 구역의 첫 주제는 볼 주제가 없어 멈추지 않는다
+    expect((await add('클로드 첫 노트', '개발 지식/Claude Code')).$1, 0);
+    for (var i = 0; i < 14; i++) {
+      Directory(p.join(vaultRoot, 'wiki', '개발 지식', '주제$i')).createSync(recursive: true);
+    }
+    final (code, out, err) = await add('새 주제 노트', '개발 지식/Riverpod');
+    expect(code, 3, reason: err);
+    expect(out, isNot(contains('저장함')));
+    // 거절 안내에 12개에서 자르지 않고 그 구역의 주제 전체가 나온다
+    expect(err, allOf(contains('Riverpod'), contains('Claude Code'), contains('주제0'), contains('주제13'), contains('--new-topic')));
+    expect(Directory(p.join(vaultRoot, 'wiki', '개발 지식', 'Riverpod')).existsSync(), isFalse);
+    final (again, out2, err2) = await add('새 주제 노트', '개발 지식/Riverpod', extra: ['--new-topic']);
+    expect(again, 0, reason: err2);
+    expect(out2, contains('wiki/개발 지식/Riverpod/'));
+    // 띄어쓰기·대소문자만 다른 이름은 기존 주제다: 멈추지 않고 그 주제에 저장한다
+    final (same, out3, err3) = await add('클로드 둘째 노트', '개발 지식/claudecode');
+    expect(same, 0, reason: err3);
+    expect(out3, contains('wiki/개발 지식/Claude Code/'));
+    // 사람이 터미널에서 부르면 멈추지 않는다
+    expect((await add('사람 노트', '개발 지식/Dart', env: const {})).$1, 0);
   });
 
   test('brain topics: 구역마다 주제와 노트 수, 구역을 주면 그 구역의 주제 전체', () async {

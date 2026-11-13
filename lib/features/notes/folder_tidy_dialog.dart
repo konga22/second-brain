@@ -13,6 +13,58 @@ import '../../core/brain_providers.dart';
 Future<void> showFolderTidy(BuildContext context) =>
     showShadDialog<void>(context: context, builder: (_) => const FolderTidyDialog());
 
+/// [폴더 정리] 한 번 실행한 결과. [failure]가 있으면 중간에 멈췄다 (옮긴 [moved]개는 그 묶음으로 되돌린다).
+typedef FolderTidyOutcome = ({int moved, List<MoveError> errors, int done, bool isStopped, Object? failure});
+
+/// 덩어리 하나를 옮긴다 ([moveNotesInBackground]). 빈 목록 + [syncAfter]는 색인·자동 목차 맞추기만.
+typedef FolderMoveChunk = Future<MoveResult> Function(List<FolderMove> chunk, {required bool syncAfter});
+
+bool _never() => false;
+
+/// [moves]를 [chunk]개씩 옮긴다. 화면과 따로 돈다 (설계서_프롬프트이후 5.1, 11/13 검토).
+///
+/// 예전에는 이 반복이 창 안에 있어, 옮기는 중에 창을 닫으면(Esc·바깥 누름) 다음 덩어리 앞의 `mounted` 확인에서 그냥 끝났다 →
+/// 남은 노트는 안 옮겨지고, 마지막 색인·자동 목차 맞추기와 결과 안내도 빠졌다. 이제는
+/// - 창이 닫혀도 끝까지 옮기고 ([onChunk]는 화면이 있을 때만 쓰면 된다)
+/// - 멈추거나(isStopping) 중간에 실패해도 그때까지 옮긴 것으로 색인·자동 목차를 한 번 맞춘다
+/// - 결과를 돌려줘 부르는 쪽이 창이 없으면 알림으로 보인다
+Future<FolderTidyOutcome> runFolderTidy(
+  List<FolderMove> moves, {
+  required FolderMoveChunk moveChunk,
+  bool Function() isStopping = _never,
+  void Function(int done, List<MoveError> errors)? onChunk,
+  int chunk = 200,
+}) async {
+  var moved = 0;
+  var done = 0;
+  var isSynced = false;
+  Object? failure;
+  final errors = <MoveError>[];
+  try {
+    for (var start = 0; start < moves.length; start += chunk) {
+      final end = (start + chunk).clamp(0, moves.length);
+      final isLast = end == moves.length;
+      final result = await moveChunk(moves.sublist(start, end), syncAfter: isLast);
+      moved += result.moved.length;
+      done = end;
+      errors.addAll(result.errors);
+      isSynced = isLast;
+      onChunk?.call(done, result.errors);
+      if (isLast || isStopping()) break;
+    }
+  } on Object catch (e) {
+    failure = e;
+  }
+  if (!isSynced) {
+    try {
+      await moveChunk(const [], syncAfter: true);
+    } on Object catch (e) {
+      failure ??= e;
+    }
+  }
+  return (moved: moved, errors: errors, done: done, isStopped: failure == null && done < moves.length, failure: failure);
+}
+
 class FolderTidyDialog extends ConsumerStatefulWidget {
   const FolderTidyDialog({super.key});
 
@@ -68,6 +120,8 @@ class _FolderTidyDialogState extends ConsumerState<FolderTidyDialog> {
     if (isOk != true || !mounted) return;
     final vault = ref.read(vaultProvider);
     final revision = ref.read(vaultRevisionProvider.notifier);
+    // 창이 닫혀도 결과를 알리도록 앱의 알림 자리를 먼저 잡아 둔다
+    final toaster = ShadToaster.maybeOf(context);
     final batch = newBatchId();
     setState(() {
       _isRunning = true;
@@ -77,40 +131,40 @@ class _FolderTidyDialogState extends ConsumerState<FolderTidyDialog> {
       _errors.clear();
       _result = null;
     });
-    var moved = 0;
-    try {
-      for (var start = 0; start < moves.length; start += _chunk) {
-        final end = (start + _chunk).clamp(0, moves.length);
-        final isLast = end == moves.length;
-        final result = await moveNotesInBackground(
-          vault.root,
-          vault.indexPath,
-          moves.sublist(start, end),
-          batch: batch,
-          syncAfter: isLast,
-        );
-        moved += result.moved.length;
-        if (!mounted) return;
-        setState(() {
-          _done = end;
-          _errors.addAll(result.errors);
-        });
-        if (isLast) break;
-        if (_isStopping) {
-          // 멈추면 여기까지 옮긴 것으로 색인·자동 목차만 맞춘다 (빈 목록 = 맞추기만)
-          await moveNotesInBackground(vault.root, vault.indexPath, const [], batch: batch, syncAfter: true);
-          break;
+    final outcome = await runFolderTidy(
+      moves,
+      chunk: _chunk,
+      moveChunk: (chunk, {required syncAfter}) =>
+          moveNotesInBackground(vault.root, vault.indexPath, chunk, batch: batch, syncAfter: syncAfter),
+      isStopping: () => _isStopping,
+      onChunk: (done, errors) {
+        if (mounted) {
+          setState(() {
+            _done = done;
+            _errors.addAll(errors);
+          });
         }
-      }
-      final stopped = _done < _total ? ' (멈춤: ${_total - _done}개는 그대로)' : '';
-      setState(() => _result = '옮김 $moved개, 못 옮김 ${_errors.length}개$stopped · 되돌리기 묶음 $batch');
-    } on Object catch (e) {
-      if (mounted) setState(() => _result = '옮기다 멈췄습니다: $e — 옮긴 $moved개는 묶음 $batch로 되돌릴 수 있습니다.');
-    } finally {
-      revision.bump();
-      if (mounted) setState(() => _isRunning = false);
+      },
+    );
+    revision.bump();
+    final stopped = outcome.isStopped ? ' (멈춤: ${moves.length - outcome.done}개는 그대로)' : '';
+    final message = outcome.failure != null
+        ? '옮기다 멈췄습니다: ${outcome.failure} — 옮긴 ${outcome.moved}개는 묶음 $batch로 되돌릴 수 있습니다.'
+        : '옮김 ${outcome.moved}개, 못 옮김 ${outcome.errors.length}개$stopped · 되돌리기 묶음 $batch';
+    if (!mounted) {
+      final description = Text(message);
+      toaster?.show(
+        outcome.failure != null || outcome.errors.isNotEmpty
+            ? ShadToast.destructive(title: const Text('폴더 정리'), description: description)
+            : ShadToast(title: const Text('폴더 정리'), description: description),
+      );
+      return;
     }
-    if (mounted && _done == _total) await _load(); // 남은 노트로 목록을 새로
+    setState(() {
+      _result = message;
+      _isRunning = false;
+    });
+    if (outcome.done == moves.length) await _load(); // 남은 노트로 목록을 새로
   }
 
   @override

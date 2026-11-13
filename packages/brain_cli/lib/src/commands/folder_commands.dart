@@ -48,7 +48,7 @@ class TopicsCommand extends Command<int> {
       if (topics.isEmpty) stdout.writeln('(없음 — 새 주제를 만들어 저장한다)');
       return 0;
     }
-    stdout.writeln('구역 ${noteZones.length}개 (구역은 사용자만 만든다). 저장: brain add --topic "구역/주제". 맞는 주제가 없을 때만 새 주제.');
+    stdout.writeln('구역 ${noteZones.length}개 (구역은 사용자만 만든다). 저장: brain add --topic "구역/주제". 맞는 주제가 없을 때만 새 주제(--new-topic).');
     for (final zone in noteZones) {
       final topics = context.index.zoneTopics(zone);
       stdout.writeln('$zone: ${topics.isEmpty ? '(없음)' : [for (final t in topics) line(t, counts['$zone/$t'] ?? 0)].join(', ')}');

@@ -392,6 +392,7 @@ class _StepReader {
       return total == null ? '대화 읽는 중' : '대화 읽는 중 ($from / $total자)';
     }
     if (command.startsWith('brain find')) return '같은 노트가 있는지 찾는 중';
+    if (command.startsWith('brain topics')) return '주제 목록 보는 중';
     if (command.startsWith('brain add')) {
       final title = _title.firstMatch(command)?.group(1);
       return title == null ? '노트 저장 중' : '노트 저장: $title';

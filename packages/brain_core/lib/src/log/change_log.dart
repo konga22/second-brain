@@ -223,7 +223,9 @@ void recordBeforeChange(Vault vault, String path, {String? batch}) {
     backup = 'files/${cached.lines}${p.extension(path)}';
     file.copySync(p.join(dir, backup));
   }
-  final line = '${jsonEncode({'path': rel, 'existed': backup != null, 'backup': backup})}\n';
+  // 'at': 이 묶음이 이 파일을 처음 바꾼 때(마이크로초). 옮긴 묶음을 되돌릴 때 "그 뒤에" 같은 자리를 고친 묶음을 가린다
+  // (설계서_프롬프트이후 5.1, 11/13 검토). 예전 줄에는 없다.
+  final line = '${jsonEncode({'path': rel, 'existed': backup != null, 'backup': backup, 'at': DateTime.now().microsecondsSinceEpoch})}\n';
   manifest.writeAsStringSync(line, mode: FileMode.append, flush: true);
   _manifestCache[manifest.path] = (
     size: (size < 0 ? 0 : size) + utf8.encode(line).length,
@@ -235,30 +237,133 @@ void recordBeforeChange(Vault vault, String path, {String? batch}) {
 /// 묶음 폴더 안 "경로 바뀜" 표시 파일: 이 묶음이 가리키는 파일을 옮긴 묶음 id들 (줄마다 하나).
 const _pathsMovedFile = 'paths-moved';
 
-/// [fromPaths](지식 폴더 기준)를 옮긴 묶음 [mover]보다 앞선 되돌리기 묶음 중 그 경로를 가리키는 것에 "경로 바뀜"을 단다
-/// (설계서_프롬프트이후 8.3). 그 묶음을 되돌리면 옛 자리에 같은 번호의 노트가 하나 더 생기거나, 새로 만든 노트를 못 치운다.
+/// 묶음 폴더 안 옮긴 기록: 줄마다 `{"from": 옛 경로, "to": 새 경로}` (지식 폴더 기준). 옮긴 묶음을 되돌리기 전에
+/// 그 뒤 새 자리를 고친 묶음이 있는지 본다 ([undoBatch], 설계서_프롬프트이후 5.1, 11/13 검토).
+const _movesFile = 'moves.jsonl';
+
+/// 묶음 [batch]가 [from]을 [to]로 옮긴다고 적는다. 파일을 옮기기 **전에** 부른다 (끊겨도 기록이 남게).
+void recordMove(Vault vault, String batch, String from, String to) {
+  final dir = Directory(_undoDir(vault, batch))..createSync(recursive: true);
+  File(p.join(dir.path, _movesFile)).writeAsStringSync(
+    '${jsonEncode({'from': p.relative(from, from: vault.root), 'to': p.relative(to, from: vault.root)})}\n',
+    mode: FileMode.append,
+    flush: true,
+  );
+}
+
+/// 옮기는 묶음 [mover]보다 앞선 되돌리기 묶음 중 옮길 파일을 가리키는 것에 "경로 바뀜"을 단다 (설계서_프롬프트이후 8.3).
+/// 그 묶음을 되돌리면 옛 자리에 같은 번호의 노트가 하나 더 생기거나, 새로 만든 노트를 못 치운다.
 /// 옮긴 묶음을 되돌리면 표시가 저절로 풀린다 ([UndoBatch.isPathMoved]).
-void markMovedPaths(Vault vault, Set<String> fromPaths, String mover) {
-  final root = Directory(p.join(vault.metaDir, 'undo'));
-  if (!root.existsSync() || fromPaths.isEmpty) return;
-  for (final dir in root.listSync().whereType<Directory>()) {
-    final name = p.basename(dir.path);
-    if (name == mover || File(p.join(dir.path, 'undone')).existsSync()) continue;
-    final manifest = File(p.join(dir.path, 'manifest.jsonl'));
-    if (!manifest.existsSync()) continue;
-    final touches = manifest.readAsLinesSync().any((line) {
-      if (line.trim().isEmpty) return false;
-      try {
-        return fromPaths.contains((jsonDecode(line) as Map<String, dynamic>)['path']);
-      } on FormatException {
-        return false;
+///
+/// 파일마다 **옮기기 전에** 단다 (11/13 검토): 예전에는 다 옮긴 뒤 한 번에 달아, `brain move --apply-plan`을 Ctrl-C로
+/// 끊거나 앱이 덩어리 중간에 꺼지면 이미 옮긴 노트의 옛 묶음이 표시 없이 남았다 → 되돌리면 옛 자리에 노트가 다시 생겼다.
+/// 먼저 달아도 안전하다: 옮긴 묶음의 목록(`manifest.jsonl`)이 생기기 전까지 표시는 힘이 없다 ([_isPathMoved]).
+/// 되돌리기 목록은 처음에 한 번만 읽는다 (파일마다 읽으면 1만 개에서 느림).
+class MovedPathMarker {
+  MovedPathMarker(this.vault, this.mover) {
+    final root = Directory(p.join(vault.metaDir, 'undo'));
+    if (!root.existsSync()) return;
+    for (final dir in root.listSync().whereType<Directory>()) {
+      final name = p.basename(dir.path);
+      if (name == mover || File(p.join(dir.path, 'undone')).existsSync()) continue;
+      final manifest = File(p.join(dir.path, 'manifest.jsonl'));
+      if (!manifest.existsSync()) continue;
+      for (final line in manifest.readAsLinesSync()) {
+        if (line.trim().isEmpty) continue;
+        try {
+          final path = (jsonDecode(line) as Map<String, dynamic>)['path'];
+          if (path is String) _dirsByPath.putIfAbsent(path, () => {}).add(dir.path);
+        } on FormatException {
+          continue;
+        }
       }
-    });
-    if (!touches) continue;
-    final mark = File(p.join(dir.path, _pathsMovedFile));
-    final movers = mark.existsSync() ? mark.readAsLinesSync() : const <String>[];
-    if (!movers.contains(mover)) mark.writeAsStringSync('$mover\n', mode: FileMode.append, flush: true);
+    }
   }
+
+  final Vault vault;
+  final String mover;
+
+  /// 지식 폴더 기준 경로 → 그 경로를 바꾼 묶음 폴더들.
+  final _dirsByPath = <String, Set<String>>{};
+
+  /// 이번에 이미 표시한 묶음 폴더.
+  final _marked = <String>{};
+
+  /// [fromPath](지식 폴더 기준)를 옮기기 직전에 부른다.
+  void mark(String fromPath) {
+    for (final dir in _dirsByPath[fromPath] ?? const <String>{}) {
+      if (!_marked.add(dir)) continue;
+      final file = File(p.join(dir, _pathsMovedFile));
+      final movers = file.existsSync() ? file.readAsLinesSync() : const <String>[];
+      if (!movers.contains(mover)) file.writeAsStringSync('$mover\n', mode: FileMode.append, flush: true);
+    }
+  }
+}
+
+/// [fromPaths]를 옮긴 묶음 [mover]보다 앞선 묶음에 "경로 바뀜"을 한꺼번에 단다 ([MovedPathMarker]).
+void markMovedPaths(Vault vault, Set<String> fromPaths, String mover) {
+  final marker = MovedPathMarker(vault, mover);
+  fromPaths.forEach(marker.mark);
+}
+
+/// 옮긴 묶음 [dir]을 되돌리면 노트가 둘이 되는가: 그 뒤 다른 묶음이 옮긴 자리(옛·새 경로)를 바꿨으면 그 묶음 id들.
+///
+/// 예 (11/13 검토): 묶음 T가 A → B로 옮기고, 그 뒤 묶음 L이 B를 고쳤다. T를 되돌리면 B(L의 고침 포함)는 휴지통으로,
+/// A는 고치기 전 내용으로 돌아온다. 이어서 L을 되돌리면 B가 다시 생겨 같은 번호의 노트가 A와 B에 둘이다.
+/// 그래서 T는 L을 먼저 되돌린 뒤에만 되돌린다 — 아무 파일도 덮거나 잃지 않는 순서다.
+///
+/// "그 뒤"는 묶음 목록 줄의 시각(`at`)으로 본다. 시각이 없는 예전 줄은 바꾸기 전 사본이 T가 남긴 "바꾼 뒤"와 같으면 그 뒤로 본다.
+List<String> _laterBatchesOnMovedPaths(Vault vault, String batch, String dir) {
+  final movesFile = File(p.join(dir, _movesFile));
+  if (!movesFile.existsSync()) return const [];
+  final moved = <String>{};
+  for (final line in movesFile.readAsLinesSync()) {
+    if (line.trim().isEmpty) continue;
+    try {
+      final json = jsonDecode(line) as Map<String, dynamic>;
+      moved.addAll([json['from'] as String, json['to'] as String]);
+    } on FormatException {
+      continue;
+    }
+  }
+  if (moved.isEmpty) return const [];
+  final mine = <String, int?>{}; // 경로 → 이 묶음이 처음 바꾼 시각
+  for (final line in File(p.join(dir, 'manifest.jsonl')).readAsLinesSync()) {
+    if (line.trim().isEmpty) continue;
+    final entry = jsonDecode(line) as Map<String, dynamic>;
+    final path = entry['path'] as String;
+    if (moved.contains(path)) mine[path] = entry['at'] as int?;
+  }
+  final after = _afterHashes(dir);
+  final out = <String>[];
+  for (final other in Directory(p.join(vault.metaDir, 'undo')).listSync().whereType<Directory>()) {
+    final name = p.basename(other.path);
+    if (name == batch || File(p.join(other.path, 'undone')).existsSync()) continue;
+    final manifest = File(p.join(other.path, 'manifest.jsonl'));
+    if (!manifest.existsSync()) continue;
+    for (final line in manifest.readAsLinesSync()) {
+      if (line.trim().isEmpty) continue;
+      final Map<String, dynamic> entry;
+      try {
+        entry = jsonDecode(line) as Map<String, dynamic>;
+      } on FormatException {
+        continue;
+      }
+      final path = entry['path'];
+      if (path is! String || !moved.contains(path)) continue;
+      final at = entry['at'] as int?;
+      final myAt = mine[path];
+      final backup = entry['backup'] as String?;
+      final isLater = at != null && myAt != null
+          ? at > myAt
+          : backup != null && after[path] != null && fileHash(p.join(other.path, backup)) == after[path];
+      if (isLater) {
+        out.add(name);
+        break;
+      }
+    }
+  }
+  return out..sort();
 }
 
 /// 묶음 폴더 [dir]의 "경로 바뀜" 표시 중 아직 살아 있는 것 (옮긴 묶음을 되돌렸으면 풀림).
@@ -363,6 +468,14 @@ int undoBatch(Vault vault, String batch) {
     throw ArgumentError(
       '$batch 묶음은 경로 바뀜: 그 뒤 폴더 정리로 노트를 옮겨 되돌리면 옛 자리에 같은 노트가 하나 더 생깁니다. '
       '되돌리려면 옮긴 묶음(${File(p.join(dir, _pathsMovedFile)).readAsLinesSync().where((l) => l.trim().isNotEmpty).join(', ')})을 먼저 되돌리세요.',
+    );
+  }
+  final later = _laterBatchesOnMovedPaths(vault, batch, dir);
+  if (later.isNotEmpty) {
+    throw ArgumentError(
+      '$batch 묶음은 노트를 옮긴 묶음인데, 그 뒤 다른 묶음(${later.join(', ')})이 옮긴 노트의 새 자리나 옛 자리를 바꿨습니다. '
+      '지금 되돌리면 그 고침이 휴지통으로 가고, 그 묶음을 나중에 되돌리면 같은 노트가 둘이 됩니다. '
+      '${later.join(', ')}을 먼저 되돌리세요 (설계서_프롬프트이후 5.1).',
     );
   }
   final entries = [

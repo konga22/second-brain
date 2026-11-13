@@ -17,6 +17,20 @@ void main() {
     });
   }
 
+  // 새 주제는 그 구역의 주제 전체를 본 뒤에만 만든다 (설계서_프롬프트이후 5.1-4, 11/13 검토): `brain add`가 AI 대화에서
+  // 없는 주제면 멈추고(3) `--new-topic`을 받는다. AI에게 저장을 시키는 모든 곳이 이 흐름을 알아야 한다.
+  for (final name in ['brain-save', 'brain-ingest']) {
+    test('$name: 저장 전 brain topics로 주제 전체를 보고, 없는 주제로 멈추면(3) 맞는 주제로 바꾸거나 --new-topic', () {
+      final text = skill(name);
+      expect(text, allOf(contains('brain topics'), contains('--new-topic')));
+    });
+  }
+
+  test('지식 폴더 AGENTS.md 안내도 --new-topic을 알린다', () {
+    final text = File('packages/brain_core/lib/src/vault/vault.dart').readAsStringSync();
+    expect(text, contains('--new-topic'));
+  });
+
   test('brain-save: 지난 세션을 정리하며 옛 노트를 고치면 brain write에 --source-session을 붙인다', () {
     final text = skill('brain-save');
     expect(RegExp(r'brain write <id> --expect-hash <해시> --source-session').hasMatch(text), isTrue);

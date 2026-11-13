@@ -233,7 +233,7 @@ class NoteStore {
       } else {
         final dir = p.join(
           vault.wikiDir,
-          topicDirName(topic ?? (note.tags.isEmpty ? null : note.tags.first)),
+          topicDirName(legacyTopicName(topic) ?? (note.tags.isEmpty ? null : note.tags.first)),
         );
         path = uniqueNotePath(dir, note.title);
       }
@@ -271,12 +271,15 @@ class NoteStore {
   }
 
   /// 본문을 바꾼다. 파일 해시가 기대와 다르면 거절하고 충돌 사본을 남긴다.
+  ///
+  /// 지식 폴더 잠금 안에서 읽고·견주고·쓴다 (설계서_프롬프트이후 5.1, 11/13 검토): [폴더 정리]가 옮기는 사이에 옛 경로로
+  /// 쓰면 옛 자리에 같은 노트가 다시 생겼다. 잠금 안에서 다시 읽으므로 옮긴 뒤면 새 자리를 고친다.
   String write(
     String id,
     String newBody, {
     required String expectHash,
     String? batch,
-  }) {
+  }) => withVaultLock(vault, () {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
     // 충돌 사본(_meta/conflicts)에도 금지어가 남지 않게 해시보다 먼저 본다. 새로 쓰는 본문만 본다:
@@ -304,12 +307,12 @@ class NoteStore {
     appendChangeLog(vault, 'write', '$id ${doc.path}', batch: batch);
     _afterChange();
     return contentHash(content);
-  }
+  });
 
   /// 앱 편집 화면: 제목·요약·태그·별칭·본문을 한 번에 고친다. 해시가 다르면 거절(충돌 사본).
   ///
   /// 제목이 바뀌면 파일 이름을 바꾸고, 이 노트를 `[[옛 제목]]`으로 가리키던 노트의 링크도 고친다.
-  /// 반환: 새 해시.
+  /// 반환: 새 해시. 잠금 안에서 읽고 쓴다 (위 [write]와 같은 까닭, 11/13 검토).
   String update(
     String id, {
     required String expectHash,
@@ -319,7 +322,7 @@ class NoteStore {
     List<String> tags = const [],
     List<String> aliases = const [],
     String? batch,
-  }) {
+  }) => withVaultLock(vault, () {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
     // 바뀌는 칸만 본다 (위 write와 같은 까닭).
@@ -414,7 +417,7 @@ class NoteStore {
     );
     _afterChange();
     return contentHash(content);
-  }
+  });
 
   /// `[[옛 제목]]`·`[[옛 제목|글]]`·`[[옛 제목#섹션]]`을 새 제목으로 바꾼다.
   void _relinkTitle(
@@ -464,7 +467,9 @@ class NoteStore {
   ///
   /// - 색인은 처음에 한 번, 끝에 한 번만 맞춘다 ([syncAfter]가 false면 끝은 부르는 쪽이): 줄마다 맞추면 1만 개에서 수십 분
   /// - 사진 링크는 새 자리 기준으로 다시 쓰고(5.5), 머리말에 번호·제목이 없으면 적는다(파일 이름이 바뀌어도 그대로이게)
-  /// - 옛 경로를 가리키던 예전 되돌리기 묶음은 "경로 바뀜"으로 표시한다 (8.3) — 되돌리면 옛 자리에 같은 노트가 하나 더 생긴다
+  /// - 옛 경로를 가리키던 예전 되돌리기 묶음은 "경로 바뀜"으로 표시한다 (8.3) — 되돌리면 옛 자리에 같은 노트가 하나 더 생긴다.
+  ///   파일마다 옮기기 전에 단다: 중간에 끊겨도(Ctrl-C·앱 종료·예외) 옮긴 노트의 옛 묶음이 표시 없이 남지 않게 (11/13 검토)
+  /// - 잠금은 부를 때마다(앱은 200개 덩어리마다) 쥔다: 그사이 편집 창 저장·`brain write`는 잠금을 기다렸다가 새 자리를 고친다
   /// - 자동 목차만 남은 옛 주제 폴더는 치운다
   MoveResult moveMany(
     List<FolderMove> moves, {
@@ -479,10 +484,11 @@ class NoteStore {
     final zoneTopics = <String, List<String>>{};
     List<String> topicsOf(String zone) => zoneTopics.putIfAbsent(zone, () => [...index.zoneTopics(zone)]);
     final done = <String>{};
+    final marker = MovedPathMarker(vault, batchId);
     for (final (i, move) in moves.indexed) {
       try {
         if (!done.add(move.id)) throw NoteStoreException('${move.id} 노트가 목록에 두 번 있습니다.');
-        final result = _moveOne(move, batchId, topicsOf);
+        final result = _moveOne(move, batchId, topicsOf, marker);
         if (result != null) moved.add(result);
       } on NoteStoreException catch (e) {
         errors.add((id: move.id, message: e.message));
@@ -492,14 +498,13 @@ class NoteStore {
       onProgress?.call(i + 1, moves.length);
     }
     if (moved.isNotEmpty) {
-      markMovedPaths(vault, {for (final m in moved) m.from}, batchId);
       _removeEmptyTopicDirs({for (final m in moved) p.dirname(p.join(vault.root, m.from))});
     }
     if (syncAfter) _afterChange();
     return MoveResult(batch: batchId, moved: moved, errors: errors);
   });
 
-  MovedNote? _moveOne(FolderMove move, String batch, List<String> Function(String zone) topicsOf) {
+  MovedNote? _moveOne(FolderMove move, String batch, List<String> Function(String zone) topicsOf, MovedPathMarker marker) {
     final doc = index.byId(move.id);
     if (doc == null) throw NoteStoreException('${move.id} 노트가 없습니다.');
     if (doc.kind != 'note') throw NoteStoreException('${move.id}는 노트(wiki/)가 아니라 옮기지 않습니다.');
@@ -520,12 +525,17 @@ class NoteStore {
     final to = uniqueNotePath(dir, name, self: from.path);
     if (to == from.path) return null;
     // 번호·제목을 파일 이름에서 얻던 노트는 머리말에 적어 둔다: 옮기면 경로 기반 번호(f_)·파일 이름 제목이 바뀐다.
-    final head = RegExp(r'^---\r?\n([\s\S]*?)\r?\n---').firstMatch(content)?.group(1) ?? '';
-    final hasIdentity = RegExp(r'^id:', multiLine: true).hasMatch(head) && RegExp(r'^title:', multiLine: true).hasMatch(head);
-    var text = hasIdentity ? content : note.toMarkdown();
+    // 색인 번호가 머리말 번호와 다른 노트도 적는다 (11/13 검토): 머리말 `id:`가 비었거나, 다른 노트와 번호가 겹쳐(복사한 파일)
+    // 색인이 f_ 번호를 준 노트는 예전에 `id:` 줄만 보고 그대로 옮겨, 새 경로로 f_ 번호가 바뀌었다.
+    final declared = Note.parse(content, fallbackId: '', fallbackTitle: '');
+    final hasIdentity = declared.id == doc.id && declared.title.isNotEmpty;
+    var text = hasIdentity ? content : note.copyWith(id: doc.id).toMarkdown();
     text = rebaseAssetLinks(vault, text, from.path, to);
+    // 순서: "경로 바뀜" 표시 → 바꾸기 전 남김 → 옮긴 기록 → 옮기기. 어디서 끊겨도 되돌리기가 노트를 둘로 만들지 않는다.
+    marker.mark(doc.path);
     recordBeforeChange(vault, from.path, batch: batch);
     recordBeforeChange(vault, to, batch: batch);
+    recordMove(vault, batch, from.path, to);
     Directory(p.dirname(to)).createSync(recursive: true);
     if (text == content) {
       from.renameSync(to);
@@ -595,7 +605,7 @@ class NoteStore {
   }
 
   /// 노트를 지운다. 실제로는 `_meta/trash/<묶음>/`으로 옮겨서 `brain undo`로 되살릴 수 있다.
-  String delete(String id, {String? batch}) {
+  String delete(String id, {String? batch}) => withVaultLock(vault, () {
     final found = _readForChange(id);
     final (doc, _, _) = found;
     final batchId = batch ?? newBatchId();
@@ -607,10 +617,10 @@ class NoteStore {
     appendChangeLog(vault, 'delete', '$id ${doc.path}', batch: batchId);
     _afterChange();
     return batchId;
-  }
+  });
 
   /// 정리 대기 → 정리됨 같은 상태 바꾸기.
-  void setStatus(String id, NoteStatus status, {String? batch}) {
+  void setStatus(String id, NoteStatus status, {String? batch}) => withVaultLock(vault, () {
     final found = _readForChange(id);
     final (doc, note, _) = found;
     recordBeforeChange(vault, fileOf(doc).path, batch: batch);
@@ -625,11 +635,11 @@ class NoteStore {
       batch: batch,
     );
     _afterChange();
-  }
+  });
 
   /// 노트를 "합쳐짐"으로 남기고 [into]를 가리키게 한다 (`redirect:`, 설계서 5.8 중복 후보).
   /// 지우지 않는다: 되돌릴 수 있고, 옛 링크·대화 속 id가 어디로 갔는지 따라갈 수 있다 (설계서_프롬프트이후 4.2·4.4).
-  void markMerged(String id, {required String into, String? batch}) {
+  void markMerged(String id, {required String into, String? batch}) => withVaultLock(vault, () {
     if (id == into) throw NoteStoreException('$id 노트를 자기 자신에 합칠 수 없습니다.');
     final (doc, note, _) = _readForChange(id);
     if (index.byId(into) == null) throw NoteStoreException('$into 노트가 없습니다.');
@@ -642,7 +652,7 @@ class NoteStore {
     );
     appendChangeLog(vault, 'merge', '$id → $into ${doc.path}', batch: batch);
     _afterChange();
-  }
+  });
 
   /// 정리 대기 초안마다 비슷한 정리된 노트 최대 [perDraft]개 (설계서_프롬프트이후 4.2). 초안 id → 점수 높은 순.
   /// 초안이 아주 많아도 보드가 늦게 뜨지 않게 앞 [maxDrafts]개만 본다 (보드도 최근 순으로 보인다).
