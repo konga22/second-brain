@@ -157,6 +157,7 @@ class Note {
     String? summary,
     List<String>? tags,
     List<String>? aliases,
+    Map<String, Object?>? extra,
   }) => Note(
     id: id,
     title: title ?? this.title,
@@ -169,7 +170,7 @@ class Note {
     updated: updated ?? this.updated,
     status: status ?? this.status,
     body: body ?? this.body,
-    extra: extra,
+    extra: extra ?? this.extra,
     isFrontmatterBroken: isFrontmatterBroken,
   );
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../vault/vault.dart';
+import 'change_log.dart';
 
 /// 변경 기록 한 줄 (타임라인용).
 class ChangeEvent {
@@ -21,6 +22,12 @@ class ChangeEvent {
   /// 기록에 나온 노트 id (`n_0042`, `L-0007`).
   String? get targetId =>
       RegExp(r'\b(n_\d{4,}|L-\d{4,}|T-\d{4,})\b').firstMatch(detail)?.group(1);
+
+  /// AI 대화 안에서 부른 `brain` 명령이 남긴 줄인가 (설계서_프롬프트이후 4.3).
+  bool get isAi => aiLogMark.hasMatch(detail);
+
+  /// AI 대화 id. 표시가 없거나 id를 모르면 null.
+  String? get aiSession => aiLogMark.firstMatch(detail)?.group(1);
 }
 
 /// `_log/YYYY-MM.md`를 읽어 최신 순으로 돌려준다 (설계서 3.3 타임라인).

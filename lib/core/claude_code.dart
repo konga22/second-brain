@@ -380,6 +380,8 @@ class _StepReader {
       final title = _title.firstMatch(command)?.group(1);
       return title == null ? '노트 저장 중' : '노트 저장: $title';
     }
+    // brain add가 비슷한 정리된 노트 때문에 멈추면 AI가 옛 노트를 고친다 (설계서_프롬프트이후 4.4)
+    if (command.startsWith('brain write')) return '옛 노트 고치는 중';
     if (command.startsWith('brain sessions mark')) return '저장할 것 없음으로 표시';
     if (command.startsWith('brain todo suggest')) return '할 일 추천 넣는 중';
     if (command.startsWith('brain todo')) return '지금 할 일 보는 중';

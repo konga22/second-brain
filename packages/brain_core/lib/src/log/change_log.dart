@@ -27,6 +27,22 @@ String newBatchId() {
       '${two(now.hour)}${two(now.minute)}${two(now.second)}-$rand';
 }
 
+/// Claude Code가 Bash 도구에 넣는 환경변수로 본 "AI 대화 안에서 부른 명령"인가.
+/// `brain add`의 초안 강제(4.1)와 변경 기록의 AI 표시(4.3)가 같은 기준을 쓴다.
+bool isAiSessionEnv(Map<String, String> env) =>
+    env['CLAUDECODE'] == '1' || (env['CLAUDE_CODE_SESSION_ID'] ?? '').isNotEmpty;
+
+/// 지금 프로세스가 AI 대화 안에서 도는가: null이면 아니고, 빈 문자열이면 대화 id를 모른다.
+String? _aiSession;
+
+/// 이 프로세스가 남기는 변경 기록 줄에 AI 대화 표시를 붙인다 (설계서_프롬프트이후 4.3).
+/// `brain` CLI만 시작할 때 부른다: 앱을 Claude Code 터미널에서 띄워도 사람의 편집이 AI로 적히지 않게.
+/// 예전 기록은 사람·AI 고침이 같은 모양이라 정리 보드가 "AI가 고친 노트"를 가려낼 수 없었다.
+void markAiSession(String? sessionId) => _aiSession = sessionId;
+
+/// 변경 기록 줄 끝의 AI 표시: ` · AI` 또는 ` · AI 대화 <세션 id>`.
+final aiLogMark = RegExp(r' · AI(?: 대화 (\S+))?$');
+
 /// 변경 기록 `_log/YYYY-MM.md`에 한 줄 추가한다 (추가만 함, 설계서 4.1).
 void appendChangeLog(
   Vault vault,
@@ -39,8 +55,10 @@ void appendChangeLog(
   final file = File(p.join(vault.logDir, '$month.md'));
   file.parent.createSync(recursive: true);
   if (!file.existsSync()) file.writeAsStringSync('# 변경 기록 $month\n\n');
+  final session = _aiSession;
+  final mark = session == null ? '' : (session.isEmpty ? ' · AI' : ' · AI 대화 $session');
   file.writeAsStringSync(
-    '- ${formatTime(now)} [${batch ?? currentBatch}] $action $detail\n',
+    '- ${formatTime(now)} [${batch ?? currentBatch}] $action $detail$mark\n',
     mode: FileMode.append,
     flush: true,
   );

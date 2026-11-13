@@ -160,6 +160,9 @@ enum NoteChange {
 
   /// 추천 연결을 확정한다: 본문 끝에 `관련: [[linkTitle]]`.
   appendLink,
+
+  /// 초안을 정리된 노트([targetId])에 합친다 (설계서_프롬프트이후 4.2).
+  mergeInto,
 }
 
 Future<void> changeNoteInBackground(
@@ -169,6 +172,7 @@ Future<void> changeNoteInBackground(
   required String id,
   String? topic,
   String? linkTitle,
+  String? targetId,
   String? batch,
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
@@ -176,6 +180,8 @@ Future<void> changeNoteInBackground(
   try {
     final store = NoteStore(vault, index);
     switch (change) {
+      case NoteChange.mergeInto:
+        store.mergeDraftInto(id, targetId!, batch: batch);
       case NoteChange.delete:
         store.delete(id, batch: batch);
       case NoteChange.confirm:
@@ -201,3 +207,94 @@ Future<void> changeNoteInBackground(
     index.close();
   }
 });
+
+/// 정리 대기 초안마다 비슷한 정리된 노트 최대 2개 (설계서_프롬프트이후 4.2). 초안마다 파일을 읽고 FTS 질의를 몇 번 해
+/// 초안이 많으면 화면 스레드에서 멈칫한다. 보드가 떠 있을 때만 계산한다.
+Future<Map<String, List<SimilarNote>>> draftSimilarInBackground(String vaultRoot, String indexPath) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+      try {
+        return NoteStore(vault, index).similarForDrafts();
+      } finally {
+        index.close();
+      }
+    });
+
+/// 정리 보드 "AI가 고친 노트" (설계서_프롬프트이후 4.3). 변경 기록 3달과 되돌리기 묶음을 읽는다.
+Future<List<AiEdit>> aiEditsInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+  try {
+    return AiEditReview(vault, index).pending();
+  } finally {
+    index.close();
+  }
+});
+
+/// [바뀐 내용 보기]: AI가 처음 고치기 전 본문과 지금 본문의 줄 차이. 고치기 전 사본이 없으면 null.
+/// 읽기 전 색인 맞추기가 1만 개에서 약 80ms라 백그라운드에서 한다.
+Future<List<DiffLine>?> aiEditDiffInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    final (before, after) = AiEditReview(vault, index).beforeAfter(edit);
+    return before == null ? null : lineDiff(before, after);
+  } finally {
+    index.close();
+  }
+});
+
+/// [되돌리기]: 이 노트를 고친 AI 묶음을 최근 것부터 되돌린다. 반환: 되돌린 파일 수.
+/// [NoteStoreException](사람이 그 뒤에 또 고침)·[ArgumentError](묶음이 없음)는 그대로 다시 던져진다.
+Future<int> revertAiEditInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return AiEditReview(vault, index).revert(edit);
+  } finally {
+    index.close();
+  }
+});
+
+/// 주 1회 옛 결정 점검 (설계서_프롬프트이후 4.4 (나)). 최근 7일 노트마다 비슷한 노트를 찾아 노트 1만 개(최근 300개)에서
+/// 약 2초라 백그라운드에서 하고, 진행을 [onProgress](본 수, 전체 수)로 알린다.
+Future<List<DecisionPair>> decisionCheckInBackground(
+  String vaultRoot,
+  String indexPath, {
+  required void Function(int done, int total) onProgress,
+}) async {
+  final port = ReceivePort();
+  final subscription = port.listen((message) {
+    if (message case [final int done, final int total]) onProgress(done, total);
+  });
+  try {
+    return await _decisionCheck(vaultRoot, indexPath, port.sendPort);
+  } finally {
+    await subscription.cancel();
+    port.close();
+  }
+}
+
+/// 따로 둔 까닭: 위 함수의 [onProgress] 클로저까지 isolate로 보내려다 실패하지 않게 (실수 노트 L-0004).
+Future<List<DecisionPair>> _decisionCheck(String vaultRoot, String indexPath, SendPort progress) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return DecisionCheck(vault, index).run(onProgress: (done, total) => progress.send([done, total]));
+  } finally {
+    index.close();
+  }
+});
+
+/// [옛 노트 보관]: 옛 노트를 합쳐짐으로 바꾸고 새 노트를 가리키게 한다 (되돌리기 묶음 하나).
+Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, DecisionPair pair, String batch) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+      try {
+        DecisionCheck(vault, index).archiveOld(NoteStore(vault, index), pair, batch: batch);
+      } finally {
+        index.close();
+      }
+    });
