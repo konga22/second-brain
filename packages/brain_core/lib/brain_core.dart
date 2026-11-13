@@ -35,6 +35,7 @@ export 'src/note/zones.dart';
 export 'src/security/git_remote_check.dart';
 export 'src/security/secret_mask.dart';
 export 'src/sessions/claude_sessions.dart';
+export 'src/sessions/compact_recall.dart';
 export 'src/sessions/session_archive.dart';
 export 'src/sessions/session_reads.dart';
 export 'src/sessions/session_registry.dart';

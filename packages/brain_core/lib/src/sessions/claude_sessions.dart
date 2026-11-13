@@ -323,7 +323,19 @@ class ClaudeSessions {
     return text.trimLeft().startsWith('<task-notification>');
   }
 
-  String? _userText(Object? content) {
+  /// 사람이 직접 친 사용자 문장이면 그 글, 아니면 null. 축약본(`_parse`)과 같은 규칙이다: 곁가지·메타·압축 요약·
+  /// 작업 알림·다른 세션 메시지·도구 결과·명령 줄·끊김 표시는 뺀다. 압축 뒤 되살리기([CompactRecall])가 쓴다
+  /// (설계서_프롬프트이후 11/13 추가: 압축 훅).
+  static String? humanUserText(Map<String, dynamic> record) {
+    if (record['type'] != 'user') return null;
+    if (record['isSidechain'] == true || record['isMeta'] == true || record['isCompactSummary'] == true) return null;
+    final message = record['message'];
+    final content = message is Map ? message['content'] : null;
+    if (_isSystemTurn(record, content)) return null;
+    return _userText(content);
+  }
+
+  static String? _userText(Object? content) {
     String text;
     if (content is String) {
       text = content;
