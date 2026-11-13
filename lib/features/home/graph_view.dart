@@ -177,7 +177,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
               ? _neighborhood(selected, allLinks)
               : allPositions.keys.toSet();
           if (_topic != null) {
-            visible = {for (final id in visible) if (docs[id]?.topic == _topic) id};
+            visible = {for (final id in visible) if (docs[id]?.topicPath == _topic) id};
           }
           final positions = {
             for (final id in visible) id: ?allPositions[id],
@@ -186,7 +186,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
             for (final l in allLinks)
               if (positions.containsKey(l.fromId) && positions.containsKey(l.toId)) l,
           ];
-          final topics = {for (final d in notes) d.topic}.toList()..sort();
+          final topics = {for (final d in notes) d.topicPath}.toList()..sort();
           final degree = <String, int>{};
           for (final l in links) {
             if (l.isSuggested) continue; // 허브·크기는 확정 연결 기준
@@ -522,7 +522,7 @@ class _GraphPainter extends CustomPainter {
     // 주제 이름: 주제 노드들 위쪽 끝에 흐리게.
     final groups = <String, List<Offset>>{};
     for (final id in positions.keys) {
-      groups.putIfAbsent(docs[id]?.topic ?? '', () => []).add(at(id));
+      groups.putIfAbsent(docs[id]?.topicPath ?? '', () => []).add(at(id));
     }
     for (final e in groups.entries) {
       if (e.value.length < 2) continue;
@@ -536,7 +536,7 @@ class _GraphPainter extends CustomPainter {
     for (final link in links) {
       final a = at(link.fromId);
       final b = at(link.toId);
-      final isSameTopic = docs[link.fromId]?.topic == docs[link.toId]?.topic;
+      final isSameTopic = docs[link.fromId]?.topicPath == docs[link.toId]?.topicPath;
       final color = !link.isSuggested ? 0xaaa78bfa : (isSameTopic ? 0x73d6d3e8 : 0x3dd6d3e8);
       final width = (isSameTopic ? 1.2 : 0.9) / scale.clamp(0.5, 3);
       final dashed = link.isSuggested && !many;

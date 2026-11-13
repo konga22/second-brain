@@ -13,6 +13,7 @@ import '../core/background_tasks.dart';
 import '../core/brain_providers.dart';
 import '../features/connect/claude_code_providers.dart';
 import '../features/connect/system_check_provider.dart';
+import '../features/notes/folder_tidy_dialog.dart';
 import 'command_palette.dart';
 
 class Sidebar extends ConsumerWidget {
@@ -232,6 +233,8 @@ class _SidebarItem extends StatelessWidget {
 /// - 폴더를 누르면 접고 다시 누르면 편다. 고른 노트의 폴더는 접어도 보라 표시가 남는다.
 /// - 노트를 끌어 다른 폴더에 놓으면 그 폴더로 옮긴다 (id·[[링크]] 유지).
 /// - [+]로 폴더(뇌)를 만들고, [추천 정리]는 연결의 다수가 다른 폴더에 있는 노트를 옮기자고 제안한다.
+/// - 구역(설계서_프롬프트이후 5.1)이 있으면 구역 이름 아래에 주제를 묶어 보인다. 노트가 30개 넘는 주제는 수를 주황으로.
+///   [폴더 정리]는 구역 밖(예전) 노트를 구역/주제로 옮기는 화면이다.
 class _TopicTree extends ConsumerStatefulWidget {
   const _TopicTree();
 
@@ -243,6 +246,12 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
   static const rawTopic = '원본 (raw)';
   final _open = <String>{};
   String? _dropHover;
+
+  /// 주제 줄 위에 붙는 구역 이름. 구역 밖(예전) 주제는 한데 묶어 [폴더 정리]로 안내한다.
+  static String _zoneLabel(String topic) {
+    final slash = topic.indexOf('/');
+    return slash < 0 ? '구역 밖 (폴더 정리로 옮기기)' : topic.substring(0, slash);
+  }
 
   void _onToggle(String topic) => setState(
     () => _open.contains(topic) ? _open.remove(topic) : _open.add(topic),
@@ -291,16 +300,21 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
         child: ShadInput(
           controller: controller,
           autofocus: true,
-          placeholder: const Text('폴더 이름 (예: 대학교)'),
+          placeholder: Text(ref.read(noteStoreProvider).isZoned ? '구역/주제 (예: 공부/운영체제)' : '폴더 이름 (예: 대학교)'),
           onSubmitted: (value) => Navigator.of(context).pop(value),
         ),
       ),
     );
     controller.dispose();
     if (name == null || name.trim().isEmpty) return;
-    final topic = ref.read(noteStoreProvider).createTopic(name);
-    setState(() => _open.add(topic));
-    bumpVault(ref);
+    try {
+      final topic = ref.read(noteStoreProvider).createTopic(name);
+      setState(() => _open.add(topic));
+      bumpVault(ref);
+    } on NoteStoreException catch (e) {
+      // 구역을 안 적었거나 모르는 구역 (설계서_프롬프트이후 5.1)
+      if (mounted) ShadToaster.maybeOf(context)?.show(ShadToast.destructive(description: Text(e.message.split('\n').take(2).join(' '))));
+    }
   }
 
   Future<void> _onSuggest() async {
@@ -334,9 +348,21 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
       for (final t in ref.watch(searchIndexProvider).topics()) t: [],
     };
     for (final d in notes) {
-      byTopic.putIfAbsent(d.topic, () => []).add(d);
+      byTopic.putIfAbsent(d.topicPath, () => []).add(d);
     }
-    final topics = byTopic.keys.toList()..sort();
+    // 구역 순서(프로젝트 → … → 생활·기기), 그 안은 가나다순, 구역 밖(예전) 주제는 뒤에
+    int zoneOrder(String t) {
+      final slash = t.indexOf('/');
+      final i = slash < 0 ? -1 : noteZones.indexOf(t.substring(0, slash));
+      return i < 0 ? noteZones.length : i;
+    }
+
+    final topics = byTopic.keys.toList()
+      ..sort((a, b) {
+        final byZone = zoneOrder(a).compareTo(zoneOrder(b));
+        return byZone != 0 ? byZone : a.compareTo(b);
+      });
+    final hasZones = topics.any((t) => t.contains('/'));
     if (raw.isNotEmpty) {
       byTopic[rawTopic] = raw;
       topics.add(rawTopic);
@@ -370,6 +396,14 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
               onTap: _onSuggest,
             ),
             _MiniButton(
+              icon: LucideIcons.folderTree,
+              tooltip: '폴더 정리 (구역/주제로 옮기기)',
+              onTap: () async {
+                await showFolderTidy(context);
+                if (mounted) bumpVault(ref);
+              },
+            ),
+            _MiniButton(
               icon: LucideIcons.folderPlus,
               tooltip: '폴더 추가',
               onTap: _onAddTopic,
@@ -394,7 +428,12 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              for (final topic in topics) ...[
+              for (final (i, topic) in topics.indexed) ...[
+                if (hasZones && topic != rawTopic && (i == 0 || _zoneLabel(topics[i - 1]) != _zoneLabel(topic)))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 8, 6, 2),
+                    child: Text(_zoneLabel(topic), style: TextStyle(fontSize: 11, color: colors.textFaint)),
+                  ),
                 DragTarget<String>(
                   onWillAcceptWithDetails: (d) {
                     if (topic == rawTopic) return false;
@@ -445,7 +484,8 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                topic,
+                                // 구역 이름은 위 줄에 있어 주제 이름만
+                                topic.contains('/') ? topic.substring(topic.indexOf('/') + 1) : topic,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -473,7 +513,10 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                               '${byTopic[topic]!.length}',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: colors.textFaint,
+                                // 30개 넘는 주제는 나누자고 알린다 (설계서_프롬프트이후 5.1)
+                                color: topic != rawTopic && byTopic[topic]!.length > topicSplitLimit
+                                    ? colors.warning
+                                    : colors.textFaint,
                               ),
                             ),
                           ],

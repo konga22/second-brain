@@ -140,8 +140,8 @@ void main() {
     final (draftId, _) = (() {
       final index = SearchIndex.open(vault, path: indexPath);
       try {
-        final store = NoteStore(vault, index);
-        final (id, _) = store.add(title: '초안 노트', summary: '확정 전', body: '본문', topic: '결제', draft: true);
+        final store = NoteStore(vault, index, zoned: true);
+        final (id, _) = store.add(title: '초안 노트', summary: '확정 전', body: '본문', topic: '개발 지식/결제', draft: true);
         return (id, '');
       } finally {
         index.close();
@@ -165,8 +165,9 @@ void main() {
     expect(doc(draftId)!.isDraft, isFalse);
     await change(NoteChange.appendLink, draftId, linkTitle: '롤백 순서');
     expect(bodyOf(draftId), endsWith('관련: [[롤백 순서]]'));
-    await change(NoteChange.move, draftId, topic: '배포');
-    expect(doc(draftId)!.topic, '배포');
+    // 구역/주제로 옮긴다 (설계서_프롬프트이후 5.1)
+    await change(NoteChange.move, draftId, topic: '개발 지식/배포');
+    expect(doc(draftId)!.topicPath, '개발 지식/배포');
     await change(NoteChange.delete, otherId);
     expect(doc(otherId), isNull);
     await expectLater(change(NoteChange.confirm, 'n_9999'), throwsA(isA<NoteStoreException>()));

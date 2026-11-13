@@ -60,7 +60,7 @@ void main() {
     }
     final storedBefore = before.graphPositions();
     final baseBefore = before.graphLayoutBase();
-    final notesBefore = [for (final d in before.notes()) if (!d.isMerged) GraphNode(d.id, d.topic)];
+    final notesBefore = [for (final d in before.notes()) if (!d.isMerged) GraphNode(d.id, d.topicPath)];
     final edgesBefore = [
       for (final l in before.links(dismissed: DismissedLinks(vault).load()))
         GraphEdge(l.fromId, l.toId, weight: l.isSuggested ? 0.25 : 1),
@@ -79,7 +79,7 @@ void main() {
 
     Future<LayoutStats> statsNow() async {
       final positions = await container.read(graphLayoutProvider.future);
-      final nodes = [for (final d in container.read(notesProvider)) if (!d.isMerged) GraphNode(d.id, d.topic)];
+      final nodes = [for (final d in container.read(notesProvider)) if (!d.isMerged) GraphNode(d.id, d.topicPath)];
       final edges = [
         for (final l in container.read(linksProvider)) GraphEdge(l.fromId, l.toId, weight: l.isSuggested ? 0.25 : 1),
       ];

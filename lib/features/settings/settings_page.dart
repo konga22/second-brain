@@ -183,6 +183,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
       (AppConfig.legacyDrafts, '확인 전 초안도 AI 찾기·자동 주입·AI 질문 근거에 쓴다 (4.1 초안 분리를 끔)'),
       (AppConfig.legacyLessons, '실수 노트 목록을 번호 순 앞 30개로 (4.5 최근순을 끔)'),
       (AppConfig.legacyDecisions, 'brain add가 저장 전에 비슷한 정리된 노트를 보이거나 멈추지 않는다 (4.4 저장 때 안내를 끔)'),
+      (AppConfig.legacyFolders, '새 노트를 구역 없이 wiki/<주제>/<제목>.md에 둔다 (5.1 폴더 구조를 끔. 이미 옮긴 노트는 그대로)'),
     ];
     return ShadCard(
       title: const Text('이전 방식'),
@@ -208,7 +209,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
                   ],
                 ),
               ),
-            Text('찾기·AI 질문은 바로, 실수 노트 목록은 새 Claude Code 세션부터 적용됩니다.', style: theme.textTheme.muted),
+            Text('찾기·AI 질문·새 노트 자리는 바로, 실수 노트 목록·저장 안내는 새 Claude Code 세션부터 적용됩니다.', style: theme.textTheme.muted),
           ],
         ),
       ),
