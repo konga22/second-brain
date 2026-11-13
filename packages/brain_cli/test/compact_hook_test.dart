@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 /// 압축 훅 (설계서_프롬프트이후 11/13 추가: 압축 훅). 실제 `brain`을 프로세스로 실행한다.
 ///
 /// - PreCompact: 요약에 사용자 지시·금지·결정을 그대로 남기라는 짧은 지침을 stdout으로 (Claude Code가 압축 지침으로 쓴다).
-/// - SessionStart(source=compact): 평소 안내 뒤에 압축 전 사용자 말 원문(최근 2,000자)과 "고칠 파일은 다시 열어 보고" 한 줄.
+/// - SessionStart(source=compact): 평소 안내 뒤에 압축 전 사용자 말 원문(최근 4,000자)과 "고칠 파일은 다시 열어 보고" 한 줄.
 ///   평소 시작(startup·resume·clear)은 지금과 한 글자도 같아야 한다 (세션 캐시, 토큰분석 2절).
 void main() {
   late Directory temp;

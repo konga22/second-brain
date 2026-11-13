@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 /// 압축 뒤 되살리기 (설계서_프롬프트이후 11/13 추가: 압축 훅).
 ///
 /// 압축하면 사용자가 한 지시가 요약 속에서 뭉개진다. SessionStart(source=compact) 때 세션 기록 끝에서 사용자가 직접 친
-/// 말만 원문으로 최근 것부터 2,000자까지 다시 넣는다. "지시처럼 보이는가"로 고르지 않는다(분류하지 않기로 함).
+/// 말만 원문으로 최근 것부터 4,000자까지 다시 넣는다(11/13 압축 훅: 2,000자는 끝에서 2,239자 앞 지시를 놓쳤다). "지시처럼 보이는가"로 고르지 않는다(분류하지 않기로 함).
 void main() {
   late Directory temp;
   late String projects;
@@ -77,22 +77,30 @@ void main() {
     expect(recall(), ['커밋은 허락받고 해', '교수님 프롬프트는 문서로만 남겨', '이름표 자르지 마']);
   });
 
-  test('최근 것부터 2,000자까지 담고 순서는 오래된 것부터, 넘치면 거기서 멈춘다', () {
-    final old = '오래된 말 ${'가' * 1500}';
-    final middle = '가운데 말 ${'나' * 900}';
-    final newest = '마지막 말 ${'다' * 900}';
+  test('최근 것부터 4,000자까지 담고 순서는 오래된 것부터, 넘치면 거기서 멈춘다', () {
+    final old = '오래된 말 ${'가' * 2500}';
+    final middle = '가운데 말 ${'나' * 1800}';
+    final newest = '마지막 말 ${'다' * 1800}';
     write([user(old), ai('a'), user(middle), ai('b'), user(newest)]);
     final got = recall()!;
     expect(got, [middle, newest]);
-    expect(got.fold<int>(0, (n, t) => n + t.runes.length), lessThanOrEqualTo(2000));
+    expect(got.fold<int>(0, (n, t) => n + t.runes.length), lessThanOrEqualTo(4000));
   });
 
-  test('마지막 말 하나가 2,000자를 넘으면 앞부분만 잘라 담는다', () {
-    write([user('짧은 말'), user('긴 말 ${'라' * 5000}')]);
+  test('끝에서 2,239자 앞에 있던 지시도 담는다 (11/13 압축 훅: 실제 기록에서 2,000자일 때 놓친 모양)', () {
+    const key = '교수님 프롬프트는 문서로만 남겨';
+    final middle = '가운데 말 ${'나' * 1200}';
+    final newest = '마지막 말 ${'다' * 1000}';
+    write([user('오래된 말 ${'가' * 2000}'), user(key), ai('a'), user(middle), ai('b'), user(newest)]);
+    expect(recall(), [key, middle, newest]);
+  });
+
+  test('마지막 말 하나가 4,000자를 넘으면 앞부분만 잘라 담는다', () {
+    write([user('짧은 말'), user('긴 말 ${'라' * 9000}')]);
     final got = recall()!;
     expect(got, hasLength(1));
     expect(got.single, startsWith('긴 말 라'));
-    expect(got.single.runes.length, lessThanOrEqualTo(2000));
+    expect(got.single.runes.length, 4000);
     expect(got.single, endsWith('…'));
   });
 

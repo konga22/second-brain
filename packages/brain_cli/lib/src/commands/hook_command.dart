@@ -97,7 +97,7 @@ class HookCommand extends Command<int> {
   /// 압축 뒤 마지막 줄 (설계서_프롬프트이후 11/13 추가: 압축 훅): 요약 속 파일 내용은 옛것일 수 있다.
   static const compactFileLine = '· 고칠 파일은 요약만 믿지 말고 다시 열어 보고 고친다.';
 
-  /// 압축 직후 덧붙일 줄 (설계서_프롬프트이후 11/13 추가: 압축 훅): 압축 전 사용자 말 원문(최근 2,000자, 오래된 것부터)과
+  /// 압축 직후 덧붙일 줄 (설계서_프롬프트이후 11/13 추가: 압축 훅): 압축 전 사용자 말 원문(최근 4,000자, 오래된 것부터)과
   /// [compactFileLine]. 원문은 [CompactRecall]이 기록 끝에서만 읽고(`~/.claude/projects` 안 파일만), 무엇이든 실패하면
   /// 원문 없이 한 줄만 낸다. 세션 시작 목록의 실수 노트와 같은 말은 이미 규칙으로 들어가므로 뺀다([restatesLesson]).
   List<String> compactLines(Object? transcriptPath, {bool legacy = false}) {
