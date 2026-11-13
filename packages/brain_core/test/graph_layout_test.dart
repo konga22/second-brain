@@ -47,6 +47,36 @@ void main() {
     expect(closest, greaterThan(28), reason: '가장 가까운 두 노드 사이 $closest');
   });
 
+  test('같은 자리에 겹친 두 노드가 함께 밀려 무리 밖으로 날아가지 않는다', () {
+    // 11/14 노트 1만 개 합성 폴더: n_06381·n_09710이 무리보다 1,230 위(y≈-2280)에 떨어져 [맞추기]가 작아졌다.
+    // 두 노드가 0.1 안으로 겹친 뒤, 사분 트리가 자기 자신이 든 작은 칸을 한 덩어리로 보고 "같은 자리" 방향을
+    // 노드 번호 % 7·% 5로만 정해(3810·590번은 같은 방향) 둘이 매 반복 같은 쪽으로 최대 걸음만큼 밀려 갔다.
+    // 여기서는 번호가 35 차이 나는 두 노드(예전 방식에서 같은 방향)를 같은 자리에 두고 시작한다.
+    final (base, baseEdges) = clusters(6, 60, [(0, 1), (1, 2), (3, 4)]);
+    const pairA = GraphNode('pair_a', '외딴'), pairB = GraphNode('pair_b', '외딴');
+    final nodes = [pairA, ...base.take(34), pairB, ...base.skip(34)];
+    final edges = [...baseEdges, GraphEdge(pairA.id, pairB.id)];
+    final first = forceLayout(nodes, edges);
+    final initial = {...first, pairB.id: first[pairA.id]!};
+    // 100개는 자리 없이 두어 새 노드만 끼우기가 아니라 전체 반복을 돈다.
+    for (final n in base.skip(base.length - 100)) {
+      initial.remove(n.id);
+    }
+    final positions = forceLayout(nodes, edges, initial: initial);
+    final cluster = [for (final n in base) positions[n.id]!];
+    final center = Point(
+      cluster.map((p) => p.x).reduce((a, b) => a + b) / cluster.length,
+      cluster.map((p) => p.y).reduce((a, b) => a + b) / cluster.length,
+    );
+    final radius = cluster.map((p) => p.distanceTo(center)).reduce(max);
+    for (final id in [pairA.id, pairB.id]) {
+      final distance = positions[id]!.distanceTo(center);
+      expect(distance, lessThanOrEqualTo(radius * 1.2),
+          reason: '$id: 가운데에서 ${distance.round()}, 무리 반지름 ${radius.round()}');
+    }
+    expect(positions[pairA.id]!.distanceTo(positions[pairB.id]!), greaterThan(28), reason: '겹친 채로 남으면 안 된다');
+  });
+
   group('다시 배치하는 조건', () {
     late List<GraphNode> nodes;
     late List<GraphEdge> edges;
