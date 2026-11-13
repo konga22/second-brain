@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../core/brain_providers.dart';
+import '../../shared/change_labels.dart';
 import '../../shared/date_text.dart';
 import '../../shared/safe_set_state.dart';
 
@@ -23,17 +24,16 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
   static const keepDays = 30;
   String? _message;
 
-  /// 묶음 id → "추가 2 · 상태 1" 같은 요약 (변경 기록에서).
+  /// 묶음 id → "새 노트 2 · 상태 1" 같은 요약 (변경 기록에서).
   Map<String, String> _summaries(Vault vault) {
     final counts = <String, Map<String, int>>{};
     for (final e in readChangeHistory(vault)) {
       final byAction = counts.putIfAbsent(e.batch, () => {});
       byAction[e.action] = (byAction[e.action] ?? 0) + 1;
     }
-    const names = {'add': '추가', 'write': '고침', 'update': '고침', 'status': '상태', 'move': '옮김', 'delete': '지움', 'lint-fix': '형식', 'import': '가져옴'};
     return {
       for (final MapEntry(:key, :value) in counts.entries)
-        key: value.entries.map((e) => '${names[e.key] ?? e.key} ${e.value}').join(' · '),
+        key: value.entries.map((e) => '${changeActionLabel(e.key)} ${e.value}').join(' · '),
     };
   }
 

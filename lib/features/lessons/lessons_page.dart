@@ -246,9 +246,15 @@ class _MergeLessonDialogState extends ConsumerState<_MergeLessonDialog> {
     }
   }
 
-  Widget _input(String key, String hint) => Padding(
+  // 칸 이름을 왼쪽에 늘 보인다: 글이 채워지면 안내 글(placeholder)이 사라져 어느 칸인지 모른다 (11/13 화면 검토)
+  Widget _input(String key, String label) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: ShadInput(controller: _fields[key], placeholder: Text(hint)),
+    child: Row(
+      children: [
+        SizedBox(width: 52, child: Text(label, style: ShadTheme.of(context).textTheme.muted)),
+        Expanded(child: ShadInput(controller: _fields[key], placeholder: Text(label))),
+      ],
+    ),
   );
 
   @override
@@ -256,7 +262,8 @@ class _MergeLessonDialogState extends ConsumerState<_MergeLessonDialog> {
     return ShadDialog(
       title: const Text('규칙 합치기'),
       description: Text(
-        '${widget.keep.id}을 고쳐 남기고 ${widget.drop.id}는 보관합니다(복원 가능). '
+        // id 끝 글자에 따라 조사가 바뀌므로 "규칙을/규칙은"으로 쓴다 ("L-0004을" 같은 틀린 조사 방지)
+        '${widget.keep.id} 규칙을 고쳐 남기고, ${widget.drop.id} 규칙은 보관합니다(복원 가능). '
         '두 규칙 문장을 이어 두었으니 한 문장으로 고쳐 저장하세요.',
       ),
       constraints: const BoxConstraints(maxWidth: 620),
@@ -423,9 +430,15 @@ class _NewLessonDialogState extends ConsumerState<_NewLessonDialog> {
     }
   }
 
-  Widget _input(String key, String hint) => Padding(
+  // 칸 이름을 왼쪽에 늘 보인다: 글이 채워지면 안내 글(placeholder)이 사라져 어느 칸인지 모른다 (11/13 화면 검토)
+  Widget _input(String key, String label, String hint) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: ShadInput(controller: _fields[key], placeholder: Text(hint)),
+    child: Row(
+      children: [
+        SizedBox(width: 76, child: Text(label, style: ShadTheme.of(context).textTheme.muted)),
+        Expanded(child: ShadInput(controller: _fields[key], placeholder: Text(hint))),
+      ],
+    ),
   );
 
   @override
@@ -441,13 +454,13 @@ class _NewLessonDialogState extends ConsumerState<_NewLessonDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _input('trigger', '언제 (예: 결제 코드를 수정할 때)'),
-          _input('action', '무엇을 (예: 테스트 키로 먼저 확인한다)'),
-          _input('reason', '왜 (예: 실제 키로 시험해 결제가 나간 적이 있음)'),
-          _input('before', 'AI가 했던 것 (diff 앞, 선택)'),
-          _input('after', '고친 것 (diff 뒤, 선택)'),
-          _input('question', '회귀 시험 질문 (선택, 예: 결제 모듈에 새 카드사를 붙여 줘)'),
-          _input('expect', '통과 조건 (선택, 예: 테스트 키로 먼저 확인한다고 답한다)'),
+          _input('trigger', '언제', '예: 결제 코드를 수정할 때'),
+          _input('action', '무엇을', '예: 테스트 키로 먼저 확인한다'),
+          _input('reason', '왜', '예: 실제 키로 시험해 결제가 나간 적이 있음'),
+          _input('before', 'AI가 한 것', 'diff 앞, 선택'),
+          _input('after', '고친 것', 'diff 뒤, 선택'),
+          _input('question', '시험 질문', '회귀 시험 질문 (선택, 예: 결제 모듈에 새 카드사를 붙여 줘)'),
+          _input('expect', '통과 조건', '선택, 예: 테스트 키로 먼저 확인한다고 답한다'),
           if (_error != null) Text(_error!, style: const TextStyle(color: Color(0xffdc2626))),
         ],
       ),

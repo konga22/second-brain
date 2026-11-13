@@ -25,6 +25,20 @@ void main() {
     );
   }
 
+  testWidgets('답 방식: 고른 쪽은 체크 표시가 붙어 안 고른 쪽과 분명히 다르다 (11/13 화면 검토)', (tester) async {
+    await pump(tester, PersonaForm(initial: const Persona(), onSave: (p) async {}));
+    Finder checkIn(String label) =>
+        find.descendant(of: find.ancestor(of: find.text(label), matching: find.byType(ShadButton)), matching: find.byIcon(LucideIcons.check));
+    expect(checkIn(Persona.styleShort), findsNothing);
+    await tester.tap(find.text(Persona.styleShort));
+    await tester.pump();
+    expect(checkIn(Persona.styleShort), findsOneWidget);
+    expect(checkIn(Persona.styleDetailed), findsNothing);
+    await tester.tap(find.text(Persona.styleShort)); // 다시 누르면 고르지 않음
+    await tester.pump();
+    expect(checkIn(Persona.styleShort), findsNothing);
+  });
+
   testWidgets('4문항을 채워 저장하면 쓴 그대로 넘긴다 (금지어는 쉼표·줄 모두)', (tester) async {
     Persona? saved;
     await pump(tester, PersonaForm(initial: const Persona(), onSave: (p) async => saved = p));
@@ -39,7 +53,7 @@ void main() {
     await tester.tap(find.text(Persona.styleShort));
     await tester.enterText(fields.at(1), '연봉, 집 주소\n돈');
     await tester.pump();
-    expect(find.textContaining('1글자 "돈"은 검사하지 않습니다'), findsOneWidget);
+    expect(find.textContaining('1글자 단어("돈")는 검사하지 않습니다'), findsOneWidget);
 
     await tester.tap(find.text('저장'));
     await tester.pump();
