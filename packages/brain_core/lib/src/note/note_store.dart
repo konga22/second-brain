@@ -511,7 +511,12 @@ class NoteStore {
 
   /// 정리 대기 카드의 [합치기] (설계서_프롬프트이후 4.2): 초안 본문을 정리된 노트 끝에 붙이고, 초안은 "합쳐짐"으로 남긴다.
   /// 두 파일을 한 묶음으로 바꿔 한 번에 되돌린다. 반환: 묶음 id.
-  String mergeDraftInto(String draftId, String targetId, {String? batch}) {
+  ///
+  /// 둘 다 되거나 둘 다 안 된다 (11/13 검토: 붙인 뒤 초안 표시가 실패하면 붙인 것만 남아 다시 누르면 두 번 붙었다).
+  /// - 지식 폴더 잠금 안에서 한다: 앱과 `brain`이 같은 초안을 동시에 합치지 않게
+  /// - 초안 표시가 실패하면 대상 노트를 붙이기 전 내용으로 되돌리고 다시 던진다
+  /// - 대상에 이 초안의 "합친 초안" 머리가 이미 있으면(예전 판에서 끊긴 경우) 또 붙이지 않고 초안 표시만 한다
+  String mergeDraftInto(String draftId, String targetId, {String? batch}) => withVaultLock(vault, () {
     final batchId = batch ?? newBatchId();
     final (_, draft, _) = _readForChange(draftId);
     if (!draft.isDraft) throw NoteStoreException('$draftId 노트는 초안이 아니라 합치지 않습니다.');
@@ -519,20 +524,38 @@ class NoteStore {
     if (targetDoc.status != NoteStatus.active) {
       throw NoteStoreException('$targetId 노트는 정리된 노트가 아니라 합치지 않습니다 (${targetDoc.status.label}).');
     }
-    final date = formatTime(DateTime.now()).substring(0, 10);
-    update(
-      targetId,
-      expectHash: hash,
-      title: target.title,
-      summary: target.summary,
-      body: '${target.body.trimRight()}\n\n## 합친 초안: ${draft.title} ($date, $draftId)\n\n${draft.body.trim()}\n',
-      tags: target.tags,
-      aliases: target.aliases,
-      batch: batchId,
-    );
-    markMerged(draftId, into: targetId, batch: batchId);
+    final targetFile = fileOf(targetDoc);
+    final original = targetFile.readAsStringSync();
+    final isAppended = RegExp(
+      '^## 합친 초안: .* \\(\\d{4}-\\d{2}-\\d{2}, ${RegExp.escape(draftId)}\\)\$',
+      multiLine: true,
+    ).hasMatch(target.body);
+    if (!isAppended) {
+      final date = formatTime(DateTime.now()).substring(0, 10);
+      update(
+        targetId,
+        expectHash: hash,
+        title: target.title,
+        summary: target.summary,
+        body: '${target.body.trimRight()}\n\n## 합친 초안: ${draft.title} ($date, $draftId)\n\n${draft.body.trim()}\n',
+        tags: target.tags,
+        aliases: target.aliases,
+        batch: batchId,
+      );
+    }
+    try {
+      markMerged(draftId, into: targetId, batch: batchId);
+    } on Object {
+      if (!isAppended) {
+        // 붙인 것을 되돌린다. 기록에도 남겨 묶음의 "바꾼 뒤" 해시가 되돌린 내용과 맞게 한다.
+        writeFileAtomic(targetFile.path, original);
+        appendChangeLog(vault, 'update', '$targetId 합치기 실패로 되돌림 ${targetDoc.path}', batch: batchId);
+        _afterChange();
+      }
+      rethrow;
+    }
     return batchId;
-  }
+  });
 
   /// 색인을 맞추고 목차·온보딩 요약을 다시 만든다.
   void _afterChange() {

@@ -136,20 +136,67 @@ class AiEditReview {
 
   /// [되돌리기]: 이 노트를 고친 AI 묶음을 최근 것부터 되돌린다 (`brain undo`와 같다). 반환: 되돌린 파일 수.
   /// 한 묶음에 다른 파일(제목을 바꿀 때 고친 링크)이 있으면 함께 돌아간다.
+  ///
+  /// 11/13 검토: 이 노트의 사람 기록만 보고 묶음을 통째로 되살려, 같은 묶음에서 바뀐 다른 노트의 뒤 고침과 편집기로 고친
+  /// 내용(기록이 남지 않음)까지 지웠다. 화면에 뜬 [edit]도 오래됐을 수 있다. 그래서 (설계서_프롬프트이후 4.3)
+  /// 1. 카드를 지금 기록으로 다시 만들어 본다 (그사이 사람이 고쳤거나, 새 AI 고침이 생겼으면 멈춤)
+  /// 2. 묶음이 바꾼 파일이 모두 AI가 남긴 그대로인지 먼저 다 본다 ([driftSinceBatches]). 하나라도 다르면 아무것도 되돌리지 않는다
+  /// 3. 그다음에만 되돌리고, 도중에 실패해도 색인·목차는 맞춘다
   int revert(AiEdit edit) {
-    if (!edit.canRevert) {
+    final fresh = pending().where((e) => e.noteId == edit.noteId).firstOrNull;
+    if (fresh == null) {
+      throw NoteStoreException('${edit.noteId} 노트의 AI 고침은 이미 되돌렸거나 [확인함]으로 넘겼습니다. 정리 보드를 다시 보세요.');
+    }
+    if (!fresh.canRevert) {
       throw NoteStoreException(
         '${edit.noteId} 노트는 AI가 고친 뒤 직접 고친 기록이 있어 되돌리지 않습니다 (직접 고친 내용까지 사라짐). '
         '[바뀐 내용 보기]로 보고 직접 고치세요.',
       );
     }
-    var count = 0;
-    for (final batch in edit.batches.reversed) {
-      if (_batchDir(batch) == null) continue;
-      count += undoBatch(vault, batch);
+    if (!_sameSet(fresh.batches, edit.batches)) {
+      throw NoteStoreException('${edit.noteId} 노트를 AI가 그사이 또 고쳤습니다. 정리 보드를 다시 보고 [바뀐 내용 보기]로 확인한 뒤 되돌리세요.');
     }
-    index.sync();
-    VaultSummary(vault, index).writeAll();
+    final batches = [
+      for (final batch in fresh.batches.reversed)
+        if (_batchDir(batch) != null) batch,
+    ];
+    final drift = driftSinceBatches(vault, batches);
+    if (drift.isNotEmpty) {
+      final changed = [for (final d in drift) if (!d.isUnknown) _describe(d.path)];
+      final unknown = [for (final d in drift) if (d.isUnknown) _describe(d.path)];
+      throw NoteStoreException(
+        changed.isNotEmpty
+            ? '되돌리지 않았습니다: AI가 고친 뒤 ${changed.join(', ')}이(가) 다른 곳(앱·터미널·편집기·다른 AI 작업)에서 또 바뀌었습니다. '
+                  '되돌리면 그 고침까지 사라집니다. [바뀐 내용 보기]로 보고 직접 고치세요.'
+            : '되돌리지 않았습니다: ${unknown.join(', ')}은(는) 고친 뒤 상태를 남기기 전(11/13 전)의 기록이라 그사이 바뀌었는지 확인할 수 없습니다. '
+                  '[바뀐 내용 보기]로 보고 직접 고치세요.',
+      );
+    }
+    var count = 0;
+    try {
+      for (final batch in batches) {
+        count += undoBatch(vault, batch);
+      }
+    } finally {
+      index.sync();
+      VaultSummary(vault, index).writeAll();
+    }
     return count;
   }
+
+  /// 바뀐 파일을 사람이 알아볼 이름으로: `n_0002 릴리스 절차 (wiki/…)`. 노트가 아니거나 없으면 경로만.
+  String _describe(String rel) {
+    try {
+      final file = File(p.join(vault.root, rel));
+      if (file.existsSync() && rel.endsWith('.md')) {
+        final note = Note.parse(file.readAsStringSync(), fallbackId: '', fallbackTitle: '');
+        if (note.id.isNotEmpty) return '${note.id} ${note.title} ($rel)';
+      }
+    } on Object {
+      // 읽지 못하면 경로만 보인다
+    }
+    return rel;
+  }
 }
+
+bool _sameSet(List<String> a, List<String> b) => a.toSet().containsAll(b) && b.toSet().containsAll(a);

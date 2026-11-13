@@ -61,6 +61,49 @@ void main() {
       expect(store.read(draft)!.$1.isDraft, isTrue);
     });
 
+    // 11/13 검토: 기존 노트에 붙인 뒤 초안을 "합쳐짐"으로 바꾸다 실패하면 붙인 것만 남아, 다시 누르면 두 번 붙었다.
+    test('초안 표시가 실패하면 붙인 것도 되돌리고, 다시 합쳐도 한 번만 붙는다 (11/13 검토)', () {
+      final (target, _) = store.add(title: '결제 웹훅 재시도 규칙', summary: '3번', body: '3번까지 다시 보낸다.\n', topic: '결제');
+      final (draft, draftPath) = store.add(
+        title: '웹훅 간격',
+        summary: '1·5·30분',
+        body: '간격은 1분, 5분, 30분.\n',
+        draft: true,
+        topic: '초안칸',
+      );
+      final before = store.read(target)!.$2.body;
+      // 초안 폴더를 읽기 전용으로: 대상 노트는 고쳐지고 초안 쓰기(markMerged)만 실패한다
+      final draftDir = p.dirname(p.join(vault.root, draftPath));
+      Process.runSync('chmod', ['555', draftDir]);
+      try {
+        expect(() => store.mergeDraftInto(draft, target), throwsA(anything));
+      } finally {
+        Process.runSync('chmod', ['755', draftDir]);
+      }
+      expect(store.read(target)!.$2.body, before, reason: '반만 합쳐진 채 남지 않는다');
+      expect(store.read(draft)!.$1.isDraft, isTrue);
+
+      store.mergeDraftInto(draft, target);
+      final merged = store.read(target)!.$2.body;
+      expect('합친 초안: 웹훅 간격'.allMatches(merged).length, 1, reason: '다시 눌러도 한 번만 붙는다');
+      expect(store.read(draft)!.$1.isMerged, isTrue);
+    });
+
+    test('붙인 뒤 끊겨 초안만 남았어도 다시 합치면 또 붙이지 않는다 (11/13 검토)', () {
+      final (target, _) = store.add(title: '배포 요일 규칙', summary: '화·목', body: '배포는 화요일과 목요일.\n');
+      final (draft, _) = store.add(title: '금요일 배포', summary: '금지', body: '금요일에는 배포하지 않는다.\n', draft: true);
+      // 예전 판에서 붙이기만 하고 끊긴 상태를 만든다
+      final (_, note, hash) = store.read(target)!;
+      store.write(
+        target,
+        '${note.body.trimRight()}\n\n## 합친 초안: 금요일 배포 (2026-11-13, $draft)\n\n금요일에는 배포하지 않는다.\n',
+        expectHash: hash,
+      );
+      store.mergeDraftInto(draft, target);
+      expect('합친 초안: 금요일 배포'.allMatches(store.read(target)!.$2.body).length, 1);
+      expect(store.read(draft)!.$1.isMerged, isTrue);
+    });
+
     test('초안이 아니거나 대상이 정리된 노트가 아니면 합치지 않는다', () {
       final (a, _) = store.add(title: '가', summary: '가', body: '가 본문\n');
       final (b, _) = store.add(title: '나', summary: '나', body: '나 본문\n');

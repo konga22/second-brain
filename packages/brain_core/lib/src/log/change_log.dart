@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../note/note.dart';
@@ -43,6 +44,11 @@ void markAiSession(String? sessionId) => _aiSession = sessionId;
 /// 변경 기록 줄 끝의 AI 표시: ` · AI` 또는 ` · AI 대화 <세션 id>`.
 final aiLogMark = RegExp(r' · AI(?: 대화 (\S+))?$');
 
+/// 변경 기록 내용에서 AI 표시를 뗀다. 기록을 읽어 키·화면 글로 쓰는 곳은 모두 이것을 거친다
+/// (설계서_프롬프트이후 4.3, 11/13 검토: 할 일 키·`brain review`에 ` · AI 대화 <id>`가 섞였다).
+/// 사람이 쓴 할 일이 마침 " · AI"로 끝나면 AI 표시로 읽힌다 — 기록 모양이 같아 가릴 수 없다.
+String stripAiMark(String detail) => detail.replaceFirst(aiLogMark, '');
+
 /// 변경 기록 `_log/YYYY-MM.md`에 한 줄 추가한다 (추가만 함, 설계서 4.1).
 void appendChangeLog(
   Vault vault,
@@ -57,11 +63,88 @@ void appendChangeLog(
   if (!file.existsSync()) file.writeAsStringSync('# 변경 기록 $month\n\n');
   final session = _aiSession;
   final mark = session == null ? '' : (session.isEmpty ? ' · AI' : ' · AI 대화 $session');
+  final batchId = batch ?? currentBatch;
   file.writeAsStringSync(
-    '- ${formatTime(now)} [${batch ?? currentBatch}] $action $detail$mark\n',
+    '- ${formatTime(now)} [$batchId] $action $detail$mark\n',
     mode: FileMode.append,
     flush: true,
   );
+  _recordAfterChanges(vault, batchId);
+}
+
+/// 묶음별로 바꾸기 전을 남겼지만 "바꾼 뒤" 해시를 아직 적지 않은 파일 (이 프로세스 안, 절대 경로).
+final _pendingAfter = <String, Set<String>>{};
+
+/// 파일 내용의 sha1 (없으면 null). 되돌리기 전 확인용이라 노트 해시([contentHash])와 달리 전체 길이를 쓴다.
+String? fileHash(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return null;
+  return sha1.convert(file.readAsBytesSync()).toString();
+}
+
+/// 묶음이 바꾼 파일의 "바꾼 뒤" 해시를 `_meta/undo/<묶음>/after.jsonl`에 남긴다 (설계서_프롬프트이후 4.3, 11/13 검토).
+///
+/// [되돌리기]는 바꾸기 전 사본만 있어 그 뒤 다른 곳(사람·편집기·다른 AI 묶음)에서 고친 내용을 모르고 덮었다.
+/// 쓰는 곳마다 따로 부르지 않게, 바꾸기 전을 남긴 파일([recordBeforeChange])을 같은 묶음의 변경 기록 줄을 쓸 때
+/// 한꺼번에 적는다 — 노트·실수 노트·할 일 쓰기는 모두 "바꾸기 전 남김 → 쓰기 → 기록 한 줄" 순서다.
+/// 추가만 하고 같은 경로는 마지막 줄이 이긴다(`BRAIN_BATCH`로 여러 프로세스가 한 묶음을 써도 맞다).
+void _recordAfterChanges(Vault vault, String batch) {
+  final paths = _pendingAfter.remove(batch);
+  if (paths == null || paths.isEmpty || !batchIdPattern.hasMatch(batch)) return;
+  final dir = Directory(p.join(vault.metaDir, 'undo', batch));
+  if (!dir.existsSync()) return;
+  final lines = [
+    for (final path in paths) jsonEncode({'path': p.relative(path, from: vault.root), 'hash': fileHash(path)}),
+  ];
+  File(p.join(dir.path, 'after.jsonl')).writeAsStringSync('${lines.join('\n')}\n', mode: FileMode.append, flush: true);
+}
+
+/// 묶음 하나가 남긴 "바꾼 뒤" 해시: 지식 폴더 기준 경로 → 해시(null = 지운 파일). 예전 묶음에는 없다.
+Map<String, String?> _afterHashes(String dir) {
+  final file = File(p.join(dir, 'after.jsonl'));
+  final out = <String, String?>{};
+  if (!file.existsSync()) return out;
+  for (final line in file.readAsLinesSync()) {
+    if (line.trim().isEmpty) continue;
+    try {
+      final json = jsonDecode(line) as Map<String, dynamic>;
+      out[json['path'] as String] = json['hash'] as String?;
+    } on FormatException {
+      continue;
+    }
+  }
+  return out;
+}
+
+/// 되돌리면 남의 고침을 덮는 파일 하나. [isUnknown]이면 "바꾼 뒤" 기록이 없는 예전 묶음이라 확인할 수 없다.
+typedef BatchDrift = ({String path, bool isUnknown});
+
+/// [batches]를 앞에서부터(최근 것 먼저) 차례로 되돌린다고 할 때, 각 묶음이 바꾼 파일이 그때 그 묶음이 남긴 그대로인지 본다
+/// (설계서_프롬프트이후 4.3, 11/13 검토). 파일을 고치지 않는다. 반환이 비었을 때만 되돌려도 다른 고침이 사라지지 않는다.
+///
+/// 뒤 묶음을 되돌린 뒤의 상태는 그 묶음의 바꾸기 전 사본이므로, 앞 묶음은 그 사본과 견준다.
+List<BatchDrift> driftSinceBatches(Vault vault, List<String> batches) {
+  final expected = <String, String?>{}; // 경로 → 그 묶음을 되돌리기 직전에 있을 내용의 해시
+  final out = <BatchDrift>[];
+  for (final batch in batches) {
+    final dir = _undoDir(vault, batch);
+    final manifest = File(p.join(dir, 'manifest.jsonl'));
+    if (!manifest.existsSync()) continue;
+    final after = _afterHashes(dir);
+    for (final line in manifest.readAsLinesSync()) {
+      if (line.trim().isEmpty) continue;
+      final entry = jsonDecode(line) as Map<String, dynamic>;
+      final rel = entry['path'] as String;
+      final now = expected.containsKey(rel) ? expected[rel] : fileHash(p.join(vault.root, rel));
+      final isUnknown = !after.containsKey(rel);
+      if ((isUnknown || after[rel] != now) && !out.any((d) => d.path == rel)) {
+        out.add((path: rel, isUnknown: isUnknown));
+      }
+      final backup = entry['backup'] as String?;
+      expected[rel] = entry['existed'] == true && backup != null ? fileHash(p.join(dir, backup)) : null;
+    }
+  }
+  return out;
 }
 
 /// 묶음 id 모양: `b_20261106-213000-a1b2`, `s_1a2b3c4d`, `undo`, `BRAIN_BATCH` 값.
@@ -104,6 +187,8 @@ int maxLoggedNumber(Vault vault, String prefix) {
 void recordBeforeChange(Vault vault, String path, {String? batch}) {
   final id = batch ?? currentBatch;
   final dir = _undoDir(vault, id);
+  // 이미 남긴 파일이어도 이번에 또 바뀌므로 "바꾼 뒤" 해시는 다시 적는다 (위 [_recordAfterChanges]).
+  _pendingAfter.putIfAbsent(id, () => {}).add(path);
   final rel = p.relative(path, from: vault.root);
   final manifest = File(p.join(dir, 'manifest.jsonl'));
   if (manifest.existsSync() &&

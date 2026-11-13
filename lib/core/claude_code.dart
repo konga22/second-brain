@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:brain_core/brain_core.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
@@ -222,19 +223,34 @@ class ClaudeCode {
   ///
   /// 허용 도구는 `brain` 명령뿐이고, 지식 폴더에서 돌려 이 실행 자체는 세션 목록에서 빠진다.
   /// 긴 세션은 몇 분 걸리므로 진행 중인 단계를 [onStep]으로 알린다 (stream-json 출력).
+  ///
+  /// 성공으로 끝났는데 세션 표시가 없으면 "저장할 것 없음"으로 닫는다 ([SessionRegistry.closeIfOpen]). AI가 바뀐 결정을
+  /// 옛 노트에 `brain write`로만 고치고 표시를 빠뜨리면 자동 정리가 같은 세션을 또 돌려 예산을 썼다
+  /// (설계서_프롬프트이후 4.4, 11/13 검토). 실패·멈춤은 그대로 둔다 — 다음에 다시 정리한다.
   Future<HeadlessResult> saveSession(
     ClaudeSession session, {
     void Function(Process)? onStart,
     void Function(String step)? onStep,
     double? maxBudgetUsd,
-  }) => _runHeadless(
-    'brain-save 스킬을 써서 지난 Claude Code 세션 ${session.shortId} 의 지식을 세컨드 브레인에 초안으로 저장해 줘. '
-    '저장할 것이 없으면 brain sessions mark로 skipped 처리해 줘. brain add에는 heredoc을 바로 붙이고 cat 파이프는 쓰지 마. 끝나면 저장한 노트 id와 제목만 짧게 알려 줘.',
-    allowedTools: 'Bash(brain *),Skill(second-brain:brain-save)',
-    onStart: onStart,
-    onStep: onStep,
-    maxBudgetUsd: maxBudgetUsd,
-  );
+  }) async {
+    final result = await _runHeadless(
+      'brain-save 스킬을 써서 지난 Claude Code 세션 ${session.shortId} 의 지식을 세컨드 브레인에 초안으로 저장해 줘. '
+      '바뀐 결정을 옛 노트에 고칠 때는 brain write에 --source-session ${session.shortId} 를 붙여 줘. '
+      '저장할 것이 없으면 brain sessions mark로 skipped 처리해 줘. brain add에는 heredoc을 바로 붙이고 cat 파이프는 쓰지 마. 끝나면 저장한 노트 id와 제목만 짧게 알려 줘.',
+      allowedTools: 'Bash(brain *),Skill(second-brain:brain-save)',
+      onStart: onStart,
+      onStep: onStep,
+      maxBudgetUsd: maxBudgetUsd,
+    );
+    if (result.ok) {
+      try {
+        SessionRegistry(vault).closeIfOpen(session.sessionId);
+      } on FileSystemException catch (e) {
+        debugPrint('[세션 정리] ${session.shortId} 표시를 남기지 못함: $e');
+      }
+    }
+    return result;
+  }
 
   /// 할 일 추천: 사용자의 Claude Code가 노트·지난 대화를 보고 `brain todo suggest`로 최대 5개를 넣는다.
   Future<HeadlessResult> suggestTodos({

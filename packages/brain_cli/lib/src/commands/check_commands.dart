@@ -194,6 +194,7 @@ class ReviewCommand extends Command<int> {
     context.index.syncIfStale();
     String title(String id) => context.index.byId(id)?.title ?? '(지워졌거나 옮겨진 노트)';
     final added = <String>{}, changed = <String>{}, confirmed = <String>{}, lessons = <String>{}, todos = <String>[];
+    // detail은 AI 표시(` · AI 대화 <id>`)를 뗀 내용이다 — 할 일 줄에 대화 id가 섞이지 않는다 (설계서_프롬프트이후 4.3, 11/13 검토)
     for (final e in events) {
       final id = e.detail.split(' ').first;
       switch (e.action) {

@@ -120,7 +120,8 @@ class TimelineView extends ConsumerWidget {
                         return GestureDetector(
                           onTap: doc == null ? null : () => ref.read(selectedNoteProvider.notifier).select(doc.id),
                           child: Text(
-                            doc == null ? e.detail : '${doc.title}  ·  ${e.detail}',
+                            // 내용에서 뗀 AI 표시(설계서_프롬프트이후 4.3)는 대화 id 없이 짧게 붙인다 (11/13 검토)
+                            '${doc == null ? e.detail : '${doc.title}  ·  ${e.detail}'}${e.isAi ? '  · AI' : ''}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 12, color: doc == null ? colors.textMuted : colors.text),

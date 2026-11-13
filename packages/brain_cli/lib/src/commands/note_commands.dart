@@ -181,6 +181,7 @@ class ShowCommand extends Command<int> {
     final from = int.tryParse(argResults!['from'] as String) ?? 0;
     final end = (from + _pageSize).clamp(0, body.length);
     final date = note.updated ?? note.created ?? doc.mtime;
+    if (doc.isMerged) stdout.writeln(_mergedNotice(doc.id, note));
     stdout
       ..writeln(
         '${doc.id} ${note.title} · ${doc.folder} · 출처 ${note.source} · ${date.toIso8601String().substring(0, 10)}'
@@ -200,10 +201,33 @@ class ShowCommand extends Command<int> {
     return 0;
   }
 
+  /// 합쳐진 노트를 열면 맨 앞에 보이는 한 줄 (설계서_프롬프트이후 4.2·4.4, 11/13 검토).
+  /// `redirect:`를 아무도 읽지 않아, 대화 속 옛 id로 연 AI가 옛 내용을 지금 결정으로 믿었다.
+  /// 합쳐진 곳이 또 합쳐졌으면 끝까지 따라간다 (돌고 도는 기록은 5번에서 멈춤).
+  String _mergedNotice(String id, Note note) {
+    var into = note.extra['redirect']?.toString().trim() ?? '';
+    final seen = {id};
+    IndexedDoc? target;
+    while (into.isNotEmpty && seen.add(into) && seen.length <= 6) {
+      target = context.index.byId(into);
+      if (target == null || !target.isMerged) break;
+      final next = context.notes.read(into)?.$2.extra['redirect']?.toString().trim() ?? '';
+      if (next.isEmpty) break;
+      into = next;
+    }
+    if (target == null) {
+      return '[합쳐진 노트] $id는 ${into.isEmpty ? '다른 노트' : into}에 합쳐진 옛 내용입니다. 합쳐진 노트를 찾지 못했습니다 — '
+          '아래는 지금 결정이 아닐 수 있으니 brain find로 지금 노트를 찾으세요.';
+    }
+    return '[합쳐진 노트] $id는 ${target.id} ${target.title}에 합쳐진 옛 내용입니다. 지금 내용은 brain show ${target.id} 로 보세요 '
+        '(아래는 근거로 쓰지 않는다).';
+  }
+
   /// 이 노트와 이어진 노트 최대 5개. `[[링크]]`가 먼저, 추천은 `(추천)`.
   List<String> _linksOf(String id) {
     final dismissed = DismissedLinks(context.vault).load();
-    // 확인 전 초안의 제목은 AI에게 보이지 않는다 (설계서_프롬프트이후 4.1).
+    // 확인 전 초안의 제목은 AI에게 보이지 않는다 (설계서_프롬프트이후 4.1). 합쳐진(옛) 노트도 AI 찾기처럼 뺀다 (4.2·4.4,
+    // 11/13 검토). "이전 방식"(초안도 보임)이면 찾기처럼 둘 다 보인다.
     final drafts = AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     final out = <String>[];
     for (final link in context.index.links(dismissed: dismissed)) {
@@ -212,7 +236,7 @@ class ShowCommand extends Command<int> {
           : (link.toId == id ? link.fromId : null);
       if (other == null || out.any((l) => l.startsWith('$other '))) continue;
       final doc = context.index.byId(other);
-      if (doc != null && doc.isDraft && !drafts) continue;
+      if (doc != null && (doc.isDraft || doc.isMerged) && !drafts) continue;
       final title = doc?.title ?? '';
       out.add('$other ${clip(title, 20)}${link.isSuggested ? ' (추천)' : ''}');
       if (out.length >= 5) break;
@@ -391,12 +415,15 @@ class AddCommand extends Command<int> {
     final isStrong = similar.isNotEmpty && similar.first.shared >= SearchIndex.similarStrongMin;
     if (!isStrong || !isAiSession || args['new'] as bool) return null;
     final top = similar.first.doc;
+    // 지난 세션 정리면 고칠 때도 세션을 적게 한다: 안 적으면 자동 정리가 같은 세션을 또 돈다 (11/13 검토)
+    final session = args['source-session'] as String?;
+    final sessionArg = session == null ? '' : ' --source-session $session';
     stderr.writeln(
       '저장하지 않음: 비슷한 정리된 노트가 있습니다 (결정이 바뀐 것이면 새 노트 대신 옛 노트를 고친다).\n'
       '${_similarLines.join('\n')}\n'
-      '- 같은 결정을 바꾼 것이면: brain show ${top.id} 로 읽고 brain write ${top.id} --expect-hash <해시> '
+      '- 같은 결정을 바꾼 것이면: brain show ${top.id} 로 읽고 brain write ${top.id} --expect-hash <해시>$sessionArg '
       '--title "…" --summary "…" 로 제목·요약까지 고친다 (본문을 바꾸면 전체를 heredoc으로).\n'
-      '- 다른 지식이면: 같은 명령에 --new 를 붙여 다시 저장한다.',
+      '- 같은 결정에 더할 사실이거나 다른 지식이면: 같은 명령에 --new 를 붙여 다시 저장한다 (초안으로 저장된다).',
     );
     return 3;
   }
@@ -410,6 +437,11 @@ class WriteCommand extends Command<int> {
       ..addOption('title', help: '새 제목 (바뀌면 파일 이름과 [[옛 제목]] 링크도 고친다)')
       ..addOption('summary', help: '새 요약 (60자 이내, 찾기 결과에 그대로 보인다)')
       ..addOption('tags', help: '새 태그 (쉼표로 구분)')
+      ..addOption(
+        'source-session',
+        help: '지난 세션을 정리하며 고친 것이면 그 세션 id (앞 8자 이상). 세션을 "저장함"으로 적어 자동 정리가 다시 돌지 않는다 '
+            '(설계서_프롬프트이후 4.4)',
+      )
       ..addFlag('force', help: '본문을 크게 줄이는 것이 맞을 때 (긴 노트의 절반 아래로)', negatable: false);
   }
 
@@ -436,6 +468,21 @@ class WriteCommand extends Command<int> {
     if (!hasBody && !hasMeta) {
       usageException('새 본문(표준 입력)이나 --title·--summary·--tags 중 하나는 주세요.');
     }
+    // 지난 세션 정리에서 바뀐 결정을 옛 노트에 고치면(4.4) brain add가 없어 세션 표시가 남지 않았다. 그러면 자동 정리가
+    // 같은 세션을 또 돌려 예산을 썼다 (11/13 검토). 세션은 고치기 전에 찾아 두고, 고친 뒤에 적는다.
+    final sessionArg = argResults!['source-session'] as String?;
+    final session = sessionArg == null ? null : context.sessions.find(sessionArg, vault: context.vault);
+    if (sessionArg != null && session == null) {
+      stderr.writeln('세션 $sessionArg 를 찾지 못했습니다 (brain sessions로 확인). 노트는 고치지 않았습니다.');
+      return 1;
+    }
+    void markSession() {
+      if (session == null) return;
+      final isPartial = warnUnreadSession(context, session);
+      context.registry.mark(session.sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
+      stdout.writeln('세션 ${session.shortId}: ${isPartial ? SessionStatus.partial.label : SessionStatus.saved.label}으로 적음');
+    }
+
     try {
       // 본문은 통째로 바뀌는데 `brain show`는 1,500자씩 보여 준다. 앞부분만 보고 고쳐 보내면 뒤쪽이 사라졌다 (11/11 K-27).
       // show 한 쪽보다 긴 노트를 절반 아래로 줄이면 멈추고 묻는다. 정말 줄이는 것이면 --force.
@@ -452,6 +499,7 @@ class WriteCommand extends Command<int> {
       }
       if (!hasMeta) {
         stdout.writeln(context.notes.write(id, body!, expectHash: expect));
+        markSession();
         return 0;
       }
       // 제목·요약·태그: 앱 편집과 같은 update (제목이 바뀌면 파일 이름·링크도). 빠진 값은 지금 값 그대로.
@@ -471,6 +519,7 @@ class WriteCommand extends Command<int> {
         aliases: note.aliases,
       );
       stdout.writeln(newHash);
+      markSession();
       return 0;
     } on NoteStoreException catch (e) {
       stderr.writeln(e.message);

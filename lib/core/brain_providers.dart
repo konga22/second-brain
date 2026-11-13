@@ -217,6 +217,7 @@ final firstSeenProvider = Provider<Map<String, DateTime>>((ref) {
       case 'add' || 'lesson-add' || 'import':
         keep(e.detail.split(' ').first, e.at);
       case 'todo-add' || 'todo-accept' || 'todo-suggest':
+        // detail은 AI 표시를 뗀 내용이다: AI가 넣은 할 일도 키가 `todo:<내용>` (설계서_프롬프트이후 4.3, 11/13 검토)
         keep('todo:${e.detail.trim()}', e.at);
     }
   }

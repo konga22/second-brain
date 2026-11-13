@@ -171,5 +171,75 @@ void main() {
       expect(legacy, 0, reason: legacyErr);
       expect(legacyOut, isNot(contains('비슷한 정리된 노트')));
     });
+
+    // 11/13 검토: 멈춘 뒤 AI가 옛 노트만 brain write로 고치면 세션 표시가 없어 자동 정리가 같은 세션을 다시 돌렸다.
+    test('지난 세션 정리에서 옛 노트를 brain write --source-session으로 고치면 그 세션이 "저장함"이 된다', () async {
+      final ids = seed();
+      final home = p.join(temp.path, 'case', 'home');
+      final project = Directory(p.join(home, '.claude', 'projects', '-Users-me-shop'))..createSync(recursive: true);
+      File(p.join(project.path, 'cafe0004-dddd.jsonl')).writeAsStringSync([
+        for (final (i, text) in ['웹훅 재시도를 5번으로 늘리자.', '네, 5번으로 바꿨습니다.'].indexed)
+          jsonEncode({
+            'type': i.isEven ? 'user' : 'assistant',
+            'sessionId': 'cafe0004-dddd',
+            'cwd': '/Users/me/shop',
+            'timestamp': '2026-11-01T10:0$i:00.000Z',
+            'message': {'role': i.isEven ? 'user' : 'assistant', 'content': i.isEven ? text : [{'type': 'text', 'text': text}]},
+          }),
+      ].join('\n'));
+      final (shown, _, showErr) = await brain(['sessions', 'show', 'cafe0004'], env: {'HOME': home});
+      expect(shown, 0, reason: showErr);
+      final (code, out, err) = await brain(
+        ['write', ids[0], '--expect-hash', hashOf(ids[0]), '--source-session', 'cafe0004', '--summary', '웹훅 실패 시 5번까지 재시도'],
+        stdin: changedBody,
+        ai: true,
+        env: {'HOME': home},
+      );
+      expect(code, 0, reason: '$out$err');
+      final registry = SessionRegistry(Vault(vaultRoot));
+      expect(registry.load()['cafe0004-dddd'], SessionStatus.saved);
+      expect(registry.notesOf('cafe0004-dddd'), [ids[0]]);
+    });
+  });
+
+  // 11/13 검토 (설계서_프롬프트이후 4.2·4.4): 합쳐진 노트의 redirect를 아무도 읽지 않아, 옛 id로 연 AI가 옛 내용을 지금 결정으로 믿었다.
+  group('합쳐진 노트 안내', () {
+    test('brain show <합쳐진 id>는 첫 줄에 어디로 합쳐졌는지 알리고, 연결 줄에는 합쳐진 노트가 없다', () async {
+      final (target, draft) = withStore((store, _, _) {
+        final (target, _) = store.add(title: '결제 웹훅 재시도 규칙', summary: '3번', body: '3번까지 다시 보낸다.\n');
+        final (draft, _) = store.add(
+          title: '웹훅 간격',
+          summary: '1·5·30분',
+          body: '간격은 1분, 5분, 30분.\n\n관련: [[결제 웹훅 재시도 규칙]]\n',
+          draft: true,
+        );
+        store.mergeDraftInto(draft, target);
+        return (target, draft);
+      });
+      final (code, out, err) = await brain(['show', draft]);
+      expect(code, 0, reason: err);
+      final first = out.split('\n').first;
+      expect(first, contains('합쳐진'));
+      expect(first, contains('$target 결제 웹훅 재시도 규칙'));
+      expect(first, contains('brain show $target'));
+
+      // 대상 본문에는 "합친 초안: … (n_…)" 머리가 있으니 연결 줄만 본다
+      String linksLine(String text) => text.split('\n').firstWhere((l) => l.startsWith('연결:'), orElse: () => '');
+      final (_, targetOut, _) = await brain(['show', target]);
+      expect(linksLine(targetOut), isNot(contains(draft)), reason: '연결: 줄에 합쳐진(옛) 노트를 보이지 않는다');
+      // 이전 방식(초안도 AI에게 보임)이면 찾기처럼 합쳐진 노트도 보인다 (4.1·4.2와 같은 기준)
+      final (_, legacyOut, _) = await brain(['show', target], env: {'BRAIN_LEGACY': 'drafts'});
+      expect(linksLine(legacyOut), contains(draft));
+    });
+  });
+
+  // 11/13 검토 (설계서_프롬프트이후 4.3): 변경 기록 끝의 AI 표시가 할 일 내용에 붙어 회고에 대화 id가 나왔다.
+  test('AI 대화에서 넣은 할 일도 brain review에는 내용만 나온다', () async {
+    const session = '7d1c2b3a-1111-4222-8333-444455556666';
+    final (code, _, err) = await brain(['todo', 'add', '발표 자료 만들기'], ai: true, env: {'CLAUDE_CODE_SESSION_ID': session});
+    expect(code, 0, reason: err);
+    final (_, out, _) = await brain(['review']);
+    expect(out, contains('- 발표 자료 만들기\n'));
+    expect(out, isNot(contains('AI 대화')));
   });
 }
