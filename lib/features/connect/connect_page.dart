@@ -348,6 +348,8 @@ class _SystemCheckCard extends ConsumerWidget {
                 for (final (label, ok) in vault.items)
                   _CheckRow(label: label, isOk: ok),
                 if (vault.error != null) Text(vault.error!),
+                if (result.gitExposure case final exposure?)
+                  _WarningRow(text: exposure.warning),
                 const SizedBox(height: 16),
                 Text('Supabase', style: theme.textTheme.small),
                 switch (result.isSupabaseReachable) {
@@ -389,6 +391,29 @@ class _CheckRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Flexible(child: Text(label)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 실패는 아니지만 사용자가 알아야 하는 점검 결과 (설계서_프롬프트이후 4.6 GitHub 경고).
+class _WarningRow extends StatelessWidget {
+  const _WarningRow({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.triangleAlert, size: 16, color: colors.warning),
+          const SizedBox(width: 8),
+          Flexible(child: Text(text)),
         ],
       ),
     );

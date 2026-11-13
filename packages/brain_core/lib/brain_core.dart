@@ -24,6 +24,7 @@ export 'src/note/note.dart';
 export 'src/note/note_origin.dart';
 export 'src/note/note_store.dart';
 export 'src/note/wiki_links.dart';
+export 'src/security/git_remote_check.dart';
 export 'src/security/secret_mask.dart';
 export 'src/sessions/claude_sessions.dart';
 export 'src/sessions/session_archive.dart';

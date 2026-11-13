@@ -99,6 +99,9 @@ class _DoctorCommand extends Command<int> {
         stdout.writeln('[주의] 읽을 수 없는 파일 $rel — UTF-8로 다시 저장하거나 지식 폴더 밖으로 ($reason)');
       }
     }
+    // 원격이 붙은 git 폴더 안이면 push 한 번에 지식이 올라간다. 경고만 하고 실패로 치지 않는다 (설계서_프롬프트이후 4.6).
+    final exposure = findGitRemoteExposure(context.vault.root);
+    if (exposure != null) stdout.writeln('[주의] ${exposure.warning}');
     final sessionsDir = Directory(context.sessions.projectsDir).existsSync();
     stdout.writeln(
       '${sessionsDir ? '[통과]' : '[없음]'} Claude Code 세션 기록 ${context.sessions.projectsDir}',
