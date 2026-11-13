@@ -298,3 +298,26 @@ Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, 
         index.close();
       }
     });
+
+/// 신경망 보기 층 배치 (설계서_프롬프트이후 5.3). 노트 출처(`sources:`)는 색인에 없어 노트 파일 머리말을 읽는다 —
+/// 노트 1만 개에서 파일 읽기 + 배치 약 0.6초라 화면 스레드에서 하지 않는다. 넘기는 것은 글자·참거짓 값뿐이다 (L-0004).
+/// 원본 문서 id·제목은 색인에서 읽고, 색인을 못 열면(처음 색인 중 잠김 등) 원본 파일 머리말로 대신한다.
+Future<NeuralLayout> neuralLayoutInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links,
+) => Isolate.run(() {
+  var rawDocs = const <String, ({String id, String title})>{};
+  try {
+    final index = SearchIndex.open(Vault(vaultRoot), path: indexPath, rebuildIfOld: false);
+    try {
+      rawDocs = {for (final d in index.docsOf('raw')) d.path: (id: d.id, title: d.title)};
+    } finally {
+      index.close();
+    }
+  } on Object {
+    // 원본 파일에서 읽는다
+  }
+  return neuralLayoutFromVault(vaultRoot, notes, links, rawDocs: rawDocs);
+});

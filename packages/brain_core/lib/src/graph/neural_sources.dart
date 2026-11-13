@@ -1,0 +1,143 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+import 'package:yaml/yaml.dart';
+
+import 'neural_layout.dart';
+
+/// 신경망 보기에 넣을 노트 한 개 (색인에서 읽은 값). 출처는 색인에 없어 파일 머리말에서 읽는다.
+typedef NeuralNoteRow = ({String id, String path, String title, String topic, bool isDraft});
+
+/// 지식 폴더에서 노트 `sources:`와 원본 제목을 읽어 층 배치까지 한다 (설계서_프롬프트이후 5.3).
+/// 파일을 1만 개 읽으므로 화면 스레드에서 부르지 않는다 — 앱은 isolate에서 부른다 (L-0004).
+/// 읽지 못한 파일은 출처 없는 노트로 둔다 (지워지는 중인 노트 하나 때문에 화면 전체가 실패하지 않게).
+///
+/// [rawDocs]는 색인의 원본 문서(경로 → id·제목)다. 있으면 원본 파일을 열지 않는다. 가져온 문서는 머리말에
+/// id가 없어 색인 id로만 열 수 있다.
+NeuralLayout neuralLayoutFromVault(
+  String vaultRoot,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links, {
+  Map<String, ({String id, String title})> rawDocs = const {},
+}) {
+  final specs = [
+    for (final n in notes)
+      NeuralNoteSpec(
+        id: n.id,
+        title: n.title,
+        topic: n.topic,
+        isDraft: n.isDraft,
+        sources: frontmatterList(_readHead(p.join(vaultRoot, n.path)), 'sources'),
+      ),
+  ];
+  final titles = <String, String>{};
+  final rawIds = <String, String>{};
+  for (final path in {
+    for (final s in specs)
+      for (final source in s.sources) ?neuralInputOf(source)?.path,
+  }) {
+    final known = rawDocs[path];
+    if (known != null) {
+      titles[path] = neuralInputTitle(known.title);
+      rawIds[path] = known.id;
+      continue;
+    }
+    final head = _readHead(p.join(vaultRoot, path));
+    final title = frontmatterScalar(head, 'title');
+    if (title != null && title.isNotEmpty) titles[path] = neuralInputTitle(title);
+    final id = frontmatterScalar(head, 'id');
+    if (id != null && id.isNotEmpty) rawIds[path] = id;
+  }
+  return layoutNeural(specs, links, inputTitles: titles, inputRawIds: rawIds);
+}
+
+/// 파일 앞부분. 머리말이 이보다 길면(드묾) 파일 전체를 읽는다.
+String _readHead(String path, [int bytes = 4096]) {
+  try {
+    final file = File(path);
+    final handle = file.openSync();
+    try {
+      final read = handle.readSync(bytes);
+      final head = utf8.decode(read, allowMalformed: true);
+      if (read.length < bytes || !head.startsWith('---') || _frontmatter.hasMatch(head)) return head;
+      return file.readAsStringSync();
+    } finally {
+      handle.closeSync();
+    }
+  } on FileSystemException {
+    return '';
+  }
+}
+
+final _frontmatter = RegExp(r'^---\r?\n([\s\S]*?)\r?\n---');
+final _item = RegExp(r'^\s*-\s+(.*)$');
+
+/// 머리말 블록 (없으면 null).
+String? _block(String text) => _frontmatter.firstMatch(text)?.group(1);
+
+/// 머리말의 목록 값. `key: ["a", "b"]`(앱이 쓰는 모양)와 여러 줄 `- a` 모두 읽는다.
+/// YAML 전체를 풀면 1만 개에서 느려 이 키 한 줄만 본다. 모르는 모양이면 그 줄만 YAML로 푼다.
+List<String> frontmatterList(String text, String key) {
+  final block = _block(text);
+  if (block == null) return const [];
+  final lines = block.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i].trimRight();
+    if (!line.startsWith('$key:')) continue;
+    final value = line.substring(key.length + 1).trim();
+    if (value.isEmpty) {
+      // 여러 줄 목록: 다음 키(들여쓰기 없는 줄)가 나오기 전까지의 `- 항목`
+      final out = <String>[];
+      for (var j = i + 1; j < lines.length; j++) {
+        final m = _item.firstMatch(lines[j]);
+        if (m == null) {
+          if (lines[j].trim().isEmpty) continue;
+          break;
+        }
+        out.add(_unquote(m.group(1)!.trim()));
+      }
+      return out;
+    }
+    if (value.startsWith('[')) {
+      try {
+        final list = jsonDecode(value);
+        if (list is List) return [for (final x in list) '$x'];
+      } on FormatException {
+        // 따옴표 없는 [a, b] — 아래 YAML로
+      }
+    }
+    try {
+      final yaml = loadYaml(value);
+      if (yaml is YamlList) return [for (final x in yaml) '$x'];
+      if (yaml != null) return ['$yaml'];
+    } on YamlException {
+      return const [];
+    }
+    return const [];
+  }
+  return const [];
+}
+
+/// 머리말의 한 값 (`title: "세션 x 사이드 채팅"` → `세션 x 사이드 채팅`).
+String? frontmatterScalar(String text, String key) {
+  final block = _block(text);
+  if (block == null) return null;
+  for (final raw in block.split('\n')) {
+    final line = raw.trimRight();
+    if (line.startsWith('$key:')) return _unquote(line.substring(key.length + 1).trim());
+  }
+  return null;
+}
+
+String _unquote(String v) {
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) {
+    try {
+      return jsonDecode(v) as String;
+    } on FormatException {
+      return v.substring(1, v.length - 1);
+    }
+  }
+  if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) return v.substring(1, v.length - 1).replaceAll("''", "'");
+  return v;
+}
