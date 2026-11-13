@@ -96,7 +96,9 @@ class BoardView extends ConsumerWidget {
                 _CardData(
                   pair.newId,
                   '옛 결정일 수 있음: ${pair.oldTitle}',
-                  '${pair.oldId}(옛)과 ${pair.newId} ${pair.newTitle}(최근)이 같은 주제 ${pair.topic}에서 비슷함 · 핵심 단어 ${pair.shared}/5',
+                  // 판단에 쓰는 것(겹친 핵심 단어·주제)을 앞에 둔다: 3줄에서 잘려도 보이게
+                  '핵심 단어 ${pair.shared}/5 겹침 · 주제 ${pair.topic}\n더 최근 노트: ${pair.newTitle} (${pair.newId}) · 옛 노트 ${pair.oldId}',
+                  detailLines: 5,
                   extra: OldDecisionActions(
                     onArchive: () => _archiveOld(context, ref, pair),
                     onKeepBoth: () => _keepBoth(context, ref, pair),
@@ -134,7 +136,7 @@ class BoardView extends ConsumerWidget {
     final toaster = ShadToaster.maybeOf(context);
     try {
       await archiveOldDecisionInBackground(vault.root, vault.indexPath, pair, newBatchId());
-      toaster?.show(ShadToast(description: Text('${pair.oldTitle}을 보관했습니다 (합쳐짐 → ${pair.newId}). 설정 → 되돌리기에서 되돌릴 수 있습니다.')));
+      toaster?.show(ShadToast(description: Text('옛 노트를 보관했습니다: ${pair.oldTitle} (합쳐짐 → ${pair.newId}). 설정 → 되돌리기에서 되돌릴 수 있습니다.')));
     } on Object catch (e) {
       toaster?.show(ShadToast.destructive(description: Text('보관하지 못했습니다: ${e is NoteStoreException ? e.message : e}')));
     } finally {
@@ -282,10 +284,12 @@ class AiEditActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    // shadcn 버튼은 onPressed가 null이어도 눌리는 버튼처럼 보인다 → enabled로 흐리게 (11/13 화면 검토)
     Widget button(String label, VoidCallback? onPressed, {bool outline = false}) => (outline ? ShadButton.outline : ShadButton.ghost)(
       size: ShadButtonSize.sm,
       height: 22,
       padding: const EdgeInsets.symmetric(horizontal: 6),
+      enabled: onPressed != null,
       onPressed: onPressed,
       child: Text(label, style: const TextStyle(fontSize: 11)),
     );
@@ -303,9 +307,12 @@ class AiEditActions extends StatelessWidget {
             ],
           ),
           if (!edit.canRevert)
-            Text(
-              '그 뒤에 직접 고친 기록이 있어 되돌리기를 막았습니다 (직접 고친 내용까지 사라짐).',
-              style: theme.textTheme.muted.copyWith(fontSize: 11),
+            Padding(
+              padding: const EdgeInsets.only(left: 6, top: 2),
+              child: Text(
+                '되돌리기 꺼짐: 그 뒤에 직접 고친 기록이 있어 되돌리기를 막았습니다 (직접 고친 내용까지 사라짐).',
+                style: theme.textTheme.muted.copyWith(fontSize: 11),
+              ),
             ),
         ],
       ),
@@ -367,23 +374,27 @@ class DecisionCheckBar extends StatelessWidget {
     } else {
       label = last == null ? '옛 결정 점검: 아직 안 함 (주 1회)' : '옛 결정 점검: ${last.month}/${last.day} (주 1회)';
     }
+    // 좁은 칸에서 글 중간에 줄이 꺾이지 않게: 자리가 모자라면 버튼이 다음 줄로 내려간다 (11/13 화면 검토)
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Row(
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.muted.copyWith(fontSize: 11, color: state.error == null ? null : colors.danger),
-            ),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.muted.copyWith(fontSize: 11, color: state.error == null ? null : colors.danger),
           ),
+          // 도는 중에는 흐리게 (shadcn은 onPressed null만으로는 흐려지지 않는다). 진행은 왼쪽 글에 보인다.
           ShadButton.outline(
             size: ShadButtonSize.sm,
             height: 22,
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            onPressed: state.isRunning ? null : onRun,
+            enabled: !state.isRunning,
+            onPressed: onRun,
             child: const Text('지금 점검', style: TextStyle(fontSize: 11)),
           ),
         ],
@@ -441,32 +452,45 @@ class DraftSimilarList extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('비슷한 정리된 노트', style: theme.textTheme.muted.copyWith(fontSize: 11)),
+          // 좁은 칸에서 버튼이 제목을 몇 글자로 줄이지 않게: 제목(두 줄까지)과 점수를 한 줄에, 버튼은 그 아래 오른쪽 (11/13 화면 검토)
           for (final s in similar.take(2))
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${s.doc.title}  (${s.shared}/${s.terms})',
-                    maxLines: 1,
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: s.doc.title),
+                        TextSpan(text: '  (${s.shared}/${s.terms})', style: theme.textTheme.muted.copyWith(fontSize: 11)),
+                      ],
+                    ),
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11),
                   ),
-                ),
-                ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  height: 22,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  onPressed: () => onOpen(s.doc.id),
-                  child: const Text('옆에 열기', style: TextStyle(fontSize: 11)),
-                ),
-                ShadButton.outline(
-                  size: ShadButtonSize.sm,
-                  height: 22,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  onPressed: () => onMerge(s),
-                  child: const Text('합치기', style: TextStyle(fontSize: 11)),
-                ),
-              ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      ShadButton.ghost(
+                        size: ShadButtonSize.sm,
+                        height: 22,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        onPressed: () => onOpen(s.doc.id),
+                        child: const Text('옆에 열기', style: TextStyle(fontSize: 11)),
+                      ),
+                      ShadButton.outline(
+                        size: ShadButtonSize.sm,
+                        height: 22,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        onPressed: () => onMerge(s),
+                        child: const Text('합치기', style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
         ],
       ),
@@ -475,11 +499,14 @@ class DraftSimilarList extends StatelessWidget {
 }
 
 class _CardData {
-  const _CardData(this.id, this.title, this.detail, {this.extra});
+  const _CardData(this.id, this.title, this.detail, {this.extra, this.detailLines = 3});
 
   final String id;
   final String title;
   final String detail;
+
+  /// 설명 줄 수 상한 (옛 결정 카드는 두 노트를 다 보여야 해서 더 길게).
+  final int detailLines;
 
   /// 카드 아래에 붙는 줄 (비슷한 노트, 점검 버튼).
   final Widget? extra;
@@ -549,7 +576,7 @@ class _Column extends ConsumerWidget {
                                   if (card.detail.isNotEmpty)
                                     Text(
                                       card.detail,
-                                      maxLines: 3,
+                                      maxLines: card.detailLines,
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.muted.copyWith(fontSize: 11),
                                     ),
