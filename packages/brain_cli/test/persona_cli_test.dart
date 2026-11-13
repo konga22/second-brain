@@ -174,7 +174,7 @@ void main() {
   });
 
   test('세션 시작 안내: 일·답 방식 한 줄만 더하고, 세션마다 같고, 금지어는 넣지 않는다', () async {
-    final (code, out, err) = await brain(['add', '--title', '결제 웹훅 재시도', '--summary', '3번까지 재시도', '--topic', '결제'], stdin: '간격을 늘린다\n');
+    final (code, out, err) = await brain(['add', '--title', '결제 웹훅 재시도', '--summary', '3번까지 재시도', '--topic', '개발 지식/결제'], stdin: '간격을 늘린다\n');
     expect(code, 0, reason: '$out $err');
     String context(String raw) =>
         (jsonDecode(raw) as Map<String, dynamic>)['hookSpecificOutput']['additionalContext'] as String;
@@ -185,7 +185,7 @@ void main() {
     final (_, second, _) = await brain(['hook', 'session-start'], stdin: input);
     final a = context(before);
     final b = context(first);
-    expect(a, contains('· 주제: 결제'), reason: '_profile.md 주제 줄을 계속 읽는다');
+    expect(a, contains('· 주제: 개발 지식(결제)'), reason: '_profile.md 주제 줄을 계속 읽는다 (구역별로 묶음, 설계서_프롬프트이후 5.1)');
     expect(b, contains('· 사용자: 대림대 3학년, 세컨드 브레인 맥 앱을 혼자 만드는 중 · 답 방식: 짧게 결론 먼저'));
     expect(second, first, reason: 'me.md가 그대로면 세션마다 같은 글 (캐시)');
     for (final term in ['연봉', '주민등록번호', '집 주소', 'Hansol', '건강검진', '저장하면 안']) {

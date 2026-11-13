@@ -8,7 +8,8 @@ import '../vault/vault.dart';
 /// 자동 생성 목차와 온보딩 요약 (설계서 4.1·5.2).
 ///
 /// - `index.md`: 주제 폴더 목록과 노트 수. AI가 한 단계씩 좁혀 읽는다.
-/// - `wiki/<주제>/index.md`: 그 주제의 노트 제목과 요약.
+/// - `wiki/<구역>/<주제>/index.md`(예전 노트는 `wiki/<주제>/index.md`): 그 주제의 노트 제목과 요약.
+///   주제는 [IndexedDoc.topicPath]로 묶는다 — 구역이 달라도 이름이 같은 주제가 섞이지 않게 (설계서_프롬프트이후 5.1).
 /// - `_profile.md`: 주요 주제 5개와 노트 수 (주제 통계만). SessionStart 훅이 주제 이름을 넣는다.
 ///   AI가 추측한 사용자 정보("자주 받은 교정")는 뺐다 — 사용자 정보는 사용자가 쓴 `me.md`에만 둔다 (설계서_프롬프트이후 5.2).
 ///
@@ -28,7 +29,7 @@ class VaultSummary {
     final notes = index.notes().where((d) => !d.isMerged).toList();
     final byTopic = <String, List<IndexedDoc>>{};
     for (final doc in notes) {
-      byTopic.putIfAbsent(doc.topic, () => []).add(doc);
+      byTopic.putIfAbsent(doc.topicPath, () => []).add(doc);
     }
     final topics = byTopic.keys.toList()
       ..sort((a, b) => byTopic[b]!.length.compareTo(byTopic[a]!.length));
@@ -36,7 +37,7 @@ class VaultSummary {
     final root = StringBuffer()
       ..writeln('# 지식 폴더 목차 (자동 생성)')
       ..writeln()
-      ..writeln('노트 ${notes.length}개. 주제를 고른 뒤 `wiki/<주제>/index.md`나 `brain find`로 좁힌다.')
+      ..writeln('노트 ${notes.length}개. 구역/주제를 고른 뒤 `wiki/<구역>/<주제>/index.md`나 `brain find`로 좁힌다.')
       ..writeln();
     for (final topic in topics) {
       final docs = byTopic[topic]!;

@@ -5,6 +5,7 @@ import 'package:brain_core/brain_core.dart';
 
 import 'brain_context.dart';
 import 'commands/check_commands.dart';
+import 'commands/folder_commands.dart';
 import 'commands/hook_command.dart';
 import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
@@ -27,6 +28,8 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(ShowCommand(context))
         ..addCommand(AddCommand(context))
         ..addCommand(WriteCommand(context))
+        ..addCommand(TopicsCommand(context))
+        ..addCommand(MoveCommand(context))
         ..addCommand(SessionsCommand(context))
         ..addCommand(HookCommand(context))
         ..addCommand(IndexCommand(context))

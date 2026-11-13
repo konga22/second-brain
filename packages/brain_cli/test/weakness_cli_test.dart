@@ -63,8 +63,8 @@ void main() {
     final vault = Vault(vaultRoot);
     final index = SearchIndex.open(vault);
     try {
-      final (id, _) = NoteStore(vault, index).add(title: title, summary: summary, body: body);
-      final (_, _, hash) = NoteStore(vault, index).read(id)!;
+      final (id, _) = NoteStore(vault, index, zoned: true).add(title: title, summary: summary, body: body);
+      final (_, _, hash) = NoteStore(vault, index, zoned: true).read(id)!;
       return (id, hash);
     } finally {
       index.close();
@@ -75,7 +75,7 @@ void main() {
     final vault = Vault(vaultRoot);
     final index = SearchIndex.open(vault);
     try {
-      return NoteStore(vault, index).read(id)!.$2.body;
+      return NoteStore(vault, index, zoned: true).read(id)!.$2.body;
     } finally {
       index.close();
     }
@@ -168,8 +168,8 @@ void main() {
       Future<(int, String, String)> run(int i) async {
         final process = await Process.start(
           exe,
-          ['add', '--title', '동시 노트 $i', '--summary', '동시 저장 $i'],
-          environment: {'BRAIN_VAULT': vaultRoot, 'BRAIN_CONFIG': configPath, 'CLAUDE_CODE_SESSION_ID': ''},
+          ['add', '--title', '동시 노트 $i', '--summary', '동시 저장 $i', '--topic', '개발 지식/동시'],
+          environment: {'BRAIN_VAULT': vaultRoot, 'BRAIN_CONFIG': configPath, 'CLAUDE_CODE_SESSION_ID': '', 'CLAUDECODE': '', 'BRAIN_LEGACY': ''},
         );
         process.stdin.write('동시에 저장한 본문 $i\n');
         await process.stdin.close();
@@ -209,11 +209,11 @@ void main() {
     test('훅이 미리 넣는 노트 줄은 제목을 한 줄로 펴고 초안을 표시한다 (이전 방식), 새 방식은 초안을 넣지 않는다', () async {
       final vault = Vault(vaultRoot);
       final index = SearchIndex.open(vault);
-      final (id, _) = NoteStore(vault, index).add(
+      final (id, _) = NoteStore(vault, index, zoned: true).add(
         title: '결제 웹훅 재시도 규칙',
         summary: '웹훅 실패 시 3번까지 재시도',
         body: '결제 웹훅이 실패하면 1분·5분·30분 간격으로 3번까지 다시 보낸다.',
-        topic: '결제',
+        topic: '개발 지식/결제',
         draft: true,
       );
       index.close();

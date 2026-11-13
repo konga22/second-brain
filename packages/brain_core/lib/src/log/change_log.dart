@@ -184,6 +184,11 @@ int maxLoggedNumber(Vault vault, String prefix) {
   return max;
 }
 
+/// 묶음 목록(`manifest.jsonl`)을 이 프로세스가 마지막으로 본 모양: 파일 크기, 이미 남긴 경로, 줄 수.
+/// 파일마다 목록을 처음부터 다시 읽으면 한 묶음에 파일이 많을 때(폴더 정리 1만 개 = 2만 줄) 길이의 제곱으로 느려졌다
+/// (설계서_프롬프트이후 5.1). 크기가 다르면(다른 프로세스가 같은 묶음에 씀, `BRAIN_BATCH`) 다시 읽는다.
+final _manifestCache = <String, ({int size, Set<String> paths, int lines})>{};
+
 /// 파일을 바꾸기 전 상태를 묶음에 남긴다. 같은 묶음에서 같은 파일은 처음 한 번만.
 void recordBeforeChange(Vault vault, String path, {String? batch}) {
   final id = batch ?? currentBatch;
@@ -192,23 +197,82 @@ void recordBeforeChange(Vault vault, String path, {String? batch}) {
   _pendingAfter.putIfAbsent(id, () => {}).add(path);
   final rel = p.relative(path, from: vault.root);
   final manifest = File(p.join(dir, 'manifest.jsonl'));
-  if (manifest.existsSync() &&
-      manifest.readAsLinesSync().any((l) => l.contains(jsonEncode(rel)))) {
+  final size = manifest.existsSync() ? manifest.lengthSync() : -1;
+  var cached = _manifestCache[manifest.path];
+  if (cached == null || cached.size != size) {
+    final lines = size < 0 ? const <String>[] : manifest.readAsLinesSync();
+    final paths = <String>{};
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        paths.add((jsonDecode(line) as Map<String, dynamic>)['path'] as String);
+      } on FormatException {
+        continue;
+      }
+    }
+    cached = (size: size, paths: paths, lines: lines.length);
+  }
+  if (cached.paths.contains(rel)) {
+    _manifestCache[manifest.path] = cached;
     return;
   }
   Directory(p.join(dir, 'files')).createSync(recursive: true);
   final file = File(path);
   String? backup;
   if (file.existsSync()) {
-    final n = manifest.existsSync() ? manifest.readAsLinesSync().length : 0;
-    backup = 'files/$n${p.extension(path)}';
+    backup = 'files/${cached.lines}${p.extension(path)}';
     file.copySync(p.join(dir, backup));
   }
-  manifest.writeAsStringSync(
-    '${jsonEncode({'path': rel, 'existed': backup != null, 'backup': backup})}\n',
-    mode: FileMode.append,
-    flush: true,
+  final line = '${jsonEncode({'path': rel, 'existed': backup != null, 'backup': backup})}\n';
+  manifest.writeAsStringSync(line, mode: FileMode.append, flush: true);
+  _manifestCache[manifest.path] = (
+    size: (size < 0 ? 0 : size) + utf8.encode(line).length,
+    paths: cached.paths..add(rel),
+    lines: cached.lines + 1,
   );
+}
+
+/// 묶음 폴더 안 "경로 바뀜" 표시 파일: 이 묶음이 가리키는 파일을 옮긴 묶음 id들 (줄마다 하나).
+const _pathsMovedFile = 'paths-moved';
+
+/// [fromPaths](지식 폴더 기준)를 옮긴 묶음 [mover]보다 앞선 되돌리기 묶음 중 그 경로를 가리키는 것에 "경로 바뀜"을 단다
+/// (설계서_프롬프트이후 8.3). 그 묶음을 되돌리면 옛 자리에 같은 번호의 노트가 하나 더 생기거나, 새로 만든 노트를 못 치운다.
+/// 옮긴 묶음을 되돌리면 표시가 저절로 풀린다 ([UndoBatch.isPathMoved]).
+void markMovedPaths(Vault vault, Set<String> fromPaths, String mover) {
+  final root = Directory(p.join(vault.metaDir, 'undo'));
+  if (!root.existsSync() || fromPaths.isEmpty) return;
+  for (final dir in root.listSync().whereType<Directory>()) {
+    final name = p.basename(dir.path);
+    if (name == mover || File(p.join(dir.path, 'undone')).existsSync()) continue;
+    final manifest = File(p.join(dir.path, 'manifest.jsonl'));
+    if (!manifest.existsSync()) continue;
+    final touches = manifest.readAsLinesSync().any((line) {
+      if (line.trim().isEmpty) return false;
+      try {
+        return fromPaths.contains((jsonDecode(line) as Map<String, dynamic>)['path']);
+      } on FormatException {
+        return false;
+      }
+    });
+    if (!touches) continue;
+    final mark = File(p.join(dir.path, _pathsMovedFile));
+    final movers = mark.existsSync() ? mark.readAsLinesSync() : const <String>[];
+    if (!movers.contains(mover)) mark.writeAsStringSync('$mover\n', mode: FileMode.append, flush: true);
+  }
+}
+
+/// 묶음 폴더 [dir]의 "경로 바뀜" 표시 중 아직 살아 있는 것 (옮긴 묶음을 되돌렸으면 풀림).
+bool _isPathMoved(Vault vault, String dir) {
+  final mark = File(p.join(dir, _pathsMovedFile));
+  if (!mark.existsSync()) return false;
+  for (final mover in mark.readAsLinesSync()) {
+    if (mover.trim().isEmpty || !batchIdPattern.hasMatch(mover.trim())) continue;
+    final moverDir = p.join(vault.metaDir, 'undo', mover.trim());
+    if (File(p.join(moverDir, 'manifest.jsonl')).existsSync() && !File(p.join(moverDir, 'undone')).existsSync()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 class UndoBatch {
@@ -217,12 +281,16 @@ class UndoBatch {
     required this.files,
     required this.at,
     required this.isUndone,
+    this.isPathMoved = false,
   });
 
   final String id;
   final int files;
   final DateTime at;
   final bool isUndone;
+
+  /// 이 묶음이 바꾼 노트를 그 뒤 다른 자리로 옮겼다 ("경로 바뀜", 설계서_프롬프트이후 8.3). 되돌리지 않는다.
+  final bool isPathMoved;
 }
 
 /// 되돌릴 수 있는 최근 묶음 (최신 순).
@@ -239,11 +307,44 @@ List<UndoBatch> recentBatches(Vault vault, {int limit = 10}) {
         files: manifest.readAsLinesSync().where((l) => l.isNotEmpty).length,
         at: manifest.statSync().modified,
         isUndone: File(p.join(dir.path, 'undone')).existsSync(),
+        isPathMoved: _isPathMoved(vault, dir.path),
       ),
     );
   }
   batches.sort((a, b) => b.at.compareTo(a.at));
   return batches.take(limit).toList();
+}
+
+/// 되돌리며 비워진 `wiki/` 아래 폴더(구역/주제)를 위로 올라가며 지운다. 자동 목차(첫 줄 "(자동 생성)")만 남았어도 빈 것으로 본다.
+/// 폴더 정리(설계서_프롬프트이후 5.1)를 되돌리면 빈 구역/주제 폴더가 사이드바에 0개짜리 주제로 남았다.
+void _removeEmptyWikiDirs(Vault vault, Set<String> dirs) {
+  for (var dir in dirs) {
+    while (p.isWithin(vault.wikiDir, dir)) {
+      final folder = Directory(dir);
+      if (!folder.existsSync()) {
+        dir = p.dirname(dir);
+        continue;
+      }
+      final entries = folder.listSync();
+      final isEmpty = entries.every((e) {
+        final name = p.basename(e.path);
+        if (name == '.DS_Store') return true;
+        if (name != 'index.md' || e is! File) return false;
+        try {
+          return e.readAsLinesSync().firstOrNull?.contains('(자동 생성)') ?? true;
+        } on FileSystemException {
+          return false;
+        }
+      });
+      if (!isEmpty) break;
+      try {
+        folder.deleteSync(recursive: true);
+      } on FileSystemException {
+        break;
+      }
+      dir = p.dirname(dir);
+    }
+  }
 }
 
 /// 묶음 하나를 통째로 되돌린다. 원래 있던 파일은 되살리고, 새로 생긴 파일은
@@ -258,11 +359,18 @@ int undoBatch(Vault vault, String batch) {
   if (undoneMark.existsSync()) {
     throw ArgumentError('$batch 묶음은 이미 되돌렸습니다.');
   }
+  if (_isPathMoved(vault, dir)) {
+    throw ArgumentError(
+      '$batch 묶음은 경로 바뀜: 그 뒤 폴더 정리로 노트를 옮겨 되돌리면 옛 자리에 같은 노트가 하나 더 생깁니다. '
+      '되돌리려면 옮긴 묶음(${File(p.join(dir, _pathsMovedFile)).readAsLinesSync().where((l) => l.trim().isNotEmpty).join(', ')})을 먼저 되돌리세요.',
+    );
+  }
   final entries = [
     for (final line in manifest.readAsLinesSync())
       if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, dynamic>,
   ].reversed;
   var count = 0;
+  final emptied = <String>{}; // 새로 생겼던 파일을 치운 폴더
   final stamp = DateTime.now().millisecondsSinceEpoch;
   // 같은 이름의 묶음을 전에 되돌린 적이 있으면 휴지통 폴더를 따로 쓴다 (앞 휴지통 파일을 덮지 않게)
   final trashName = Directory(p.join(vault.metaDir, 'trash', batch)).existsSync() ? '$batch-u$stamp' : batch;
@@ -291,9 +399,11 @@ int undoBatch(Vault vault, String batch) {
       final trash = p.join(vault.metaDir, 'trash', trashName, entry['path'] as String);
       Directory(p.dirname(trash)).createSync(recursive: true);
       file.renameSync(trash);
+      emptied.add(p.dirname(target));
     }
     count++;
   }
+  _removeEmptyWikiDirs(vault, emptied);
   undoneMark.writeAsStringSync(formatTime(DateTime.now()));
   // 되돌린 묶음은 이름을 바꿔 보관한다. 세션 묶음(s_<세션 앞 8자>)은 같은 세션에서 다시 저장하면 같은 이름을 쓰는데,
   // 예전에는 "이미 되돌림" 표시가 남은 폴더에 새 저장이 쌓여 다시 되돌릴 수 없었다 (11/11 K-35).

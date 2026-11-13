@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
+  // 예전 폴더 구조(`wiki/<주제>/<제목>.md`)로 쓰는 시험이다. 구역 구조는 folder_zones_test.dart (설계서_프롬프트이후 5.1).
   late Directory temp;
   late Vault vault;
   late SearchIndex index;
@@ -14,7 +15,7 @@ void main() {
     temp = Directory.systemTemp.createTempSync('vault_');
     vault = Vault(p.join(temp.path, 'SecondBrain'));
     index = SearchIndex.open(vault, path: p.join(temp.path, 'index.db'));
-    store = NoteStore(vault, index);
+    store = NoteStore(vault, index, zoned: false);
   });
 
   tearDown(() {
