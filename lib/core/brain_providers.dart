@@ -77,7 +77,8 @@ class VaultRevision extends Notifier<int> {
           // 자동 목차·온보딩 요약·변경 기록은 노트를 고칠 때 함께 쓰는 파일이라, 그것만으로 다시 그릴 일이 없다
           // (같이 바뀐 노트 파일 이벤트가 따로 온다). 11/12 O-6: 저장 1회에 모든 계산이 두 번 돌던 원인 중 하나.
           final name = p.basename(rel);
-          if (name == 'index.md' || name == '_profile.md' || rel.startsWith('_log')) return;
+          // me.md(나에 대해)도 노트가 아니라 다시 그릴 것이 없다 (설계서_프롬프트이후 5.2).
+          if (name == 'index.md' || name == '_profile.md' || rel == 'me.md' || rel.startsWith('_log')) return;
           // 앱 안에서 방금 고친 것([bump] 뒤 2초 안)은 색인이 이미 맞고 번호도 이미 올렸다. 이때는 실제로
           // 색인이 바뀐 게 있을 때만 올린다. 그 밖(CLI·편집기·자동 정리)은 예전처럼 바뀐 것 자체로 다시 그린다.
           _pendingForce |= DateTime.now().isAfter(_ownWriteUntil);

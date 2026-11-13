@@ -5,23 +5,27 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
 import '../../core/claude_code.dart';
+import '../persona/persona_card.dart';
 import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
 import '../../shared/safe_set_state.dart';
 
-/// 연동: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
+/// 연동: Claude Code 연동, 나에 대해 4문항(설계서_프롬프트이후 5.2), 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
   const ConnectPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = ShadTheme.of(context);
+    final status = ref.watch(claudeCodeStatusProvider).value;
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
         Text('연동', style: theme.textTheme.h4),
         const SizedBox(height: 24),
         const _ClaudeCodeCard(),
+        // 연동 다음 단계: 4문항 (설계서_프롬프트이후 5.2)
+        PersonaStep(isConnected: status != null && status.isInstalled && status.isEnabled),
         const SizedBox(height: 16),
         const _PastSessionsCard(),
         const SizedBox(height: 16),

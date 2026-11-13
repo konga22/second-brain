@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../index/search_index.dart';
 import '../log/change_log.dart';
 import '../security/secret_mask.dart';
+import '../vault/persona.dart';
 import '../vault/vault.dart';
 import '../vault/vault_summary.dart';
 import 'file_name.dart';
@@ -27,6 +28,21 @@ class NoteConflictException extends NoteStoreException {
 
   /// 지식 폴더 기준 상대 경로.
   final String copyPath;
+}
+
+/// 사용자가 `me.md`에 "저장하면 안 되는 것"으로 적은 말이 들어 있어 저장하지 않았다 (설계서_프롬프트이후 5.2).
+/// [term]은 사용자가 쓴 모양 그대로다 — 저장하려던 글에 이미 있던 말이라 AI에게 새로 알려 주는 것이 없다.
+class ForbiddenTermException extends NoteStoreException {
+  ForbiddenTermException(this.term, this.field)
+    : super(
+        '저장하지 않았습니다: $field에 "저장하면 안 되는 것"(나에 대해, me.md)으로 정한 "$term"이 있습니다. '
+        '그 내용을 빼고 저장하세요. AI는 표현을 바꿔 다시 저장하지 말고 사용자에게 알립니다.',
+      );
+
+  final String term;
+
+  /// 제목·요약·본문·태그·별칭 중 어디.
+  final String field;
 }
 
 /// 노트 읽기·쓰기. 모든 쓰기는 형식 검사·비밀값 가림·원자적 쓰기·변경 기록을 거친다.
@@ -78,6 +94,34 @@ class NoteStore {
     return found;
   }
 
+  /// `me.md`의 "저장하면 안 되는 것"이 들어 있으면 [ForbiddenTermException] (설계서_프롬프트이후 5.2).
+  /// 기기에서만 검사한다. `me.md`가 있는데 읽지 못하면 막는다 — 금지어를 모른 채 저장하지 않게.
+  void checkForbidden({
+    required String title,
+    required String summary,
+    required String body,
+    List<String> tags = const [],
+    List<String> aliases = const [],
+  }) {
+    final Persona? persona;
+    try {
+      persona = Persona.load(vault);
+    } on Object catch (e) {
+      throw NoteStoreException('me.md(나에 대해)를 읽지 못해 저장하지 않았습니다: $e — 파일을 열어 확인하세요.');
+    }
+    if (persona == null || persona.forbidden.isEmpty) return;
+    final terms = ForbiddenTerms(persona.forbidden);
+    for (final (field, text) in [
+      ('제목', title),
+      ('요약', summary),
+      ('본문', body),
+      ('태그', tags.join(' , ')),
+      ('별칭', aliases.join(' , ')),
+    ]) {
+      if (terms.find(text) case final term?) throw ForbiddenTermException(term, field);
+    }
+  }
+
   /// 다음 노트 번호. 색인과 변경 기록 중 큰 쪽 + 1 — 지운 노트의 번호를 다시 쓰지 않는다 (11/11 K-26).
   String nextNoteId() {
     final max = [
@@ -116,6 +160,7 @@ class NoteStore {
     if (body.trim().isEmpty) {
       throw const NoteStoreException('본문이 비었습니다 (표준 입력).');
     }
+    checkForbidden(title: cleanTitle, summary: cleanSummary, body: body, tags: tags, aliases: aliases);
     // 번호를 정하고 저장해 색인에 들어갈 때까지 다른 프로세스가 끼어들지 않게 (K-26(다)).
     return withVaultLock(vault, () {
       vault.ensure();
@@ -175,6 +220,8 @@ class NoteStore {
   }) {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
+    // 충돌 사본(_meta/conflicts)에도 금지어가 남지 않게 해시보다 먼저 본다.
+    checkForbidden(title: note.title, summary: note.summary, body: newBody, tags: note.tags, aliases: note.aliases);
     if (!hash.startsWith(expectHash) || expectHash.length < 6) {
       final conflict = p.join(
         vault.metaDir,
@@ -215,6 +262,7 @@ class NoteStore {
   }) {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
+    checkForbidden(title: title, summary: summary, body: body, tags: tags, aliases: aliases);
     if (hash != expectHash) {
       final conflict = p.join(
         vault.metaDir,

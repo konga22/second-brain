@@ -50,7 +50,7 @@ class HookCommand extends Command<int> {
   }
 
   /// 세션 시작 안내 (설계서 5.2 v1.3.9·v1.3.16): 사람이 읽어도 알 수 있는 세 줄 — 주제·찾기·자동 저장 —
-  /// 과 지킬 규칙(적용 중 실수 노트) 목록.
+  /// 과 지킬 규칙(적용 중 실수 노트) 목록. `me.md`가 있으면 맨 앞에 사용자 한 줄 (설계서_프롬프트이후 5.2).
   /// **세션마다 같은 글이어야 한다**: 세션 id·노트 수처럼 바뀌는 값을 넣으면 Claude Code가 지난 세션 캐시를
   /// 못 써 세션마다 약 1.35만 토큰을 다시 캐시에 쓴다(토큰분석 2절). 규칙 목록은 규칙이 바뀔 때만 바뀐다.
   /// 모두 꺼져 있고 실수 노트도 없으면 아무것도 넣지 않는다 (0토큰). 지식 폴더 안 세션(정리용 실행)은 빼고.
@@ -60,6 +60,7 @@ class HookCommand extends Command<int> {
     if (cwd.isNotEmpty && context.vault.contains(cwd)) return;
     final lines = <String>[];
     if (!config.isOnboardingOff) {
+      if (personaLine(context.vault) case final line?) lines.add(line);
       final topics = profileTopics(context.vault);
       if (topics.isNotEmpty) lines.add('· 주제: ${[for (final t in topics) clip(t, 20)].join(', ')}');
       lines.add(findLine);
@@ -179,6 +180,17 @@ class HookCommand extends Command<int> {
       'brain-save 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄을 붙인다. '
       '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지. '
       '형식: brain add --draft --title "제목" --summary "60자 요약" --tags "a,b" --topic "주제" <<\'NOTE\' (본문 2~8줄) NOTE';
+
+  /// `me.md`의 1번(지금 하는 일)·3번(답 방식) 한 줄 (설계서_프롬프트이후 5.2). 없거나 읽지 못하면 null —
+  /// 안내 나머지는 그대로 넣는다. 금지 목록은 넣지 않는다: `brain add`·`brain write`가 막으므로 AI가 알 필요가 없다.
+  static String? personaLine(Vault vault) {
+    try {
+      return Persona.load(vault)?.sessionLine;
+    } on Object catch (e) {
+      stderr.writeln('me.md를 읽지 못해 사용자 한 줄을 뺐습니다: $e');
+      return null;
+    }
+  }
 
   /// `_profile.md`의 "주요 주제: A(3), B(2)" 줄에서 이름만 (노트 수는 자주 바뀌어 빼고 순서만 쓴다).
   static List<String> profileTopics(Vault vault) {
