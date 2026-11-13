@@ -49,4 +49,55 @@ void main() {
     await tester.tap(find.text('합치기').last);
     expect(merged!.doc.id, 'n_0002');
   });
+
+  AiEdit edit({bool canRevert = true}) => AiEdit(
+    noteId: 'n_0007',
+    title: '로그인 토큰 만료 시간',
+    batches: const ['b_20261113-140500-a1b2', 'b_20261113-141000-c3d4'],
+    firstAt: DateTime(2026, 11, 13, 14, 5),
+    lastAt: DateTime(2026, 11, 13, 14, 10),
+    sessions: const {'7d1c2b3a-1111-4222-8333-444455556666'},
+    canRevert: canRevert,
+  );
+
+  testWidgets('4.3 AI가 고친 노트: 언제·어느 대화·몇 번, 버튼 셋이 각자 동작한다', (tester) async {
+    final pressed = <String>[];
+    await pump(
+      tester,
+      Column(
+        children: [
+          Text(aiEditDetail(edit())),
+          AiEditActions(
+            edit: edit(),
+            onShowDiff: () => pressed.add('diff'),
+            onRevert: () => pressed.add('revert'),
+            onAcknowledge: () => pressed.add('ack'),
+          ),
+        ],
+      ),
+    );
+    expect(find.text('11/13 14:10 · 대화 7d1c2b3a · 2번 고침'), findsOneWidget);
+    await tester.tap(find.text('바뀐 내용 보기'));
+    await tester.tap(find.text('되돌리기'));
+    await tester.tap(find.text('확인함'));
+    expect(pressed, ['diff', 'revert', 'ack']);
+  });
+
+  testWidgets('4.3 AI가 고친 뒤 사람이 또 고쳤으면 [되돌리기]가 눌리지 않고 까닭을 보인다', (tester) async {
+    var reverted = false;
+    await pump(
+      tester,
+      AiEditActions(edit: edit(canRevert: false), onShowDiff: () {}, onRevert: () => reverted = true, onAcknowledge: () {}),
+    );
+    await tester.tap(find.text('되돌리기'), warnIfMissed: false);
+    expect(reverted, isFalse);
+    expect(find.textContaining('직접 고친 기록이 있어'), findsOneWidget);
+  });
+
+  testWidgets('4.3 바뀐 내용 보기: 빠진 줄은 -, 새 줄은 +', (tester) async {
+    await pump(tester, DiffLines(lines: lineDiff('제목\n액세스 15분\n끝', '제목\n액세스 30분\n끝')));
+    expect(find.text('- 액세스 15분'), findsOneWidget);
+    expect(find.text('+ 액세스 30분'), findsOneWidget);
+    expect(find.text('  제목'), findsOneWidget);
+  });
 }

@@ -253,6 +253,13 @@ final draftSimilarProvider = FutureProvider.autoDispose<Map<String, List<Similar
   return draftSimilarInBackground(vault.root, vault.indexPath);
 });
 
+/// 정리 보드 "AI가 고친 노트" (설계서_프롬프트이후 4.3). 보드를 볼 때만 백그라운드에서 계산한다.
+final aiEditsProvider = FutureProvider.autoDispose<List<AiEdit>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final vault = ref.watch(vaultProvider);
+  return aiEditsInBackground(vault.root, vault.indexPath);
+});
+
 /// 할 일 화면: 할 일 목록·AI 추천(자기 파일만 읽어 가벼움).
 final todoViewProvider = Provider<({List<Todo> todos, List<Todo> suggestions})>((ref) {
   ref.watch(vaultRevisionProvider);

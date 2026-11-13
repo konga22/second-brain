@@ -220,3 +220,39 @@ Future<Map<String, List<SimilarNote>>> draftSimilarInBackground(String vaultRoot
         index.close();
       }
     });
+
+/// 정리 보드 "AI가 고친 노트" (설계서_프롬프트이후 4.3). 변경 기록 3달과 되돌리기 묶음을 읽는다.
+Future<List<AiEdit>> aiEditsInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+  try {
+    return AiEditReview(vault, index).pending();
+  } finally {
+    index.close();
+  }
+});
+
+/// [바뀐 내용 보기]: AI가 처음 고치기 전 본문과 지금 본문의 줄 차이. 고치기 전 사본이 없으면 null.
+/// 읽기 전 색인 맞추기가 1만 개에서 약 80ms라 백그라운드에서 한다.
+Future<List<DiffLine>?> aiEditDiffInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    final (before, after) = AiEditReview(vault, index).beforeAfter(edit);
+    return before == null ? null : lineDiff(before, after);
+  } finally {
+    index.close();
+  }
+});
+
+/// [되돌리기]: 이 노트를 고친 AI 묶음을 최근 것부터 되돌린다. 반환: 되돌린 파일 수.
+/// [NoteStoreException](사람이 그 뒤에 또 고침)·[ArgumentError](묶음이 없음)는 그대로 다시 던져진다.
+Future<int> revertAiEditInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return AiEditReview(vault, index).revert(edit);
+  } finally {
+    index.close();
+  }
+});

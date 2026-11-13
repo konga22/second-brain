@@ -13,6 +13,10 @@ import 'commands/todo_command.dart';
 
 /// brain 명령을 실행하고 종료 코드를 돌려준다 (설계서 5.1).
 Future<int> runBrain(List<String> arguments) async {
+  // AI 대화 안에서 부른 명령이면 변경 기록 줄에 대화 id를 남긴다: 정리 보드가 "AI가 고친 노트"를 가려낸다
+  // (설계서_프롬프트이후 4.3). 앱은 부르지 않는다 — 앱을 Claude Code 터미널에서 띄워도 사람의 편집이다.
+  final env = Platform.environment;
+  if (isAiSessionEnv(env)) markAiSession(env['CLAUDE_CODE_SESSION_ID'] ?? '');
   final context = BrainContext();
   final runner =
       CommandRunner<int>(
