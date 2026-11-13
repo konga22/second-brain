@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:brain_core/brain_core.dart';
+import 'package:path/path.dart' as p;
 
 import '../brain_context.dart';
 import 'sessions_command.dart' show warnUnreadSession;
@@ -11,7 +12,7 @@ class FindCommand extends Command<int> {
   FindCommand(this.context) {
     argParser
       ..addFlag('raw', help: '원본(raw/)도 함께 찾는다.', negatable: false)
-      ..addOption('topic', help: '이 주제 폴더(뇌)에서 먼저 찾는다. 없으면 전체에서 찾는다.')
+      ..addOption('topic', help: '이 주제(구역/주제, 구역, 주제 이름)에서 먼저 찾는다. 없으면 전체에서 찾는다.')
       ..addOption('limit', defaultsTo: '5')
       ..addFlag(
         'here',
@@ -273,7 +274,11 @@ class AddCommand extends Command<int> {
       ..addOption('title', help: '제목 (= 파일 이름)', mandatory: true)
       ..addOption('summary', help: '요약 줄, 60자 이내', mandatory: true)
       ..addOption('tags', help: '쉼표로 구분', defaultsTo: '')
-      ..addOption('topic', help: '주제 폴더 (없으면 첫 태그, 그것도 없으면 미분류)')
+      ..addOption(
+        'topic',
+        help: '구역/주제 (예: 개발 지식/Flutter). 저장 전 brain topics로 그 구역의 주제를 보고 맞는 것을 고른다. '
+            '이전 방식(구역 없음)이면 주제 폴더 (없으면 첫 태그)',
+      )
       ..addFlag('draft', help: '정리 대기로 저장', negatable: false)
       ..addFlag(
         'new',
@@ -317,6 +322,18 @@ class AddCommand extends Command<int> {
     }
     final env = Platform.environment;
     final isAiSession = isAiSessionEnv(env);
+    // 구역은 저장 전에 본다 (설계서_프롬프트이후 5.1): AI가 모르는 구역이나 구역 없이 저장하면 거절하고 구역·주제를 보인다.
+    final topicArg = args['topic'] as String?;
+    String? newTopic;
+    if (context.notes.isZoned && (topicArg != null || isAiSession)) {
+      try {
+        final topicPath = resolveTopicPath(topicArg ?? '', context.index.zoneTopics);
+        if (!Directory(p.join(context.vault.wikiDir, topicPath)).existsSync()) newTopic = topicPath;
+      } on UnknownZoneException catch (e) {
+        stderr.writeln(e.message);
+        return 1;
+      }
+    }
     if (!AppConfig.load().usesLegacy(AppConfig.legacyDecisions)) {
       final stop = _checkSimilar(body, isAiSession: isAiSession);
       if (stop != null) return stop;
@@ -379,6 +396,15 @@ class AddCommand extends Command<int> {
       if (_similarLines.isNotEmpty) {
         // 멈출 만큼은 아니어도 알린다: 관련이면 본문 끝에 `관련: [[제목]]`으로 이을 수 있다.
         stdout.writeln('비슷한 정리된 노트 (관련이면 brain write로 잇거나 고친다):\n${_similarLines.join('\n')}');
+      }
+      if (newTopic != null) {
+        // 새 주제를 만들었으면 같은 구역의 기존 주제를 보인다: 맞는 주제가 있었으면 바로 옮길 수 있게 (주제가 늘어나는 것을 줄임)
+        final zone = newTopic.split('/').first;
+        final others = [for (final t in context.index.zoneTopics(zone)) if ('$zone/$t' != newTopic) t];
+        stdout.writeln(
+          '새 주제 $newTopic를 만들었습니다. $zone 구역의 기존 주제: ${others.isEmpty ? '(없음)' : others.join(', ')}'
+          '${others.isEmpty ? '' : ' — 맞는 주제가 있었으면 brain move $id "$zone/<주제>"'}',
+        );
       }
       stdout.writeln(
         '$id 저장함${isDraft ? ' (정리 대기)' : ''}  $path'

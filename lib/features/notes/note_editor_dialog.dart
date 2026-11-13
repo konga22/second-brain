@@ -311,7 +311,10 @@ class _NoteEditorState extends ConsumerState<_NoteEditor> {
                     Expanded(
                       child: ShadInput(
                         controller: _topic,
-                        placeholder: const Text('주제 폴더 (비우면 첫 태그)'),
+                        // 구역을 쓰면 구역/주제, 비우면 구역 밖 미분류 (설계서_프롬프트이후 5.1)
+                        placeholder: Text(
+                          ref.read(noteStoreProvider).isZoned ? '구역/주제 (예: 개발 지식/Flutter, 비우면 미분류)' : '주제 폴더 (비우면 첫 태그)',
+                        ),
                       ),
                     ),
                   ],

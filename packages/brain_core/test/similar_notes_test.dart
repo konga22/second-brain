@@ -18,7 +18,7 @@ void main() {
     temp = Directory.systemTemp.createTempSync('similar_');
     vault = Vault(p.join(temp.path, 'SecondBrain'));
     index = SearchIndex.open(vault, path: p.join(temp.path, 'index.db'));
-    store = NoteStore(vault, index);
+    store = NoteStore(vault, index, zoned: false);
   });
 
   tearDown(() {

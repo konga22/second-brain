@@ -62,8 +62,8 @@ void main() {
     final vault = Vault(vaultRoot);
     final index = SearchIndex.open(vault);
     try {
-      return NoteStore(vault, index)
-          .add(title: title, summary: summary, body: '$summary\n', tags: ['결제', '웹훅'], topic: '결제', draft: draft)
+      return NoteStore(vault, index, zoned: true)
+          .add(title: title, summary: summary, body: '$summary\n', tags: ['결제', '웹훅'], topic: '개발 지식/결제', draft: draft)
           .$1;
     } finally {
       index.close();
@@ -74,7 +74,7 @@ void main() {
     final vault = Vault(vaultRoot);
     final index = SearchIndex.open(vault);
     try {
-      NoteStore(vault, index).setStatus(id, NoteStatus.active);
+      NoteStore(vault, index, zoned: true).setStatus(id, NoteStatus.active);
     } finally {
       index.close();
     }
@@ -137,8 +137,8 @@ void main() {
     final index = SearchIndex.open(vault);
     final String confirmed;
     try {
-      confirmed = NoteStore(vault, index)
-          .add(title: '결제 웹훅 재시도 정책', summary: '3번까지', body: '관련: [[결제 웹훅 재시도 횟수 변경]]\n', topic: '결제')
+      confirmed = NoteStore(vault, index, zoned: true)
+          .add(title: '결제 웹훅 재시도 정책', summary: '3번까지', body: '관련: [[결제 웹훅 재시도 횟수 변경]]\n', topic: '개발 지식/결제')
           .$1;
     } finally {
       index.close();
@@ -151,7 +151,7 @@ void main() {
 
   test('AI 세션에서 부른 brain add는 --draft가 없어도 초안, 사람이 부르면 그대로', () async {
     const body = '결제 웹훅 재시도는 3번이다.\n';
-    final args = ['add', '--title', '웹훅 노트', '--summary', '요약', '--topic', '결제'];
+    final args = ['add', '--title', '웹훅 노트', '--summary', '요약', '--topic', '개발 지식/결제'];
     final (code, out, err) = await brain(args, stdin: body, env: {'CLAUDECODE': '1'});
     expect(code, 0, reason: err);
     expect(out, contains('정리 대기'));

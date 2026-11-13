@@ -147,7 +147,7 @@ class DecisionCheck {
       for (final similar in index.similarNotes(
         note,
         excludeId: doc.id,
-        topic: doc.topic,
+        topic: doc.topicPath,
         minShared: SearchIndex.similarStrongMin,
       )) {
         final other = similar.doc;
@@ -158,7 +158,7 @@ class DecisionCheck {
           oldId: other.id,
           newTitle: doc.title,
           oldTitle: other.title,
-          topic: doc.topic,
+          topic: doc.topicPath,
           shared: similar.shared,
         );
         if (kept.contains(pair.key)) continue;

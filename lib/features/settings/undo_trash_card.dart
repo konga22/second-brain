@@ -111,12 +111,13 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
                 children: [
                   Expanded(
                     child: Text(
-                      '${time(b.at)}  ${summaries[b.id] ?? summaries[b.id.replaceFirst(RegExp(r'-u\d+$'), '')] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
+                      '${time(b.at)}  ${summaries[b.id] ?? summaries[b.id.replaceFirst(RegExp(r'-u\d+$'), '')] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}${b.isPathMoved ? '  (경로 바뀜)' : ''}',
                       style: theme.textTheme.small,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (!b.isUndone)
+                  // 경로 바뀜: 그 뒤 폴더 정리로 옮긴 노트라 되돌리면 같은 노트가 둘이 된다 (설계서_프롬프트이후 8.3)
+                  if (!b.isUndone && !b.isPathMoved)
                     ShadButton.ghost(size: ShadButtonSize.sm, onPressed: () => _undo(vault, b), child: const Text('되돌리기')),
                 ],
               ),

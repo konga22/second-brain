@@ -62,10 +62,12 @@ class HookCommand extends Command<int> {
     if (!config.isOnboardingOff) {
       if (personaLine(context.vault) case final line?) lines.add(line);
       final topics = profileTopics(context.vault);
-      if (topics.isNotEmpty) lines.add('· 주제: ${[for (final t in topics) clip(t, 20)].join(', ')}');
+      if (topics.isNotEmpty) lines.add('· 주제: ${topicsLine(topics)}');
       lines.add(findLine);
     }
-    if (!config.isAutoCaptureOff) lines.add(autoCaptureLine);
+    if (!config.isAutoCaptureOff) {
+      lines.add(config.usesLegacy(AppConfig.legacyFolders) ? autoCaptureLine : autoCaptureZoneLine);
+    }
     lines.addAll(lessonLines(context.lessons, legacy: config.usesLegacy(AppConfig.legacyLessons)));
     if (lines.isEmpty) return;
     final parts = ['[세컨드 브레인] 사용자의 개인 지식 폴더 안내 (자동)', ...lines];
@@ -125,7 +127,7 @@ class HookCommand extends Command<int> {
     );
   }
 
-  static const _readOnly = {'find', 'show', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'bench', 'lint', '--help', '-h'};
+  static const _readOnly = {'find', 'show', 'topics', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'bench', 'lint', '--help', '-h'};
   static final _tailPipe = RegExp(r'^[ \t]*(head|tail)([ \t]+-n[ \t]*\d+|[ \t]+-\d+|[ \t]+--lines=\d+)?[ \t]*$');
 
   /// 명령 끝에 붙은 `2>&1`·`2>/dev/null`. 가운데 있는 것은 떼지 않는다(따옴표 안 글자를 바꾸지 않게).
@@ -180,6 +182,27 @@ class HookCommand extends Command<int> {
       'brain-save 규칙대로 초안으로 저장하고, 답 끝에 "세컨드 브레인에 저장: <id> <제목> (초안)" 한 줄을 붙인다. '
       '잡담·추측·비밀값은 저장하지 않고, 한 세션에 5개까지. '
       '형식: brain add --draft --title "제목" --summary "60자 요약" --tags "a,b" --topic "주제" <<\'NOTE\' (본문 2~8줄) NOTE';
+
+  /// 구역을 쓰는 자동 저장 안내 (설계서_프롬프트이후 5.1): 주제는 `구역/주제`로, 저장 전에 `brain topics`로 기존 주제 전체를 본다.
+  /// 주제 목록 자체는 넣지 않는다 — 주제가 바뀔 때마다 안내가 바뀌어 세션 캐시가 깨진다(6.2). 늘어난 글자 수는 folder_zones_cli_test.
+  /// 자리 규칙(개발 지식 ↔ 프로젝트)은 `brain topics`·거절 안내·brain-save 스킬에 있어 여기서는 뺀다 (글자 수, 6.2).
+  static final autoCaptureZoneLine =
+      '${autoCaptureLine.replaceFirst('--topic "주제"', '--topic "구역/주제"')} (주제는 brain topics로 보고 고른다)';
+
+  /// 주요 주제를 구역별로 묶어 짧게: `개발 지식(결제, 배포), 생활·기기(아이폰), 옛주제` (설계서_프롬프트이후 5.1).
+  /// 같은 구역 이름을 주제마다 되풀이하지 않는다. 주제 이름은 20자에서 자른다.
+  static String topicsLine(List<String> topics) {
+    final groups = <String, List<String>>{};
+    for (final topic in topics) {
+      final slash = topic.indexOf('/');
+      final (zone, name) = slash < 0 ? ('', topic) : (topic.substring(0, slash), topic.substring(slash + 1));
+      groups.putIfAbsent(zone.isEmpty ? '\u0000$name' : zone, () => []).add(clip(name, 20));
+    }
+    return [
+      for (final MapEntry(key: zone, value: names) in groups.entries)
+        zone.startsWith('\u0000') ? names.single : '$zone(${names.join(', ')})',
+    ].join(', ');
+  }
 
   /// `me.md`의 1번(지금 하는 일)·3번(답 방식) 한 줄 (설계서_프롬프트이후 5.2). 없거나 읽지 못하면 null —
   /// 안내 나머지는 그대로 넣는다. 금지 목록은 넣지 않는다: `brain add`·`brain write`가 막으므로 AI가 알 필요가 없다.

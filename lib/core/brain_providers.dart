@@ -334,7 +334,7 @@ final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
   final index = ref.watch(searchIndexProvider);
   final nodes = [
     for (final doc in notes)
-      if (!doc.isMerged) GraphNode(doc.id, doc.topic),
+      if (!doc.isMerged) GraphNode(doc.id, doc.topicPath),
   ];
   final edges = [
     for (final link in links)

@@ -123,3 +123,18 @@ bool isAssetReferenced(Vault vault, String assetName) {
   }
   return false;
 }
+
+/// 노트를 [fromPath]에서 [toPath]로 옮길 때 본문의 사진 링크를 새 자리 기준 상대 경로로 다시 쓴다 (설계서_프롬프트이후 5.1).
+/// 링크는 노트 폴더 기준이라(`../../assets/…`) 구역 아래로 한 단계 깊어지면 그대로는 끊긴다. 둘 다 절대 경로.
+/// 지식 폴더의 `assets/`를 가리키는 상대 링크만 바꾼다 (절대 경로·주소·폴더 밖은 그대로).
+String rebaseAssetLinks(Vault vault, String text, String fromPath, String toPath) {
+  final assetsRoot = p.join(vault.root, assetsDirName);
+  return text.replaceAllMapped(assetImageLink, (m) {
+    final link = m.group(2)!;
+    if (link.startsWith('/') || link.contains(':')) return m.group(0)!;
+    final target = p.normalize(p.join(p.dirname(fromPath), link));
+    if (!p.isWithin(assetsRoot, target)) return m.group(0)!;
+    final rel = p.posix.joinAll(p.split(p.relative(target, from: p.dirname(toPath))));
+    return '![${m.group(1)}]($rel)';
+  });
+}

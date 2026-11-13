@@ -15,7 +15,7 @@ void main() {
     vault = Vault(p.join(temp.path, 'SecondBrain'))..ensure();
     dbPath = p.join(temp.path, 'index.db');
     final index = SearchIndex.open(vault, path: dbPath);
-    final store = NoteStore(vault, index);
+    final store = NoteStore(vault, index, zoned: false);
     for (final (title, topic) in [('웹훅 재시도', '결제'), ('롤백 순서', '배포'), ('배포 요일', '배포')]) {
       store.add(title: title, summary: '$title 요약', body: '$title 본문', topic: topic);
     }
@@ -88,7 +88,7 @@ void main() {
     old.close();
     final app = SearchIndex.open(vault, path: dbPath, rebuildIfOld: false);
     final writer = SearchIndex.open(vault, path: dbPath);
-    final (id, _) = NoteStore(vault, writer).add(title: '환불 기한', summary: '7일', body: '7일 안에 환불한다.');
+    final (id, _) = NoteStore(vault, writer, zoned: false).add(title: '환불 기한', summary: '7일', body: '7일 안에 환불한다.');
     writer.close();
     expect(app.isRebuildPending, isFalse);
     expect(app.byId(id), isNotNull);

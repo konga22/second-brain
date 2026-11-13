@@ -298,3 +298,38 @@ Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, 
         index.close();
       }
     });
+
+/// [폴더 정리] 첫 제안과 30개 넘는 주제 (설계서_프롬프트이후 5.1). 읽기만 한다.
+Future<({List<FolderProposal> proposals, Map<String, int> oversized, Map<String, List<String>> zoneTopics})>
+folderPlanInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    index.sync();
+    return (
+      proposals: proposeFolderMoves(index),
+      oversized: oversizedTopics(index),
+      zoneTopics: {for (final zone in noteZones) zone: index.zoneTopics(zone)},
+    );
+  } finally {
+    index.close();
+  }
+});
+
+/// [폴더 정리] 실행 한 덩어리. 화면이 진행을 보이도록 부르는 쪽이 200개씩 나눠 부르고, 같은 [batch]라
+/// 모두 한 되돌리기 묶음이다. 색인·자동 목차는 마지막 덩어리([syncAfter])에서만 맞춘다 (1만 개에서 덩어리마다 맞추면 느림).
+Future<MoveResult> moveNotesInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<FolderMove> moves, {
+  required String batch,
+  required bool syncAfter,
+}) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return NoteStore(vault, index).moveMany(moves, batch: batch, syncAfter: syncAfter);
+  } finally {
+    index.close();
+  }
+});
