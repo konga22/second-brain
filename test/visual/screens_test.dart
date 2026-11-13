@@ -292,13 +292,11 @@ void main() {
     }
     final hub = (degree.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).first.key;
     final viewer = tester.getRect(find.byType(InteractiveViewer));
-    final origin = Offset(
-      layout.values.map((q) => q.x).reduce(min) - 80 - graphDragRoom,
-      layout.values.map((q) => q.y).reduce(min) - 60 - graphDragRoom,
-    );
+    // 그림 원점. 끌기 여유는 배율에 따라 바뀌어 그때그때 읽는다 (설계서_프롬프트이후 5.6, 11/14).
+    Offset origin() => graphContentForTest.origin;
     Offset screenOf(Point<double> w) {
       final m = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer)).transformationController!.value;
-      return viewer.topLeft + MatrixUtils.transformPoint(m, Offset(w.x, w.y) - origin);
+      return viewer.topLeft + MatrixUtils.transformPoint(m, Offset(w.x, w.y) - origin());
     }
 
     final before = await capture(tester, '09a_graph_before_drag');

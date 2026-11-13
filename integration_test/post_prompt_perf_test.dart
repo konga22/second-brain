@@ -153,8 +153,8 @@ void main() {
     final viewerFinder = find.byType(InteractiveViewer);
     TransformationController controller() => tester.widget<InteractiveViewer>(viewerFinder).transformationController!;
     final layout = container.read(graphLayoutProvider).requireValue;
-    final xs = layout.values.map((p) => p.x), ys = layout.values.map((p) => p.y);
-    final origin = Offset(xs.reduce(min) - 80 - graphDragRoom, ys.reduce(min) - 60 - graphDragRoom);
+    // 그림 원점. 끌기 여유는 배율에 따라 바뀌어 그때그때 읽는다 (설계서_프롬프트이후 5.6, 11/14).
+    Offset origin() => graphContentForTest.origin;
     final degree = <String, int>{};
     for (final l in container.read(linksProvider)) {
       if (l.isSuggested) continue;
@@ -179,7 +179,7 @@ void main() {
       final viewer = tester.getRect(viewerFinder);
       final m = controller().value;
       final p = layout[id]!;
-      final local = Offset(p.x, p.y) - origin;
+      final local = Offset(p.x, p.y) - origin();
       final shift = viewer.center - (viewer.topLeft + MatrixUtils.transformPoint(m, local));
       controller().value = Matrix4.identity()
         ..translateByDouble(shift.dx, shift.dy, 0, 1)

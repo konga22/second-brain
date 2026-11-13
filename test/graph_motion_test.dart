@@ -82,6 +82,13 @@ void main() {
       tester.widget<InteractiveViewer>(find.byType(InteractiveViewer)).transformationController!;
   double scale(WidgetTester tester) => controller(tester).value.getMaxScaleOnAxis();
 
+  /// 그래프 좌표 → 화면 좌표. 그림 원점(노드 범위 왼쪽 위 - 여백 80·60 - 끌기 여유)은 배율에 따라 바뀌어 그때그때 읽는다.
+  Offset screenAt(WidgetTester tester, Point<double> world) {
+    final viewer = tester.getRect(find.byType(InteractiveViewer));
+    return viewer.topLeft +
+        MatrixUtils.transformPoint(controller(tester).value, Offset(world.x, world.y) - graphContentForTest.origin);
+  }
+
   /// [frames]개 프레임(16ms)을 넘기며 배율을 모은다.
   Future<List<double>> frames(WidgetTester tester, double Function() read, {int frames = 25}) async {
     final out = <double>[];
@@ -230,10 +237,7 @@ void main() {
     GraphMotion motion() => graphMotionForTest!;
 
     /// 그래프 좌표 → 화면 좌표 (그림 원점은 노드 범위 왼쪽 위 - 여백 80·60 - 끌기 여유).
-    Offset screenOf(WidgetTester tester, Point<double> world) {
-      final viewer = tester.getRect(find.byType(InteractiveViewer));
-      return viewer.topLeft + MatrixUtils.transformPoint(controller(tester).value, Offset(world.x + 80 + graphDragRoom, world.y + 60 + graphDragRoom));
-    }
+    Offset screenOf(WidgetTester tester, Point<double> world) => screenAt(tester, world);
 
     Point<double> now(String id) => motion().moved[id] ?? layout[id]!;
     double moved(String id) => (Offset(now(id).x, now(id).y) - Offset(layout[id]!.x, layout[id]!.y)).distance;
@@ -372,17 +376,81 @@ void main() {
     final chips = find.ancestor(of: find.text('주제39'), matching: find.byType(Wrap));
     final chipsBottom = tester.getRect(chips).bottom;
     expect(chipsBottom - tester.getRect(find.byType(InteractiveViewer)).top, greaterThan(120), reason: '칩이 세 줄 넘게 감겨야 시험이 된다');
-    final viewer = tester.getRect(find.byType(InteractiveViewer));
-    final ys = manyLayout.values.map((q) => q.y);
-    final xs = manyLayout.values.map((q) => q.x);
     final top = manyLayout.values.reduce((a, b) => a.y <= b.y ? a : b);
-    final local = Offset(top.x - (xs.reduce(min) - 80 - graphDragRoom), top.y - (ys.reduce(min) - 60 - graphDragRoom));
-    final screenTop = viewer.top + MatrixUtils.transformPoint(controller(tester).value, local).dy;
-    expect(screenTop, greaterThan(chipsBottom), reason: '맨 위 노드가 주제 칩 뒤에 가리면 안 된다');
+    expect(screenAt(tester, top).dy, greaterThan(chipsBottom), reason: '맨 위 노드가 주제 칩 뒤에 가리면 안 된다');
     // [맞추기] 버튼도 같은 자리
     await tester.tap(find.text('맞추기'));
     await tester.pumpAndSettle();
-    expect(viewer.top + MatrixUtils.transformPoint(controller(tester).value, local).dy, greaterThan(chipsBottom));
+    expect(screenAt(tester, top).dy, greaterThan(chipsBottom));
+  });
+
+  // 11/14 실제 앱 (설계서_프롬프트이후 5.6): 노트 1만 개를 [맞추기]하면 배율이 약 0.14라, 끌기 여유 200(그래프 좌표)이
+  // 화면에서 28px뿐이었다. 무리 가장자리 노드를 바깥으로 끌면 곧바로 멈췄다. 여유를 화면 기준(약 120px)으로 둔다.
+  group('크게 줄여 볼 때 끌기 여유', () {
+    // 세로로 긴 배치: [맞추기] 배율이 약 0.11이고 좌우에 빈 곳이 있다.
+    final tallNotes = [for (var i = 0; i < 30; i++) doc('w$i', '주제${i % 3}')];
+    final tallLayout = {for (var i = 0; i < 30; i++) 'w$i': Point((i % 5) * 750.0, (i ~/ 5) * 1000.0)};
+
+    Offset worldAt(WidgetTester tester, Offset screen) {
+      final viewer = tester.getRect(find.byType(InteractiveViewer));
+      final local = MatrixUtils.transformPoint(Matrix4.inverted(controller(tester).value), screen - viewer.topLeft);
+      return local + graphContentForTest.origin;
+    }
+
+    testWidgets('가장자리 노드를 화면에서 100px 바깥으로 끌 수 있고, 거기서 다시 잡힌다', (tester) async {
+      await pump(tester, const GraphView(), withNotes: tallNotes, withLinks: const [], withLayout: tallLayout);
+      final s = scale(tester);
+      expect(s, lessThan(0.15), reason: '크게 줄여 보는 조건 (배율 $s)');
+      expect(graphContentForTest.room * s, closeTo(graphDragRoomPixels, 1), reason: '여유는 화면에서 약 ${graphDragRoomPixels}px');
+      // 오른쪽 가운데 노드를 오른쪽으로 100px
+      const id = 'w14';
+      final start = screenAt(tester, tallLayout[id]!);
+      var g = await tester.startGesture(start, kind: PointerDeviceKind.mouse);
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(const Offset(10, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      final out = screenAt(tester, graphMotionForTest!.moved[id]!);
+      expect(out.dx - start.dx, closeTo(100, 1), reason: '노드 범위 밖 100px까지 손을 따라간다 (예전: 약 30px에서 멈춤)');
+      // 바깥에 둔 노드를 다시 잡아 안으로 50px
+      g = await tester.startGesture(out, kind: PointerDeviceKind.mouse);
+      for (var i = 0; i < 5; i++) {
+        await g.moveBy(const Offset(-10, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(screenAt(tester, graphMotionForTest!.moved[id]!).dx, closeTo(out.dx - 50, 1), reason: '그림 영역 안이라 다시 잡힌다');
+    });
+
+    testWidgets('맞추기는 그대로: 노드 범위가 가운데에 오고, 여유가 바뀌어도 화면이 튀지 않는다', (tester) async {
+      await pump(tester, const GraphView(), withNotes: tallNotes, withLinks: const [], withLayout: tallLayout);
+      final viewer = tester.getRect(find.byType(InteractiveViewer));
+      // 노드 범위(여백 80 포함) 좌우가 영역 가운데에 놓인다 (세로에 맞춰져 좌우가 남는다)
+      final left = screenAt(tester, const Point(-80, 0)).dx, right = screenAt(tester, const Point(3000 + 80, 0)).dx;
+      expect(left - viewer.left, closeTo(viewer.right - right, 1));
+      // [−]: 가운데를 기준으로 줄인다. 줄이는 동안 여유(그림 원점)가 바뀌어도 가운데 점은 그 자리에 있어야 한다.
+      final roomBefore = graphContentForTest.room;
+      final center = worldAt(tester, viewer.center);
+      await tester.tap(find.text('−'));
+      await tester.pumpAndSettle();
+      expect(graphContentForTest.room, greaterThan(roomBefore + 50), reason: '줄이면 여유(그래프 좌표)가 커진다');
+      final after = screenAt(tester, Point(center.dx, center.dy));
+      expect(after.dx, closeTo(viewer.center.dx, 0.5));
+      expect(after.dy, closeTo(viewer.center.dy, 0.5));
+      // [맞추기]로 돌아오면 처음과 같은 자리
+      await tester.tap(find.text('맞추기'));
+      await tester.pumpAndSettle();
+      expect(screenAt(tester, const Point(-80, 0)).dx, closeTo(left, 0.5));
+    });
+
+    test('여유: 화면 약 120px, 그래프 좌표로 200~1,500', () {
+      expect(graphDragRoomFor(1), graphDragRoom, reason: '보통 배율에서는 예전과 같다');
+      expect(graphDragRoomFor(0.14), closeTo(graphDragRoomPixels / 0.14, 1e-9));
+      expect(graphDragRoomFor(0.01), graphDragRoomMax);
+    });
   });
 
   // 끝난 기준 (5.6): 노트 1만 개에서 끌기 중 한 프레임 시간. 시간을 재는 시험이라 따로 돌린다:
@@ -422,8 +490,7 @@ void main() {
       // 노드를 화면 가운데로 옮겨 놓고 잡는다 (확대해도 화면 안에 있게)
       final m = controller(tester).value;
       final p = bigLayout[id]!;
-      final xs = bigLayout.values.map((q) => q.x), ys = bigLayout.values.map((q) => q.y);
-      final local = Offset(p.x - (xs.reduce(min) - 80 - graphDragRoom), p.y - (ys.reduce(min) - 60 - graphDragRoom));
+      final local = Offset(p.x, p.y) - graphContentForTest.origin;
       final shift = viewer.center - (viewer.topLeft + MatrixUtils.transformPoint(m, local));
       controller(tester).value = Matrix4.identity()
         ..translateByDouble(shift.dx, shift.dy, 0, 1)

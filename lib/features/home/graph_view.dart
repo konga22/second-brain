@@ -20,8 +20,27 @@ int graphFitCount = 0;
 /// 성능 시험용: 그래프를 실제로 그린 횟수 (painter.paint).
 int graphPaintCount = 0;
 
-/// 노드 범위 둘레에 더 두는 그림 영역 (그래프 좌표). 노드를 이만큼 바깥까지 끌 수 있다 (설계서_프롬프트이후 5.6).
+/// 노드 범위 둘레에 더 두는 그림 영역(끌기 여유)의 가장 작은 값 (그래프 좌표). 노드를 이만큼 바깥까지 끌 수 있다
+/// (설계서_프롬프트이후 5.6). 보통 배율(0.6 이상)에서는 이 값이다.
 const graphDragRoom = 200.0;
+
+/// 끌기 여유를 화면에서 이만큼(px) 둔다 (설계서_프롬프트이후 5.6, 11/14).
+const graphDragRoomPixels = 120.0;
+
+/// 끌기 여유의 가장 큰 값 (그래프 좌표). 아주 작게 줄였을 때 그림 영역이 한없이 커지지 않게.
+const graphDragRoomMax = 1500.0;
+
+/// 배율 [scale]에서의 끌기 여유 (그래프 좌표): 화면 약 [graphDragRoomPixels]px, [graphDragRoom]~[graphDragRoomMax].
+///
+/// 예전에는 늘 200이었다. 노트 1만 개를 [맞추기]하면 배율이 약 0.14라 화면에서 28px뿐이어서, 무리 가장자리 노드를
+/// 바깥으로 끌면 곧바로 멈췄다 (설계서_프롬프트이후 5.6, 11/14 실제 앱에서 발견).
+double graphDragRoomFor(double scale) =>
+    (graphDragRoomPixels / max(scale, 1e-6)).clamp(graphDragRoom, graphDragRoomMax);
+
+/// 시험용: 지금 그림 영역의 원점(그래프 좌표, 노드 범위 왼쪽 위 - 여백 - 끌기 여유)과 끌기 여유.
+/// 그래프 좌표 p는 화면에서 `transform(p - origin)`에 그려진다.
+@visibleForTesting
+({Offset origin, double room}) graphContentForTest = (origin: Offset.zero, room: graphDragRoom);
 
 /// 시험용: 지금 그래프 보기의 노드 끌기 상태 (옮긴 자리, 설계서_프롬프트이후 5.6).
 @visibleForTesting
@@ -98,6 +117,13 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
 
   double _lastScale = 1;
 
+  /// 지금 끌기 여유 (그래프 좌표, [graphDragRoomFor]). 확대 비율([_lastScale])이 바뀌면 [_updateRoom]이 맞춘다.
+  double _room = graphDragRoom;
+
+  /// 화면 끌기·손가락 확대 중 (InteractiveViewer). 이때는 끌기 여유를 바꾸지 않는다: 그림 원점이 움직이면
+  /// InteractiveViewer가 잡아 둔 확대 기준점(그림 좌표)이 어긋나 화면이 한 번 튄다. 손을 떼면 맞춘다.
+  bool _isInteracting = false;
+
   @override
   void initState() {
     super.initState();
@@ -152,6 +178,25 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
       m.storage[i] = from.storage[i] + (to.storage[i] - from.storage[i]) * t;
     }
     _transform.value = m;
+  }
+
+  /// 끌기 여유를 지금 배율에 맞춘다 (설계서_프롬프트이후 5.6, 11/14).
+  ///
+  /// 그림 원점(노드 범위 왼쪽 위 - 여유)이 바뀐 여유만큼 옮겨지므로, 같은 그래프 좌표가 화면 같은 자리에 남게 변환을
+  /// 반대로 옮긴다 (움직이는 확대의 출발·도착 값도). 그래서 맞추기·보던 자리·저장된 배치는 그대로다.
+  /// 확대 비율이 바뀔 때만(바탕을 어차피 다시 그릴 때) 불리므로 바탕을 더 그리지 않는다.
+  void _updateRoom() {
+    final want = graphDragRoomFor(_lastScale);
+    if (want == _room || _isInteracting || _motion.isSimulating) return;
+    // 옮긴 노드가 있으면 줄이지 않는다: 바깥에 둔 노드가 그림 영역 밖으로 나가면 다시 잡을 수 없다.
+    if (want < _room && _motion.hasMoved) return;
+    final d = want - _room;
+    _room = want;
+    // 그림 좌표가 (d, d)만큼 커지므로 변환 오른쪽에 (-d, -d) 옮기기를 곱한다: 화면 = 변환(그림 좌표 - d).
+    Matrix4 shift(Matrix4 m) => m.clone()..translateByDouble(-d, -d, 0, 1);
+    if (_zoomFrom != null) _zoomFrom = shift(_zoomFrom!);
+    if (_zoomTo != null) _zoomTo = shift(_zoomTo!);
+    _transform.value = shift(_transform.value);
   }
 
   void _zoomDone() {
@@ -461,9 +506,11 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
                     if (live.contains(l.fromId) || live.contains(l.toId)) l,
                 ];
           // 노드가 그림 밖으로 나가면 다시 잡을 수 없어 그림 영역 안에서만 움직인다.
-          // 그림 영역: 노드 범위 둘레에 끌기 여유([graphDragRoom])를 둔다. 노드를 범위 밖으로 끌어도 다시 잡고 마우스를
+          // 그림 영역: 노드 범위 둘레에 끌기 여유([_room], 화면 약 120px)를 둔다. 노드를 범위 밖으로 끌어도 다시 잡고 마우스를
           // 올릴 수 있게 (그림 밖은 눌러도 받지 않는다). 맞추기는 그대로 노드 범위(bounds)에 맞춘다.
-          final content = bounds.inflate(graphDragRoom);
+          _updateRoom();
+          final content = bounds.inflate(_room);
+          graphContentForTest = (origin: content.topLeft, room: _room);
           final dragArea = content.deflate(10);
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -494,6 +541,7 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
                         minScale: _minScale,
                         maxScale: _maxScale,
                         onInteractionStart: (_) {
+                          _isInteracting = true;
                           // 휠이면 _onWheel이 되돌릴 값. 끌기·손가락 확대면 움직이던 확대를 그 자리에서 멈춘다 (손이 우선).
                           _beforeWheel = (matrix: _transform.value.clone(), lastScale: _lastScale, target: _zoomTo);
                           if (_zoomAnim.isAnimating) {
@@ -501,6 +549,11 @@ class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateM
                             _zoomFrom = null;
                             _zoomTo = null;
                           }
+                        },
+                        onInteractionEnd: (_) {
+                          _isInteracting = false;
+                          // 손가락 확대 중에 미뤄 둔 끌기 여유를 맞춘다 (바뀔 때만 다시 빌드).
+                          if (graphDragRoomFor(_lastScale) != _room && mounted) setState(() {});
                         },
                         child: MouseRegion(
                           onHover: (event) {

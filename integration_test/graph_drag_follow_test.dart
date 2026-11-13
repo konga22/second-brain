@@ -75,11 +75,10 @@ void main() {
     final viewerFinder = find.byType(InteractiveViewer);
     TransformationController controller() => tester.widget<InteractiveViewer>(viewerFinder).transformationController!;
     final layout = container.read(graphLayoutProvider).requireValue;
-    final xs = layout.values.map((p) => p.x), ys = layout.values.map((p) => p.y);
-    // 그림 원점: 노드 범위 왼쪽 위 - 여백 80·60 - 끌기 여유
-    final origin = Offset(xs.reduce(min) - 80 - graphDragRoom, ys.reduce(min) - 60 - graphDragRoom);
+    // 그림 원점: 노드 범위 왼쪽 위 - 여백 80·60 - 끌기 여유. 끌기 여유는 배율에 따라 바뀌어 그때그때 읽는다 (5.6, 11/14).
+    Offset origin() => graphContentForTest.origin;
     final viewer = tester.getRect(viewerFinder);
-    Offset screen(Point<double> p) => viewer.topLeft + MatrixUtils.transformPoint(controller().value, Offset(p.x, p.y) - origin);
+    Offset screen(Point<double> p) => viewer.topLeft + MatrixUtils.transformPoint(controller().value, Offset(p.x, p.y) - origin());
 
     // 1. [맞추기]: 맨 위 노드가 주제 칩 묶음 아래
     await tester.tap(find.text('맞추기'));

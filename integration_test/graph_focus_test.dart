@@ -59,11 +59,12 @@ void main() {
     final viewer = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
     final viewport = tester.getSize(find.byType(InteractiveViewer));
     final zoom = viewer.transformationController!.value.getMaxScaleOnAxis();
-    // 그림 영역에는 노드 범위 둘레에 끌기 여유(graphDragRoom, 5.6)가 있다. 견주는 것은 노드가 그려진 범위.
+    // 그림 영역에는 노드 범위 둘레에 끌기 여유(graphContentForTest.room, 5.6)가 있다. 견주는 것은 노드가 그려진 범위.
     final area = tester.getSize(
       find.descendant(of: find.byType(InteractiveViewer), matching: find.byType(SizedBox)).first,
     );
-    final content = Size(area.width - graphDragRoom * 2, area.height - graphDragRoom * 2);
+    final room = graphContentForTest.room;
+    final content = Size(area.width - room * 2, area.height - room * 2);
     debugPrint('[시험] 보이는 영역 $viewport, 그림 ${content * zoom} (배율 ${zoom.toStringAsFixed(2)})');
     // 시험이 실제로 "그림이 영역보다 작은" 상황을 만들었는지 먼저 확인한다 (L-0006).
     expect(content.width * zoom, lessThan(viewport.width), reason: '축소가 안 돼 시험 조건이 안 만들어짐');
