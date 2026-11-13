@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:brain_core/brain_core.dart';
 import 'package:path/path.dart' as p;
@@ -129,7 +130,11 @@ void main() {
 
   group('지식 폴더에서 읽기', () {
     late Directory dir;
-    setUp(() => dir = Directory.systemTemp.createTempSync('neural_'));
+    var finished = false;
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('neural_');
+      finished = false;
+    });
     tearDown(() => dir.deleteSync(recursive: true));
 
     void write(String rel, String text) {
@@ -168,6 +173,70 @@ void main() {
       final imported = withIndex.inputs.firstWhere((i) => i.kind == NeuralInputKind.document);
       expect(imported.rawId, 'r_abc');
       expect(withIndex.indexOfRaw('r_abc'), withIndex.inputs.indexOf(imported));
+    });
+
+    // 머리말 경로는 믿지 않는다 (설계서_프롬프트이후 5.3, 11/13 검토 5·7)
+    test('출처 경로가 ..·심볼릭 링크로 지식 폴더 밖을 가리키면 읽지 않고, 없는 원본은 입력층에 넣지 않는다', () {
+      final outside = Directory.systemTemp.createTempSync('neural_out_');
+      addTearDown(() => outside.deleteSync(recursive: true));
+      File(p.join(outside.path, 'secret.md')).writeAsStringSync('---\nid: r_secret\ntitle: "밖의 비밀"\n---\n');
+      final rel = p.relative(p.join(outside.path, 'secret.md'), from: p.join(dir.path, 'raw', 'sessions'));
+      Directory(p.join(dir.path, 'raw', 'sessions')).createSync(recursive: true);
+      Link(p.join(dir.path, 'raw', 'sessions', '2026-11-03-link.md')).createSync(p.join(outside.path, 'secret.md'));
+      write('raw/sessions/2026-11-01-ok.md', '---\nid: r_ok\ntitle: "세션 ok 안쪽 대화"\n---\n');
+      write('wiki/a.md', '---\nid: n_1\ntitle: "가"\nsources: ["raw/sessions/$rel", "raw/sessions/2026-11-03-link.md", '
+          '"raw/sessions/2026-11-01-ok.md", "raw/sessions/2026-11-02-gone.md", "raw/sessions/../imports/2026-11-04-doc.md"]\n---\n');
+      write('raw/imports/2026-11-04-doc.md', '---\ntitle: "문서"\n---\n');
+      // 폴더째 심볼릭 링크로 밖을 가리켜도 읽지 않는다
+      Directory(p.join(outside.path, 'dir')).createSync();
+      File(p.join(outside.path, 'dir', '2026-11-06-far.md')).writeAsStringSync('---\ntitle: "밖의 폴더"\n---\n');
+      Link(p.join(dir.path, 'raw', 'linked')).createSync(p.join(outside.path, 'dir'));
+      write('wiki/b.md', '---\nid: n_3\ntitle: "다"\nsources: ["raw/sessions/../linked/2026-11-06-far.md", "raw/imports/../linked/2026-11-06-far.md"]\n---\n');
+      // 노트 경로도 밖을 가리키면 읽지 않는다
+      final noteRel = p.relative(p.join(outside.path, 'secret.md'), from: dir.path);
+      final layout = neuralLayoutFromVault(dir.path, [
+        (id: 'n_1', path: 'wiki/a.md', title: '가', topic: '결제', isDraft: false),
+        (id: 'n_2', path: noteRel, title: '나', topic: '결제', isDraft: false),
+        (id: 'n_3', path: 'wiki/b.md', title: '다', topic: '결제', isDraft: false),
+        (id: 'n_4', path: 'raw/linked/2026-11-06-far.md', title: '라', topic: '결제', isDraft: false),
+      ], const []);
+      expect(rel, startsWith('../'));
+      expect(layout.notes[layout.indexOfNote('n_4')!].inputs, isEmpty);
+      expect(layout.inputs.map((i) => i.title), isNot(contains('밖의 비밀')));
+      expect(layout.inputs.map((i) => i.rawId), isNot(contains('r_secret')));
+      expect({for (final i in layout.inputs) i.path}, {'raw/sessions/2026-11-01-ok.md', 'raw/imports/2026-11-04-doc.md'},
+          reason: '밖·링크·없는 파일은 빠지고, 안쪽을 가리키는 ..는 정리해 받는다');
+      expect(layout.notes[layout.indexOfNote('n_2')!].inputs, isEmpty);
+    });
+
+    test('FIFO 같은 보통 파일이 아닌 것은 열지 않는다 (열면 isolate가 영영 멈춘다)', () async {
+      final fifo = p.join(dir.path, 'raw', 'sessions', '2026-11-05-fifo.md');
+      Directory(p.dirname(fifo)).createSync(recursive: true);
+      final made = Process.runSync('mkfifo', [fifo]);
+      if (made.exitCode != 0) {
+        markTestSkipped('mkfifo 없음');
+        return;
+      }
+      // 고치기 전에는 여기서 멈췄다. 시험이 끝나도록 쓰는 쪽을 열어 풀어 준다.
+      addTearDown(() {
+        if (!finished) File(fifo).openSync(mode: FileMode.writeOnly).closeSync();
+      });
+      write('wiki/a.md', '---\nid: n_1\ntitle: "가"\nsources: ["raw/sessions/2026-11-05-fifo.md"]\n---\n');
+      final root = dir.path;
+      final inputs = await Isolate.run(() => neuralLayoutFromVault(root, [
+        (id: 'n_1', path: 'wiki/a.md', title: '가', topic: '결제', isDraft: false),
+        (id: 'n_2', path: 'raw/sessions/2026-11-05-fifo.md', title: '나', topic: '결제', isDraft: false),
+      ], const []).inputs.length).timeout(const Duration(seconds: 10));
+      finished = true;
+      expect(inputs, 0);
+    });
+
+    test('입력 경로 정리: ..로 밖에 나가면 null, 절대 경로·안쪽 ..는 받는다', () {
+      expect(neuralInputOf('raw/sessions/../../../x.md'), isNull);
+      expect(neuralInputOf('raw/sessions/../../raw/x.md'), isNull);
+      expect(neuralInputOf('/Users/raw/vault/raw/sessions/2026-11-01-a.md')?.path, 'raw/sessions/2026-11-01-a.md');
+      expect(neuralInputOf('raw/sessions/../imports/b.md'), (path: 'raw/imports/b.md', kind: NeuralInputKind.document));
+      expect(neuralInputOf('raw/sessions/'), isNull);
     });
 
     test('M8: 노트 1만 개 파일 읽기 + 배치 (첫 표시까지 앱이 하는 일)', () {

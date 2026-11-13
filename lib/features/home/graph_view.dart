@@ -145,7 +145,6 @@ class _GraphViewState extends ConsumerState<GraphView> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final layout = ref.watch(graphLayoutProvider);
     final notes = ref.watch(notesProvider);
     final allLinks = ref.watch(linksProvider);
     final selected = ref.watch(selectedNoteProvider);
@@ -162,21 +161,43 @@ class _GraphViewState extends ConsumerState<GraphView> {
         ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: _isNeural ? NeuralView(toggle: _viewToggle()) : layout.when(
-        loading: () => const Center(
+      // 신경망 보기일 때는 그물 배치를 지켜보지 않는다: 지켜보는 곳이 없으면 노트가 바뀌어도 다시 계산하지 않고
+      // (1만 개에서 전체 배치 약 13초), 그물로 돌아올 때 한 번만 계산한다 (설계서_프롬프트이후 5.3, 11/13 검토 6).
+      child: _isNeural ? NeuralView(toggle: _viewToggle()) : _mesh(context, theme, notes, allLinks, selected, docs),
+    );
+  }
+
+  /// 그물 보기. 배치 중·실패·빈 지식 폴더에서도 [그물 | 신경망] 버튼은 늘 보인다: 그물 배치가 끝나야만 신경망으로
+  /// 갈 수 있으면, 노트 1만 개에서 배치를 기다리는 동안이나 배치가 실패했을 때 신경망 보기에 갈 수 없었다 (11/13 검토 6).
+  Widget _mesh(
+    BuildContext context,
+    ShadThemeData theme,
+    List<IndexedDoc> notes,
+    List<NoteLink> allLinks,
+    String? selected,
+    Map<String, IndexedDoc> docs,
+  ) {
+    Widget withToggle(Widget child) => Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(top: 10, left: 10, child: _viewToggle()),
+      ],
+    );
+    return ref.watch(graphLayoutProvider).when(
+        loading: () => withToggle(const Center(
           child: Text('그래프 배치 중…', style: TextStyle(color: AppColors.graphLabel)),
-        ),
-        error: (e, _) => Center(
+        )),
+        error: (e, _) => withToggle(Center(
           child: Text('그래프를 그리지 못했습니다: $e', style: const TextStyle(color: AppColors.graphLabel)),
-        ),
+        )),
         data: (allPositions) {
           if (allPositions.isEmpty) {
-            return const Center(
+            return withToggle(const Center(
               child: Text(
                 '아직 노트가 없습니다. 노트가 생기면 주제별로 모여 이어집니다.',
                 style: TextStyle(color: AppColors.graphLabel, fontSize: 13),
               ),
-            );
+            ));
           }
           final isLocal = _isLocal && selected != null && allPositions.containsKey(selected);
           var visible = isLocal
@@ -416,8 +437,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
             },
           );
         },
-      ),
-    );
+      );
   }
 }
 

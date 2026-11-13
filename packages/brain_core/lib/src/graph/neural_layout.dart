@@ -131,30 +131,68 @@ class NeuralLayout {
   /// 고른 순서의 겹침.
   final NeuralCrossings crossings;
 
-  int get sourceEdgeCount => notes.fold(0, (s, n) => s + n.inputs.length);
-  int get faintEdgeCount => notes.fold(0, (s, n) => s + n.neighborTopics.length);
+  // 아래 값은 화면이 그릴 때마다 묻는다. 노트 1만 개에서 매번 세지 않도록 한 번만 센다 (설계서_프롬프트이후 5.3, 11/13 검토).
+  late final int sourceEdgeCount = notes.fold(0, (s, n) => s + n.inputs.length);
+  late final int faintEdgeCount = notes.fold(0, (s, n) => s + n.neighborTopics.length);
+
+  /// 입력 하나에서 나온 노트 수의 최댓값, 주제 하나의 노트 수 최댓값 (노드 크기 기준, 최소 1).
+  late final int maxInputNotes = inputs.fold(1, (m, x) => x.notes.length > m ? x.notes.length : m);
+  late final int maxTopicNotes = topics.fold(1, (m, t) => t.count > m ? t.count : m);
 
   late final Map<String, int> _noteIndex = {for (var i = 0; i < notes.length; i++) notes[i].id: i};
   late final Map<String, int> _rawIndex = {
     for (var i = 0; i < inputs.length; i++)
       if (inputs[i].rawId != null) inputs[i].rawId!: i,
   };
+  late final Map<String, int> _inputIndex = {for (var i = 0; i < inputs.length; i++) inputs[i].path: i};
+  late final Map<String, int> _topicIndex = {for (var i = 0; i < topics.length; i++) topics[i].name: i};
 
   /// 노트 id → 은닉층 순서 번호.
   int? indexOfNote(String id) => _noteIndex[id];
 
   /// 원본 문서 id(`r_…`) → 입력층 순서 번호.
   int? indexOfRaw(String id) => _rawIndex[id];
+
+  /// 입력 경로(`raw/sessions/…`) → 입력층 순서 번호. 배치가 바뀌면 번호가 바뀌어 화면은 경로로 기억한다.
+  int? indexOfInput(String path) => _inputIndex[path];
+
+  /// 주제 이름 → 출력층 순서 번호.
+  int? indexOfTopic(String name) => _topicIndex[name];
 }
 
-final _inputPath = RegExp(r'(?:^|/)(raw/(sessions|imports)/.+)$');
+final _inputDir = RegExp(r'^raw/(sessions|imports)/[^/]');
 final _datePart = RegExp(r'\d{4}-\d{2}-\d{2}');
 
 /// `sources:`의 한 경로를 입력층 경로로 바꾼다. 대화(`raw/sessions/`)·가져온 문서(`raw/imports/`)가 아니면 null.
+/// 절대 경로(`/…/지식폴더/raw/sessions/x.md`)도 받는다. `raw/sessions/../../../x`처럼 `..`로 지식 폴더 밖이나 다른
+/// 폴더를 가리키면 정리한 뒤 다시 보고, 밖이면 null (설계서_프롬프트이후 5.3, 11/13 검토: 정리 없이 이어 붙여
+/// 지식 폴더 밖 파일을 읽었다).
 ({String path, NeuralInputKind kind})? neuralInputOf(String source) {
-  final m = _inputPath.firstMatch(source.replaceAll(r'\', '/'));
-  if (m == null) return null;
-  return (path: m.group(1)!, kind: m.group(2) == 'sessions' ? NeuralInputKind.session : NeuralInputKind.document);
+  final s = source.replaceAll(r'\', '/');
+  for (var i = s.indexOf('raw/'); i >= 0; i = s.indexOf('raw/', i + 1)) {
+    if (i > 0 && s[i - 1] != '/') continue;
+    final path = _normalize(s.substring(i));
+    final d = path == null ? null : _inputDir.firstMatch(path);
+    if (d != null) {
+      return (path: path!, kind: d.group(1) == 'sessions' ? NeuralInputKind.session : NeuralInputKind.document);
+    }
+  }
+  return null;
+}
+
+/// `a/./b/../c` → `a/c`. 맨 위보다 위로 올라가면(`..`가 남으면) null. 순수 Dart라 path 패키지 없이 한다.
+String? _normalize(String path) {
+  final out = <String>[];
+  for (final part in path.split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      if (out.isEmpty) return null;
+      out.removeLast();
+    } else {
+      out.add(part);
+    }
+  }
+  return out.join('/');
 }
 
 /// 원본 제목 `세션 bed8445f 사이드 채팅` → `사이드 채팅` (세션 id는 이름표에서 읽을 수 없는 글자라 뺀다).

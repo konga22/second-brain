@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:math';
 
@@ -337,19 +338,30 @@ Future<MoveResult> moveNotesInBackground(
 /// 신경망 보기 층 배치 (설계서_프롬프트이후 5.3). 노트 출처(`sources:`)는 색인에 없어 노트 파일 머리말을 읽는다.
 /// 노트 1만 개에서 파일 열기만 약 0.3초라, 노트를 [_sourceReaders]덩어리로 나눠 isolate 여러 개에서 함께 읽고
 /// 배치는 isolate 하나에서 한다 (M8 첫 표시 1초 목표). 넘기는 것은 글자·참거짓 값뿐이다 (L-0004).
+///
+/// [timeout] 안에 끝나지 않으면 [TimeoutException]을 던진다: 파일 읽기가 멈춰도 화면이 "배치 중…"에 영영 남지 않고
+/// 오류 문구를 보인다 (11/13 검토 5). 보통 파일만 열어 멈출 일은 없지만(brain_core), 느린 외장 디스크 등에 대비한다.
 Future<NeuralLayout> neuralLayoutInBackground(
   String vaultRoot,
   String indexPath,
   List<NeuralNoteRow> notes,
-  List<(String, String)> links,
-) async {
+  List<(String, String)> links, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
   final paths = [for (final n in notes) n.path];
   final size = max(500, (paths.length / _sourceReaders).ceil());
-  final parts = await Future.wait([
-    for (var start = 0; start < paths.length; start += size)
-      _readSourcesInBackground(vaultRoot, paths.sublist(start, min(start + size, paths.length))),
-  ]);
-  return _neuralLayoutInBackground(vaultRoot, indexPath, notes, links, [for (final part in parts) ...part]);
+  Future<NeuralLayout> run() async {
+    final parts = await Future.wait([
+      for (var start = 0; start < paths.length; start += size)
+        _readSourcesInBackground(vaultRoot, paths.sublist(start, min(start + size, paths.length))),
+    ]);
+    return _neuralLayoutInBackground(vaultRoot, indexPath, notes, links, [for (final part in parts) ...part]);
+  }
+
+  return run().timeout(
+    timeout,
+    onTimeout: () => throw TimeoutException('지식 폴더 파일 읽기가 ${timeout.inSeconds}초 안에 끝나지 않았습니다', timeout),
+  );
 }
 
 const _sourceReaders = 4;
