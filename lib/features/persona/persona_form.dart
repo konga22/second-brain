@@ -141,12 +141,21 @@ class _PersonaFormState extends State<PersonaForm> with SafeSetState<PersonaForm
         Wrap(
           spacing: 8,
           children: [
+            // 고른 쪽은 보라 테두리·옅은 보라 바탕·체크로 분명하게 (예전 secondary 회색은 안 고른 쪽보다 흐려 보였다, 11/13 화면 검토)
             for (final style in const [Persona.styleShort, Persona.styleDetailed])
-              (_style == style ? ShadButton.secondary : ShadButton.outline)(
-                size: ShadButtonSize.sm,
-                onPressed: () => _onStyle(style),
-                child: Text(style),
-              ),
+              if (_style == style)
+                ShadButton.outline(
+                  size: ShadButtonSize.sm,
+                  backgroundColor: colors.accentSoft,
+                  hoverBackgroundColor: colors.accentSoft,
+                  foregroundColor: colors.accentText,
+                  decoration: ShadDecoration(border: ShadBorder.all(color: colors.accent, width: 1.5, radius: BorderRadius.circular(6))),
+                  leading: Icon(LucideIcons.check, size: 14, color: colors.accentText),
+                  onPressed: () => _onStyle(style),
+                  child: Text(style, style: const TextStyle(fontWeight: FontWeight.w600)),
+                )
+              else
+                ShadButton.outline(size: ShadButtonSize.sm, onPressed: () => _onStyle(style), child: Text(style)),
           ],
         ),
         question(
@@ -162,7 +171,7 @@ class _PersonaFormState extends State<PersonaForm> with SafeSetState<PersonaForm
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              '1글자 ${ignored.map((t) => '"$t"').join(', ')}은 검사하지 않습니다 (너무 흔해 거의 모든 노트가 막힘).',
+              '1글자 단어(${ignored.map((t) => '"$t"').join(', ')})는 검사하지 않습니다 (너무 흔해 거의 모든 노트가 막힘).',
               style: TextStyle(color: colors.warning, fontSize: 12),
             ),
           ),

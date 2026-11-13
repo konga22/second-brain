@@ -174,7 +174,9 @@ class _FolderTidyDialogState extends ConsumerState<FolderTidyDialog> {
     return ShadDialog(
       title: const Text('폴더 정리'),
       description: const Text(
-        '노트를 구역(프로젝트·개발 지식·조사·참고·공부·생활·기기) 아래 주제로 옮기고 파일 이름을 짧게 바꿉니다. '
+        // 이름은 긴 제목(20자 넘음, "—"·"(" 뒤 설명)만 줄인다 (shortNoteName). 짧은 제목은 그대로라 "짧게 바꿉니다"만 쓰면 틀린 말이 된다.
+        '노트를 구역(프로젝트·개발 지식·조사·참고·공부·생활·기기) 아래 주제로 옮깁니다. '
+        '제목이 길면(20자 넘음, "—"·"(" 뒤 설명) 파일 이름을 짧게 줄이고, 짧으면 그대로 둡니다. '
         '제안은 추정입니다. 자리를 고친 뒤 승인하세요.',
       ),
       constraints: const BoxConstraints(maxWidth: 980),

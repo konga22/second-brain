@@ -51,6 +51,35 @@ void main() {
     expect(merged!.doc.id, 'n_0002');
   });
 
+  testWidgets('화면 검토: 좁은 칸(230px)에서도 비슷한 노트 제목이 버튼에 밀려 몇 글자로 줄지 않는다', (tester) async {
+    await tester.pumpWidget(
+      ShadApp(
+        theme: buildAppTheme(Brightness.light),
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 230,
+            child: DraftSimilarList(
+              similar: [SimilarNote(doc: doc('n_0001', 'FTS5 trigram 토크나이저로 한국어 검색'), shared: 3, terms: 5)],
+              onOpen: (_) {},
+              onMerge: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    final title = find.text('FTS5 trigram 토크나이저로 한국어 검색  (3/5)');
+    expect(title, findsOneWidget);
+    expect(tester.getSize(title).width, greaterThan(200), reason: '제목은 칸 폭을 다 쓴다');
+    // 버튼은 제목 아래 줄
+    expect(tester.getTopLeft(find.text('합치기')).dy, greaterThan(tester.getBottomLeft(title).dy - 1));
+  });
+
+  /// 버튼이 흐리게(꺼짐) 보이는지: shadcn은 enabled가 false일 때만 반투명으로 그린다.
+  bool looksDisabled(WidgetTester tester, String label) => tester
+      .widgetList<Opacity>(find.ancestor(of: find.text(label), matching: find.byType(Opacity)))
+      .any((o) => o.opacity < 1);
+
   AiEdit edit({bool canRevert = true}) => AiEdit(
     noteId: 'n_0007',
     title: '로그인 토큰 만료 시간',
@@ -93,6 +122,8 @@ void main() {
     await tester.tap(find.text('되돌리기'), warnIfMissed: false);
     expect(reverted, isFalse);
     expect(find.textContaining('직접 고친 기록이 있어'), findsOneWidget);
+    expect(looksDisabled(tester, '되돌리기'), isTrue, reason: '눌리지 않는 버튼은 흐리게 보인다');
+    expect(looksDisabled(tester, '확인함'), isFalse);
   });
 
   testWidgets('4.3 바뀐 내용 보기: 빠진 줄은 -, 새 줄은 +', (tester) async {
@@ -108,11 +139,13 @@ void main() {
     expect(find.text('옛 결정 점검: 11/13 (주 1회)'), findsOneWidget);
     await tester.tap(find.text('지금 점검'));
     expect(runs, 1);
+    expect(looksDisabled(tester, '지금 점검'), isFalse);
 
     await pump(tester, DecisionCheckBar(state: const DecisionCheckState(isRunning: true, done: 120, total: 300), onRun: () => runs++));
     expect(find.text('옛 결정 점검 중 120/300'), findsOneWidget);
     await tester.tap(find.text('지금 점검'), warnIfMissed: false);
     expect(runs, 1, reason: '도는 중에는 다시 돌리지 않는다');
+    expect(looksDisabled(tester, '지금 점검'), isTrue, reason: '도는 중에는 흐리게 보인다');
 
     await pump(tester, DecisionCheckBar(state: const DecisionCheckState(error: 'database is locked'), onRun: () {}));
     expect(find.text('옛 결정 점검 실패: database is locked'), findsOneWidget);

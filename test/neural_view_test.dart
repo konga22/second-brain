@@ -166,40 +166,44 @@ void main() {
     expect(container.read(selectedNoteProvider), isNull);
   });
 
-  testWidgets('이름표는 자르지 않는다: 긴 제목은 여러 줄로 다 보인다 (결정 6)', (tester) async {
+  testWidgets('이름표: 평소는 한 줄로 줄이고, 마우스 올림·고른 길은 자르지 않고 전체 (11/13 사용자 결정)', (tester) async {
     await pump(tester, NeuralView(toggle: const SizedBox()));
-    // 마우스를 올리면 이름 전체 (말줄임 없음)
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: Offset.zero);
-    addTearDown(mouse.removePointer);
-    neuralLabelLog.clear();
-    await mouse.moveTo(noteAt('n_2'));
-    await tester.pumpAndSettle();
-    expect(find.text(longTitle), findsOneWidget, reason: '마우스 올림 안내에 제목 전체');
-    final hovered = neuralLabelLog.where((l) => l.text == longTitle);
-    expect(hovered, isNotEmpty, reason: '노드 옆 이름표도 제목 전체');
-    expect(hovered.first.lines, greaterThan(1), reason: '긴 제목은 줄을 바꾼다');
-    expect(neuralLabelLog.any((l) => l.text.contains('…')), isFalse);
-    await mouse.moveTo(const Offset(5, 5));
-    await tester.pumpAndSettle();
-
-    // 고르면 고른 길의 노트 이름표도 전체
-    await tester.tapAt(noteAt('n_2'));
-    await tester.pumpAndSettle();
-    expect(neuralLabelLog.where((l) => l.text == longTitle && l.lines > 1), isNotEmpty);
-
-    // 확대하면 노트 이름표가 바탕에 나온다 (모두 전체 제목)
-    container.read(selectedNoteProvider.notifier).select(null);
-    await tester.pumpAndSettle();
+    // 확대하면 노트 이름표가 바탕에 나온다: 긴 제목은 한 줄로 줄인다 (말줄임)
     neuralLabelLog.clear();
     for (var i = 0; i < 3; i++) {
       await tester.tap(find.text('+'));
       await tester.pump();
     }
     await tester.pumpAndSettle();
-    final shown = neuralLabelLog.map((l) => l.text).toSet();
-    expect(shown, contains(longTitle));
-    expect(shown.where((t) => t.endsWith('…')), isEmpty);
+    final plain = neuralLabelLog.where((l) => l.text == longTitle);
+    expect(plain, isNotEmpty, reason: '확대하면 긴 제목 노트에도 이름표가 붙는다');
+    expect(plain.last.lines, 1);
+    expect(plain.last.cut, isTrue, reason: '평소 이름표는 한 줄로 줄인다');
+    expect(neuralLabelLog.where((l) => l.text == '결제 웹훅 재시도').last.cut, isFalse, reason: '짧은 제목은 그대로');
+
+    // 마우스를 올리면 이름 전체 (말줄임 없음)
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await tester.tap(find.text('맞추기'));
+    await tester.pumpAndSettle();
+    neuralLabelLog.clear();
+    await mouse.moveTo(noteAt('n_2'));
+    await tester.pumpAndSettle();
+    expect(find.text(longTitle), findsOneWidget, reason: '마우스 올림 안내에 제목 전체');
+    final hovered = neuralLabelLog.where((l) => l.text == longTitle && l.strong);
+    expect(hovered, isNotEmpty, reason: '노드 옆 이름표도 제목 전체');
+    expect(hovered.last.lines, greaterThan(1), reason: '긴 제목은 줄을 바꾼다');
+    expect(hovered.last.cut, isFalse);
+    await mouse.moveTo(const Offset(5, 5));
+    await tester.pumpAndSettle();
+
+    // 고르면 고른 길의 노트 이름표도 전체
+    neuralLabelLog.clear();
+    await tester.tapAt(noteAt('n_2'));
+    await tester.pumpAndSettle();
+    final picked = neuralLabelLog.where((l) => l.text == longTitle && l.strong);
+    expect(picked.where((l) => l.lines > 1 && !l.cut), isNotEmpty);
   });
 
   testWidgets('확대는 은닉층만: 휠로 키워도 대화·주제 자리는 그대로이고 [맞추기]로 돌아온다', (tester) async {
@@ -349,6 +353,33 @@ void main() {
       for (var b = a + 1; b < want.length; b++) {
         expect(rects[want[a]]!.overlaps(rects[want[b]]!), isFalse, reason: '${want[a]} · ${want[b]} 이름표가 겹친다');
       }
+    }
+  });
+
+  testWidgets('화면 검토: 고른 길 이름표에 반쯤 가리는 바탕 이름표는 빼서 조각이 남지 않는다', (tester) async {
+    // 노트 30개(간격 약 19px)에 긴 제목: 고른 노트 이름표(여러 줄)가 이웃 이름표 자리를 덮는다
+    final crowded = layoutNeural([
+      for (var i = 0; i < 30; i++)
+        NeuralNoteSpec(
+          id: 'c$i',
+          title: i == 15 ? longTitle : '이웃 노트 $i 이름표는 두 줄이 될 만큼 조금 길다',
+          topic: 'T${i % 5}',
+          sources: ['raw/sessions/2026-03-${(1 + i % 20).toString().padLeft(2, '0')}-c$i.md'],
+        ),
+    ], const []);
+    await pump(tester, NeuralView(toggle: const SizedBox()), using: crowded);
+    await tester.tap(find.text('+'));
+    await tester.pumpAndSettle();
+    neuralLabelLog.clear();
+    container.read(selectedNoteProvider.notifier).select('c15');
+    await tester.pumpAndSettle();
+    final picked = neuralLabelLog.where((l) => l.text == longTitle && l.strong).toList();
+    expect(picked, isNotEmpty);
+    final box = picked.last.rect.inflate(3);
+    final dimmed = neuralLabelLog.where((l) => !l.strong && l.text != longTitle);
+    expect(dimmed, isNotEmpty, reason: '시험 전제: 바탕 이름표가 어둡게 보인다');
+    for (final l in dimmed) {
+      expect(l.rect.overlaps(box), isFalse, reason: '${l.text} 이름표가 고른 노트 이름표 밑에 조각으로 남는다');
     }
   });
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/widgets.dart';
@@ -247,6 +248,35 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
   final _open = <String>{};
   String? _dropHover;
 
+  /// 고른 노트 줄을 화면 안으로 옮기기 (11/13 화면 검토: 폴더를 펼치면 고른 줄이 반쯤 화면 밖에 있었다).
+  final _scroll = ScrollController();
+  final _selectedRow = GlobalKey();
+
+  /// 목록에서 고른 줄의 대략 자리(0~1). 목록이 길어 그 줄을 아직 만들지 않았을 때 먼저 그 근처로 옮긴다.
+  double? _selectedFraction;
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// 다음 프레임(펼친 폴더가 그려진 뒤)에 고른 줄이 다 보이게 최소한만 굴린다. 이미 보이면 그대로.
+  void _revealSelected({bool isRetry = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final row = _selectedRow.currentContext?.findRenderObject();
+      if (row != null) {
+        row.showOnScreen(duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+        return;
+      }
+      final fraction = _selectedFraction;
+      if (isRetry || fraction == null || !_scroll.hasClients) return;
+      _scroll.jumpTo(_scroll.position.maxScrollExtent * fraction);
+      _revealSelected(isRetry: true);
+    });
+  }
+
   /// 주제 줄 위에 붙는 구역 이름. 구역 밖(예전) 주제는 한데 묶어 [폴더 정리]로 안내한다.
   static String _zoneLabel(String topic) {
     final slash = topic.indexOf('/');
@@ -377,7 +407,20 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
       for (final t in byTopic.keys) {
         if (byTopic[t]!.any((d) => d.id == next)) setState(() => _open.add(t));
       }
+      _revealSelected();
     });
+    // 고른 줄의 대략 자리: 그 앞 줄 수 / 전체 줄 수 (구역 이름 줄은 셈에서 뺀다 — 대략이면 된다)
+    var rowCount = 0;
+    int? selectedRow;
+    for (final t in topics) {
+      rowCount++;
+      if (!_open.contains(t)) continue;
+      for (final d in byTopic[t]!) {
+        if (d.id == selected) selectedRow = rowCount;
+        rowCount++;
+      }
+    }
+    _selectedFraction = selectedRow == null ? null : selectedRow / max(1, rowCount - 1);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -426,6 +469,7 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
           ),
         Expanded(
           child: ListView(
+            controller: _scroll,
             padding: EdgeInsets.zero,
             children: [
               for (final (i, topic) in topics.indexed) ...[
@@ -528,6 +572,7 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
                 if (_open.contains(topic))
                   for (final doc in byTopic[topic]!)
                     _FileRow(
+                      key: doc.id == selected ? _selectedRow : null,
                       doc: doc,
                       isSelected: doc.id == selected,
                       hasIssue: issues.contains(doc.id),
@@ -547,6 +592,7 @@ class _TopicTreeState extends ConsumerState<_TopicTree> {
 
 class _FileRow extends StatelessWidget {
   const _FileRow({
+    super.key,
     required this.doc,
     required this.isSelected,
     required this.hasIssue,

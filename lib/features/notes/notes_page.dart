@@ -184,7 +184,10 @@ class _NoteRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Flexible(
+            // id·주제 칸과 [확인] 칸은 폭을 고정한다: 글 길이에 따라 [확인]이 줄마다 옆으로 움직였다 (11/13 화면 검토).
+            // 확인 칸은 초안이 아닌 줄에도 비워 두어 id·주제 칸도 줄마다 같은 자리에 온다.
+            SizedBox(
+              width: 260,
               child: Text(
                 '${doc.id} · ${doc.topicPath}',
                 maxLines: 1,
@@ -192,14 +195,19 @@ class _NoteRow extends StatelessWidget {
                 style: theme.textTheme.muted,
               ),
             ),
-            if (doc.isDraft) ...[
-              const SizedBox(width: 12),
-              ShadButton.outline(
-                size: ShadButtonSize.sm,
-                onPressed: onConfirm,
-                child: const Text('확인'),
-              ),
-            ],
+            SizedBox(
+              width: 68,
+              child: doc.isDraft
+                  ? Align(
+                      alignment: Alignment.centerRight,
+                      child: ShadButton.outline(
+                        size: ShadButtonSize.sm,
+                        onPressed: onConfirm,
+                        child: const Text('확인'),
+                      ),
+                    )
+                  : null,
+            ),
           ],
         ),
       ),

@@ -4,36 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../shared/change_labels.dart';
 import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 
 /// 타임라인 (설계서 3.3): 날짜별로 쌓이고 고쳐진 일, 이번 주 숫자와 7일 막대. `_log/`에서 만든다.
 class TimelineView extends ConsumerWidget {
   const TimelineView({super.key});
-
-  static const _labels = {
-    'add': '새 노트',
-    'update': '고침',
-    'write': '고침',
-    'rename': '이름 바꿈',
-    'relink': '링크 고침',
-    'status': '상태',
-    'delete': '지움',
-    'undo': '되돌림',
-    'lint-fix': '형식 채움',
-    'lesson-add': '실수 노트',
-    'lesson-status': '실수 노트 상태',
-    'lesson-evidence': '규칙 근거',
-    'lesson-update': '실수 노트 고침',
-    'lesson-edit': '실수 노트 고침',
-    'lesson-merge': '실수 노트 합침',
-    'verifier-add': '검사 기준',
-    'todo-add': '할 일',
-    'todo-done': '할 일 끝',
-    'todo-undo': '할 일 되살림',
-    'todo-remove': '할 일 지움',
-    'import': '가져옴',
-  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -110,7 +87,7 @@ class TimelineView extends ConsumerWidget {
                   ),
                   SizedBox(
                     width: 96,
-                    child: Text(_labels[e.action] ?? e.action, style: TextStyle(fontSize: 12, color: colors.accentText)),
+                    child: Text(changeActionLabel(e.action), style: TextStyle(fontSize: 12, color: colors.accentText)),
                   ),
                   Expanded(
                     child: Builder(
