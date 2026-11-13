@@ -69,9 +69,11 @@ class Persona {
     final extra = StringBuffer();
     String? current;
     for (final line in text.replaceAll('\r\n', '\n').split('\n')) {
-      if (line.startsWith('## ')) {
-        current = line.substring(3).trim();
-        if (!const [_workTitle, _keepsTitle, _styleTitle, _forbiddenTitle].contains(current)) {
+      if (RegExp(r'^##(?!#)').hasMatch(line)) {
+        // 제목을 조금 고쳐도("## 저장하면 안 되는 것 (금지)", "##제목", 자모로 풀린 글) 같은 절로 본다.
+        // 정확히 같을 때만 알아보면 금지어 절이 extra로 빠져 검사가 조용히 꺼졌다 (11/13 검토).
+        current = _sectionOf(toNfc(line.substring(2)).trim());
+        if (current == null) {
           extra.writeln(line);
           current = '';
         }
@@ -95,6 +97,14 @@ class Persona {
       forbidden: _items(lines(_forbiddenTitle)),
       extra: extra.toString().trim(),
     );
+  }
+
+  static String? _sectionOf(String heading) {
+    final key = heading.replaceAll(' ', '');
+    for (final title in const [_workTitle, _keepsTitle, _styleTitle, _forbiddenTitle]) {
+      if (key.startsWith(title.replaceAll(' ', ''))) return title;
+    }
+    return null;
   }
 
   /// 입력 칸 글(쉼표나 줄로 나눔)을 항목으로. 앱 4번 칸이 쓴다.
@@ -188,14 +198,23 @@ class ForbiddenTerms {
     for (final term in raw) {
       final shown = _flat(toNfc(term));
       final key = shown.toLowerCase();
-      if (key.replaceAll(' ', '').runes.length < 2 || !seen.add(key)) continue;
+      // 글자·숫자가 2개 이상이어야 한다: "--"(손으로 고친 구분선)나 "·"는 모든 노트를 막았다 (11/13 검토).
+      if (RegExp(r'[\p{L}\p{N}]', unicode: true).allMatches(key).length < 2 || !seen.add(key)) continue;
+      // "없음"·"없다"처럼 '없음'을 뜻하는 답은 금지어가 아니다 ("문제 없음"이 든 노트가 다 막혔다).
+      if (_nothing.hasMatch(key.trim())) continue;
       _shown.add(shown);
-      _patterns.add(RegExp(key.split(' ').map(RegExp.escape).join(r'\s*')));
+      final body = key.split(' ').map(RegExp.escape).join(r'\s*');
+      // 영문·숫자만인 말은 단어 경계로 찾는다: "SK"가 task·risk를, "AI"가 email을 막았다 (11/13 검토).
+      // 한국어는 조사가 붙어 경계를 두지 않는다.
+      final isAscii = RegExp(r'^[a-z0-9 ]+$').hasMatch(key);
+      _patterns.add(RegExp(isAscii ? '(?<![a-z0-9])$body(?![a-z0-9])' : body));
     }
   }
 
   final _shown = <String>[];
   final _patterns = <RegExp>[];
+
+  static final _nothing = RegExp(r'^(없음|없다|없어요|없습니다|없어|해당\s*없음|none|n/?a|-)$');
 
   /// 검사하는 금지어 (소문자로 맞춘 것).
   List<String> get terms => [for (final s in _shown) s.toLowerCase()];

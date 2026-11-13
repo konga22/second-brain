@@ -153,6 +153,45 @@ void main() {
     });
   });
 
+  group('11/13 검토에서 고친 것', () {
+    test('영문 금지어는 단어로만: SK는 task·risk를 막지 않고 "SK 연봉"은 막는다', () {
+      final terms = ForbiddenTerms(['SK', 'AI']);
+      expect(terms.find('task risk skill desk'), isNull);
+      expect(terms.find('email detail main'), isNull);
+      expect(terms.find('SK 다녀요'), 'SK');
+      expect(terms.find('ai 모델'), 'AI');
+    });
+
+    test('"없음" 같은 답과 "--" 같은 구분선은 금지어가 아니다', () {
+      final terms = ForbiddenTerms(['없음', '--', '해당 없음', '연봉']);
+      expect(terms.find('문제 없음, brain add --draft'), isNull);
+      expect(terms.find('연봉 이야기'), '연봉');
+    });
+
+    test('금지어 절 제목을 조금 고쳐도 검사가 꺼지지 않는다', () {
+      for (final heading in ['## 저장하면 안 되는 것 (금지)', '##저장하면 안 되는 것', '## 저장하면안되는것']) {
+        expect(Persona.parse('$heading\n- 연봉\n').forbidden, ['연봉'], reason: heading);
+      }
+    });
+
+    test('나중에 더한 금지어가 제목에 든 옛 노트도 깨끗한 본문으로 고칠 수 있다', () {
+      final (id, _) = store.add(title: '연봉 메모', summary: '요약', body: '처음');
+      const Persona(forbidden: ['연봉']).save(vault);
+      final (_, _, hash) = store.read(id)!;
+      expect(() => store.write(id, '새 본문', expectHash: hash), returnsNormally);
+      final (_, _, hash2) = store.read(id)!;
+      expect(() => store.write(id, '연봉 올림', expectHash: hash2), throwsA(isA<NoteStoreException>()));
+    });
+
+    test('실수 노트도 금지어를 지킨다', () {
+      const Persona(forbidden: ['연봉']).save(vault);
+      expect(
+        () => LessonStore(vault, index).add(trigger: '연봉 이야기할 때', action: '줄인다', reason: '규칙'),
+        throwsA(isA<NoteStoreException>()),
+      );
+    });
+  });
+
   test('_profile.md에는 주제 통계만: AI가 추측한 "자주 받은 교정"은 넣지 않는다', () {
     LessonStore(vault, index).add(trigger: '커밋할 때', action: '허락을 받는다', reason: '규칙', status: LessonStatus.active);
     store.add(title: '결제 웹훅', summary: '요약', body: '본문', tags: ['결제']);

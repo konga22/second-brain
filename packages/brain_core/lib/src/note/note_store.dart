@@ -220,8 +220,9 @@ class NoteStore {
   }) {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
-    // 충돌 사본(_meta/conflicts)에도 금지어가 남지 않게 해시보다 먼저 본다.
-    checkForbidden(title: note.title, summary: note.summary, body: newBody, tags: note.tags, aliases: note.aliases);
+    // 충돌 사본(_meta/conflicts)에도 금지어가 남지 않게 해시보다 먼저 본다. 새로 쓰는 본문만 본다:
+    // 금지어를 나중에 더하면 제목에 든 옛 노트는 깨끗한 본문으로도 못 고쳤다 (11/13 검토).
+    checkForbidden(title: '', summary: '', body: newBody);
     if (!hash.startsWith(expectHash) || expectHash.length < 6) {
       final conflict = p.join(
         vault.metaDir,
@@ -262,7 +263,14 @@ class NoteStore {
   }) {
     final found = _readForChange(id);
     final (doc, note, hash) = found;
-    checkForbidden(title: title, summary: summary, body: body, tags: tags, aliases: aliases);
+    // 바뀌는 칸만 본다 (위 write와 같은 까닭).
+    checkForbidden(
+      title: title == note.title ? '' : title,
+      summary: summary == note.summary ? '' : summary,
+      body: body == note.body ? '' : body,
+      tags: _sameList(tags, note.tags) ? const [] : tags,
+      aliases: _sameList(aliases, note.aliases) ? const [] : aliases,
+    );
     if (hash != expectHash) {
       final conflict = p.join(
         vault.metaDir,
@@ -472,3 +480,5 @@ class NoteStore {
     VaultSummary(vault, index).writeAll();
   }
 }
+
+bool _sameList(List<String> a, List<String> b) => a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((x) => x);

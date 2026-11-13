@@ -60,6 +60,8 @@ class LessonStore {
         throw NoteStoreException('$name이 비었습니다 (언제 → 무엇을 → 왜).');
       }
     }
+    // 실수 노트는 세션 시작 안내에 늘 들어가 저장 금지 목록도 지킨다 (설계서_프롬프트이후 5.2, 11/13 검토).
+    NoteStore(vault, index).checkForbidden(title: '', summary: '', body: '$trigger\n$action\n$reason');
     return withVaultLock(vault, () {
       vault.ensure();
       index.sync();
@@ -225,6 +227,7 @@ class LessonStore {
     for (final (name, value) in [('trigger', trigger), ('action', action), ('reason', reason)]) {
       if (value.trim().isEmpty) throw NoteStoreException('$name이 비었습니다 (언제 → 무엇을 → 왜).');
     }
+    NoteStore(vault, index).checkForbidden(title: '', summary: '', body: '$trigger\n$action\n$reason');
     // 잠금 안에서 읽고 쓴다: 그사이 훅의 `lesson evidence`가 같은 규칙을 고치면 그 기록이 사라졌다 (11/13 검토).
     withVaultLock(vault, () => _merge(keepId, dropId, trigger: trigger, action: action, reason: reason, batch: batch));
   }
