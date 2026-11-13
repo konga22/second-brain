@@ -52,7 +52,7 @@ void main() {
     final before = scale();
     for (var i = 0; i < 4; i++) {
       await tester.tap(find.text('−'));
-      await settle(tester, 200);
+      await settle(tester, 400); // [−]는 0.25초 동안 부드럽게 줄어든다 (설계서_프롬프트이후 5.6)
     }
     // [−] 4번이면 배율이 0.8⁴ ≈ 0.41배가 된다. 예전에는 z축 배율이 1로 남아 늘 1.0으로 읽혔다 (K-38).
     expect(scale(), closeTo(before * 0.4096, before * 0.01), reason: '[−]가 배율을 줄이지 못함');

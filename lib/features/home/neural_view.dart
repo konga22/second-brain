@@ -33,6 +33,10 @@ final neuralLabelLog = <({String text, int lines, Rect rect, bool strong, bool c
 @visibleForTesting
 int neuralPathPaintCount = 0;
 
+/// 시험용: 마지막으로 그린 은닉층 확대 배율 (부드러운 확대의 중간 값을 본다, 설계서_프롬프트이후 5.6).
+@visibleForTesting
+double neuralZoom = 1;
+
 /// 시험용: 빛 흐름을 그린 프레임 수와, 한 프레임에 그은 선·빛 번짐 수의 최댓값.
 @visibleForTesting
 int neuralPulseFrames = 0;
@@ -173,7 +177,7 @@ class NeuralView extends ConsumerStatefulWidget {
   ConsumerState<NeuralView> createState() => _NeuralViewState();
 }
 
-class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProviderStateMixin {
+class _NeuralViewState extends ConsumerState<NeuralView> with TickerProviderStateMixin {
   /// 은닉층 확대 배율(1 = 층 높이에 모두 들어감)과 위아래 이동(px, 0 이하).
   double _k = 1;
   double _off = 0;
@@ -193,8 +197,21 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
   late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
   final _focus = FocusNode(debugLabel: '신경망 보기');
 
+  /// 부드러운 확대·축소 (설계서_프롬프트이후 5.6): [+]·[−]·[맞추기]·휠은 0.25초 동안 끝이 느려지게. 트랙패드 손가락은 바로 따라온다.
+  late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 250))
+    ..addListener(() {
+      final t = Curves.easeOutCubic.transform(_zoomAnim.value);
+      // 배율과 이동을 같은 비율로 섞으면 확대 기준점(마우스·가운데)이 섞는 동안에도 제자리에 있다.
+      setState(() {
+        _k = _kFrom + (_kTo - _kFrom) * t;
+        _off = _offFrom + (_offTo - _offFrom) * t;
+      });
+    });
+  double _kFrom = 1, _kTo = 1, _offFrom = 0, _offTo = 0;
+
   @override
   void dispose() {
+    _zoomAnim.dispose();
     _pulse.dispose();
     _focus.dispose();
     _mouse.dispose();
@@ -259,17 +276,40 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
   /// 한 프레임에 휠 이벤트가 여럿 와도 앞 이벤트가 바꾼 값 위에서 셈하도록, 빌드 때 잡은 자리 대신 지금 값으로 다시 잰다.
   _Geo _now(NeuralLayout layout) => _Geo(_size!, layout, _k, _off);
 
-  void _zoomAt(double factor, double y, NeuralLayout layout) {
-    final g = _now(layout);
-    final k = (_k * factor).clamp(1.0, g.kMax);
+  /// [smooth]: 버튼·휠은 부드럽게, 트랙패드 손가락 확대는 바로. 움직이는 중이면 도착 값 위에 이어서 셈한다
+  /// ([+]를 빠르게 세 번 누르거나 휠을 연달아 굴려도 멈췄다 튀지 않음).
+  void _zoomAt(double factor, double y, NeuralLayout layout, {bool smooth = true}) {
+    if (!smooth) _stopZoom();
+    final moving = _zoomAnim.isAnimating;
+    final g = _Geo(_size!, layout, moving ? _kTo : _k, moving ? _offTo : _off);
+    final k = (g.k * factor).clamp(1.0, g.kMax);
     final idx = (y - g.top - g.off) / g.s;
-    setState(() {
-      _k = k;
-      _off = _Geo.clampOff(y - g.top - idx * g.s0 * k, g.lh, g.n * g.s0 * k);
-    });
+    _zoomTo(k, _Geo.clampOff(y - g.top - idx * g.s0 * k, g.lh, g.n * g.s0 * k), smooth: smooth);
+  }
+
+  void _zoomTo(double k, double off, {bool smooth = true}) {
+    if (!smooth || (MediaQuery.maybeDisableAnimationsOf(context) ?? false)) {
+      _stopZoom();
+      setState(() {
+        _k = k;
+        _off = off;
+      });
+      return;
+    }
+    _kFrom = _k;
+    _offFrom = _off;
+    _kTo = k;
+    _offTo = off;
+    _zoomAnim.forward(from: 0);
+  }
+
+  /// 손으로 움직이면(끌기·손가락) 부드러운 확대를 그 자리에서 멈춘다.
+  void _stopZoom() {
+    if (_zoomAnim.isAnimating) _zoomAnim.stop();
   }
 
   void _panBy(double dy, NeuralLayout layout) {
+    _stopZoom();
     final g = _now(layout);
     setState(() => _off = _Geo.clampOff(g.off + dy, g.lh, g.n * g.s));
   }
@@ -279,6 +319,7 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
     if (id == null || size == null) return;
     final n = layout.indexOfNote(id);
     if (n == null) return;
+    _stopZoom();
     final g = _Geo(size, layout, _k, _off);
     final y = g.yNote(n);
     if (y >= g.top && y <= g.top + g.lh) return;
@@ -327,6 +368,7 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
         // 크기만 기억한다 (다시 맞추기·setState 없음 — 영역 크기에 반응해 상태를 바꾸면 떨림 고리가 생긴다, L-0005).
         // 이동값은 그릴 때 영역에 맞춰 잘라 쓴다. 고른 길 계산(_prepare)도 상태를 바꾸지 않고 그림·목록만 만든다.
         _size = size;
+        neuralZoom = _k;
         final g = _Geo(size, layout, _k, _off);
         final prepared = _prepare(layout, sel, g);
         final hover = _find(layout, _hover);
@@ -352,7 +394,7 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                   onPointerPanZoomUpdate: (event) {
                     if (event.panDelta.dy != 0) _panBy(event.panDelta.dy, layout);
                     if ((event.scale - _lastScale).abs() > 0.001) {
-                      _zoomAt(event.scale / _lastScale, event.localPosition.dy, layout);
+                      _zoomAt(event.scale / _lastScale, event.localPosition.dy, layout, smooth: false);
                       _lastScale = event.scale;
                     }
                   },
@@ -433,10 +475,7 @@ class _NeuralViewState extends ConsumerState<NeuralView> with SingleTickerProvid
                 right: 10,
                 child: _ToolButton(
                   label: '맞추기',
-                  onTap: () => setState(() {
-                    _k = 1;
-                    _off = 0;
-                  }),
+                  onTap: () => _zoomTo(1, 0),
                 ),
               ),
               Positioned(left: 12, right: 90, bottom: 10, child: _legend(layout)),

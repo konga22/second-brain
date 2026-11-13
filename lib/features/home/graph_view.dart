@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:brain_core/brain_core.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -25,8 +26,27 @@ class GraphView extends ConsumerStatefulWidget {
   ConsumerState<GraphView> createState() => _GraphViewState();
 }
 
-class _GraphViewState extends ConsumerState<GraphView> {
+class _GraphViewState extends ConsumerState<GraphView> with TickerProviderStateMixin {
   final _transform = TransformationController();
+
+  /// 부드러운 확대·축소 (설계서_프롬프트이후 5.6): [+]·[−]·[맞추기]·휠은 0.25초 동안 끝이 느려지게 옮긴다.
+  /// 트랙패드 손가락 확대·끌기는 지금처럼 바로 따라온다.
+  static const zoomDuration = Duration(milliseconds: 250);
+  late final _zoomAnim = AnimationController(vsync: this, duration: zoomDuration)
+    ..addListener(_zoomTick)
+    ..addStatusListener((status) {
+      if (status == AnimationStatus.completed) _zoomDone();
+    });
+  Matrix4? _zoomFrom;
+
+  /// 움직이는 중인 확대의 도착 값. 빠르게 여러 번 누르거나 휠을 굴리면 이 값 위에 이어서 셈해 튀지 않는다.
+  Matrix4? _zoomTo;
+
+  /// 휠 한 칸 직전 상태. InteractiveViewer가 휠을 받아 바로 바꾼 변환을 되돌리고 부드럽게 다시 옮기는 데 쓴다.
+  ({Matrix4 matrix, double lastScale, Matrix4? target})? _beforeWheel;
+
+  /// 노드가 이보다 많으면 확대가 움직이는 동안 바탕을 다시 그리지 않고 끝난 뒤 한 번만 그린다.
+  bool _isHeavy = false;
   bool _isLocal = false;
   /// 추천 연결을 그린다 (기본 켬). 끄면 고른 노드의 연결만 그린다.
   bool _showSuggested = true;
@@ -51,18 +71,63 @@ class _GraphViewState extends ConsumerState<GraphView> {
     super.initState();
     // 확대할 때 글자 크기·선 굵기를 맞추려고 다시 그린다 (크게 바뀔 때만).
     _transform.addListener(() {
-      final scale = _transform.value.getMaxScaleOnAxis();
-      if ((scale - _lastScale).abs() / _lastScale > 0.08) {
-        _lastScale = scale;
-        setState(() {});
-      }
+      // 노드가 많으면 부드러운 확대 도중에는 바탕을 다시 그리지 않는다 (0.25초 동안 여러 번 그리면 버벅인다). 끝나면 맞춘다.
+      if (_isHeavy && _zoomAnim.isAnimating) return;
+      _syncScale();
     });
+  }
+
+  void _syncScale() {
+    final scale = _transform.value.getMaxScaleOnAxis();
+    if ((scale - _lastScale).abs() / _lastScale > 0.08) {
+      _lastScale = scale;
+      if (mounted) setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    _zoomAnim.dispose();
     _transform.dispose();
     super.dispose();
+  }
+
+  bool get _reduceMotion => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  /// [target]까지 부드럽게 옮긴다. 움직이는 중이면 지금 자리에서 새 도착 값으로 이어 간다 (멈췄다 튀지 않음).
+  void _animateTo(Matrix4 target, {bool smooth = true}) {
+    if (!smooth || _reduceMotion) {
+      _stopZoom();
+      _transform.value = target;
+      return;
+    }
+    _zoomFrom = _transform.value.clone();
+    _zoomTo = target;
+    _zoomAnim.forward(from: 0);
+  }
+
+  void _zoomTick() {
+    final from = _zoomFrom, to = _zoomTo;
+    if (from == null || to == null) return;
+    // 확대·이동만 있는 행렬이라 칸마다 섞으면 된다. 확대 기준점은 섞는 동안에도 같은 자리에 머문다.
+    final t = Curves.easeOutCubic.transform(_zoomAnim.value);
+    final m = Matrix4.zero();
+    for (var i = 0; i < 16; i++) {
+      m.storage[i] = from.storage[i] + (to.storage[i] - from.storage[i]) * t;
+    }
+    _transform.value = m;
+  }
+
+  void _zoomDone() {
+    _zoomFrom = null;
+    _zoomTo = null;
+    _syncScale();
+  }
+
+  /// 움직이던 확대를 그 자리에서 멈춘다.
+  void _stopZoom() {
+    if (_zoomAnim.isAnimating) _zoomAnim.stop();
+    _zoomDone();
   }
 
   /// 선택한 노트 주변 2단계까지 (로컬 그래프).
@@ -86,7 +151,8 @@ class _GraphViewState extends ConsumerState<GraphView> {
   static const _fitTop = 84.0;
   static const _fitBottom = 46.0;
 
-  void _fit(Rect bounds, Size viewport) {
+  /// [smooth]: [맞추기] 버튼은 부드럽게, 처음 열 때·보는 대상이 바뀔 때는 바로 맞춘다 (처음 열 때 움직임 없음, 5.6).
+  void _fit(Rect bounds, Size viewport, {bool smooth = false}) {
     graphFitCount++;
     // 영역이 낮으면 비워 두지 않는다 (그래프가 지나치게 작아진다).
     final hasRoom = viewport.height > 360;
@@ -101,9 +167,12 @@ class _GraphViewState extends ConsumerState<GraphView> {
     // z축도 같은 배율로 둔다. InteractiveViewer(휠 확대)와 아래 배율 읽기는 getMaxScaleOnAxis로 x·y·z 중
     // 가장 큰 값을 읽는다. z를 1로 두면 축소(배율 < 1)한 상태가 늘 1.0으로 읽혀, 클릭 범위·글자 크기·
     // 휠 확대 한도가 틀어졌다 (11/12 K-38, graph_focus_test가 [−]를 눌러도 배율 1.0이던 원인).
-    _transform.value = Matrix4.identity()
-      ..translateByDouble(dx, dy, 0, 1)
-      ..scaleByDouble(scale, scale, scale, 1);
+    _animateTo(
+      Matrix4.identity()
+        ..translateByDouble(dx, dy, 0, 1)
+        ..scaleByDouble(scale, scale, scale, 1),
+      smooth: smooth,
+    );
   }
 
   /// 영역 크기가 바뀌면 보던 가운데가 그대로 가운데에 오게 옮긴다 (다시 맞추지 않음).
@@ -114,19 +183,47 @@ class _GraphViewState extends ConsumerState<GraphView> {
     if (last == null || last == viewport) return;
     final dx = (viewport.width - last.width) / 2;
     final dy = (viewport.height - last.height) / 2;
-    _transform.value = Matrix4.identity()
+    Matrix4 shift(Matrix4 m) => Matrix4.identity()
       ..translateByDouble(dx, dy, 0, 1)
-      ..multiply(_transform.value);
+      ..multiply(m);
+    // 부드러운 확대 중이면 출발·도착 값도 같이 옮긴다 (다음 프레임에 옛 자리로 돌아가지 않게).
+    if (_zoomFrom != null) _zoomFrom = shift(_zoomFrom!);
+    if (_zoomTo != null) _zoomTo = shift(_zoomTo!);
+    _transform.value = shift(_transform.value);
   }
 
-  /// 가운데를 기준으로 확대·축소.
-  void _zoomBy(double factor, Size viewport) {
-    final center = Offset(viewport.width / 2, viewport.height / 2);
-    _transform.value = Matrix4.identity()
-      ..translateByDouble(center.dx, center.dy, 0, 1)
-      ..scaleByDouble(factor, factor, factor, 1) // z도 함께 (_fit 설명)
-      ..translateByDouble(-center.dx, -center.dy, 0, 1)
-      ..multiply(_transform.value);
+  /// [focal](보이는 영역 기준)을 기준으로 확대·축소. 버튼은 가운데, 휠은 마우스 자리.
+  /// 움직이는 중이면 도착 값 위에 이어서 셈한다: [+]를 빠르게 세 번 누르면 1.25³배로 끊김 없이 간다.
+  void _zoomBy(double factor, Offset focal, {bool smooth = true}) {
+    final base = _zoomTo ?? _transform.value;
+    final scale = base.getMaxScaleOnAxis();
+    final f = (scale * factor).clamp(_minScale, _maxScale) / scale;
+    _animateTo(
+      Matrix4.identity()
+        ..translateByDouble(focal.dx, focal.dy, 0, 1)
+        ..scaleByDouble(f, f, f, 1) // z도 함께 (_fit 설명)
+        ..translateByDouble(-focal.dx, -focal.dy, 0, 1)
+        ..multiply(base),
+      smooth: smooth,
+    );
+  }
+
+  static const _minScale = 0.05;
+  static const _maxScale = 6.0;
+
+  /// 휠 한 칸 (설계서_프롬프트이후 5.6). InteractiveViewer는 휠을 받으면 바로 배율을 바꾼다(끌 수 없음).
+  /// 그 직전 값을 [InteractiveViewer.onInteractionStart]에서 잡아 두었다가, 바깥 Listener(InteractiveViewer 다음에 불림)에서
+  /// 되돌리고 같은 배율로 부드럽게 다시 옮긴다. 한 이벤트 처리 안에서 일어나 중간 값이 그려지지는 않는다.
+  void _onWheel(PointerSignalEvent event) {
+    final before = _beforeWheel;
+    _beforeWheel = null;
+    if (event is! PointerScrollEvent || event.kind == PointerDeviceKind.trackpad || event.scrollDelta.dy == 0) return;
+    if (before == null) return;
+    _transform.value = before.matrix;
+    _lastScale = before.lastScale;
+    _zoomTo = before.target;
+    // InteractiveViewer와 같은 셈 (scaleFactor 기본 200)
+    _zoomBy(exp(-event.scrollDelta.dy / 200), event.localPosition);
   }
 
   String? _hit(Offset world, Map<String, Point<double>> positions, double scale) {
@@ -247,6 +344,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
                   xs.reduce(max) + 80,
                   ys.reduce(max) + 60,
                 );
+          _isHeavy = positions.length > _GraphPainter.manyNodes;
           return LayoutBuilder(
             builder: (context, constraints) {
               final viewport = constraints.biggest;
@@ -267,52 +365,64 @@ class _GraphViewState extends ConsumerState<GraphView> {
               return Stack(
                 children: [
                   Positioned.fill(
-                    child: InteractiveViewer(
-                      transformationController: _transform,
-                      constrained: false,
-                      boundaryMargin: const EdgeInsets.all(double.infinity),
-                      minScale: 0.05,
-                      maxScale: 6,
-                      child: MouseRegion(
-                        onHover: (event) {
-                          final scale = _transform.value.getMaxScaleOnAxis();
-                          final hit = _hit(event.localPosition + bounds.topLeft, positions, scale);
-                          if (hit != _hovered) setState(() => _hovered = hit);
+                    child: Listener(
+                      onPointerSignal: _onWheel,
+                      child: InteractiveViewer(
+                        transformationController: _transform,
+                        constrained: false,
+                        boundaryMargin: const EdgeInsets.all(double.infinity),
+                        minScale: _minScale,
+                        maxScale: _maxScale,
+                        onInteractionStart: (_) {
+                          // 휠이면 _onWheel이 되돌릴 값. 끌기·손가락 확대면 움직이던 확대를 그 자리에서 멈춘다 (손이 우선).
+                          _beforeWheel = (matrix: _transform.value.clone(), lastScale: _lastScale, target: _zoomTo);
+                          if (_zoomAnim.isAnimating) {
+                            _zoomAnim.stop();
+                            _zoomFrom = null;
+                            _zoomTo = null;
+                          }
                         },
-                        onExit: (_) => setState(() => _hovered = null),
-                        child: GestureDetector(
-                          onTapUp: (details) {
+                        child: MouseRegion(
+                          onHover: (event) {
                             final scale = _transform.value.getMaxScaleOnAxis();
-                            final hit = _hit(details.localPosition + bounds.topLeft, positions, scale);
-                            ref.read(selectedNoteProvider.notifier).select(hit);
+                            final hit = _hit(event.localPosition + bounds.topLeft, positions, scale);
+                            if (hit != _hovered) setState(() => _hovered = hit);
                           },
-                          // 끌기·확대 때 InteractiveViewer는 변환만 바꾼다. 경계로 감싸 그림을 다시 그리지 않고
-                          // 이미 그린 층을 옮기게 한다 (11/07 랙 측정: 끌기 40프레임에 37번 다시 그림).
-                          // 바탕(모든 노드·연결)은 데이터·확대 단계가 바뀔 때만 그린다. 마우스 올림·선택은 그래프 밖
-                          // 위 층(_FocusPainter)이 그린다 (11/07 노트 1만 개 측정: 마우스를 올릴 때마다 바탕까지 다시 그려 1.4초씩 멈췄다).
-                          child: RepaintBoundary(
-                            child: SizedBox.fromSize(
-                              size: bounds.size,
-                                      child: CustomPaint(
-                                        isComplex: true,
-                                        painter: _GraphPainter(
-                                          signature: Object.hash(
-                                            identityHashCode(allPositions),
-                                            identityHashCode(allLinks),
-                                            identityHashCode(notes),
-                                            isLocal ? selected : null,
-                                            _topic,
-                                            _showSuggested,
-                                            _lastScale,
+                          onExit: (_) => setState(() => _hovered = null),
+                          child: GestureDetector(
+                            onTapUp: (details) {
+                              final scale = _transform.value.getMaxScaleOnAxis();
+                              final hit = _hit(details.localPosition + bounds.topLeft, positions, scale);
+                              ref.read(selectedNoteProvider.notifier).select(hit);
+                            },
+                            // 끌기·확대 때 InteractiveViewer는 변환만 바꾼다. 경계로 감싸 그림을 다시 그리지 않고
+                            // 이미 그린 층을 옮기게 한다 (11/07 랙 측정: 끌기 40프레임에 37번 다시 그림).
+                            // 바탕(모든 노드·연결)은 데이터·확대 단계가 바뀔 때만 그린다. 마우스 올림·선택은 그래프 밖
+                            // 위 층(_FocusPainter)이 그린다 (11/07 노트 1만 개 측정: 마우스를 올릴 때마다 바탕까지 다시 그려 1.4초씩 멈췄다).
+                            child: RepaintBoundary(
+                              child: SizedBox.fromSize(
+                                size: bounds.size,
+                                        child: CustomPaint(
+                                          isComplex: true,
+                                          painter: _GraphPainter(
+                                            signature: Object.hash(
+                                              identityHashCode(allPositions),
+                                              identityHashCode(allLinks),
+                                              identityHashCode(notes),
+                                              isLocal ? selected : null,
+                                              _topic,
+                                              _showSuggested,
+                                              _lastScale,
+                                            ),
+                                            origin: bounds.topLeft,
+                                            positions: positions,
+                                            links: drawn,
+                                            degree: degree,
+                                            docs: docs,
+                                            scale: _lastScale,
                                           ),
-                                          origin: bounds.topLeft,
-                                          positions: positions,
-                                          links: drawn,
-                                          degree: degree,
-                                          docs: docs,
-                                          scale: _lastScale,
                                         ),
-                                      ),
+                              ),
                             ),
                           ),
                         ),
@@ -365,7 +475,7 @@ class _GraphViewState extends ConsumerState<GraphView> {
                           onTap: selected == null ? null : () => setState(() => _isLocal = true),
                         ),
                         const SizedBox(width: 4),
-                        _ModeButton(label: '맞추기', isOn: false, onTap: () => _fit(Offset.zero & bounds.size, viewport)),
+                        _ModeButton(label: '맞추기', isOn: false, onTap: () => _fit(Offset.zero & bounds.size, viewport, smooth: true)),
                         const SizedBox(width: 4),
                         // 저장된 위치를 지우고 처음부터 다시 배치한다 (설계서 5.5 "꼬임 막기").
                         _ModeButton(
@@ -426,9 +536,9 @@ class _GraphViewState extends ConsumerState<GraphView> {
                     bottom: 10,
                     child: Column(
                       children: [
-                        _ModeButton(label: '+', isOn: false, onTap: () => _zoomBy(1.25, viewport)),
+                        _ModeButton(label: '+', isOn: false, onTap: () => _zoomBy(1.25, viewport.center(Offset.zero))),
                         const SizedBox(height: 4),
-                        _ModeButton(label: '−', isOn: false, onTap: () => _zoomBy(0.8, viewport)),
+                        _ModeButton(label: '−', isOn: false, onTap: () => _zoomBy(0.8, viewport.center(Offset.zero))),
                       ],
                     ),
                   ),

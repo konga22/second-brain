@@ -172,7 +172,7 @@ void main() {
     neuralLabelLog.clear();
     for (var i = 0; i < 3; i++) {
       await tester.tap(find.text('+'));
-      await tester.pump();
+      await tester.pumpAndSettle(); // 확대는 0.25초 동안 부드럽게 (5.6): 단계마다 끝까지 그려 중간 배율의 이름표도 본다
     }
     await tester.pumpAndSettle();
     final plain = neuralLabelLog.where((l) => l.text == longTitle);
@@ -498,7 +498,7 @@ void main() {
     final firstPaint = neuralLastPaintMicros / 1000;
     // 확대한 상태 그리기
     await tester.tap(find.text('+'));
-    await tester.pump();
+    await tester.pumpAndSettle(); // 확대는 0.25초 동안 부드럽게 바뀐다 (5.6): 끝난 뒤의 그림을 잰다
     final zoomPaint = neuralLastPaintMicros / 1000;
     // ignore: avoid_print
     print('[M8] 노트 1만 개: isolate(파일 읽기+배치) ${layoutMs}ms, 첫 표시까지 ${total.elapsedMilliseconds}ms, '
