@@ -13,6 +13,7 @@ const changeActionLabels = {
   'delete': '지움',
   'attach': '첨부',
   'topic-add': '주제 만듦',
+  'project': '프로젝트 문맥',
   'undo': '되돌림',
   'lint-fix': '형식 채움',
   'import': '가져옴',
