@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
@@ -5,13 +6,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:secondbrain/app/theme/app_theme.dart';
 import 'package:secondbrain/core/brain_providers.dart';
+import 'package:secondbrain/features/home/graph_motion.dart';
 import 'package:secondbrain/features/home/graph_view.dart';
 import 'package:secondbrain/features/home/neural_view.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-/// 그래프 움직임 (설계서_프롬프트이후 5.6): 부드러운 확대·축소.
+/// 그래프 움직임 (설계서_프롬프트이후 5.6): 부드러운 확대·축소, 노드 끌기, [원래대로].
 void main() {
   IndexedDoc doc(String id, String topic) => IndexedDoc(
     id: id,
@@ -25,26 +28,41 @@ void main() {
     hash: 'h',
   );
 
-  // 그물: a─b─c 한 줄 + 멀리 떨어진 z (끌기 시험에서 "멀리 있는 노드는 그대로"를 본다)
-  final notes = [doc('a', '결제'), doc('b', '결제'), doc('c', '결제'), doc('z', '배포')];
+  // 그물: a─b─c─d 한 줄 + 연결 없는 z. a를 끌면 b(1단계)·c(2단계)만 따라오고 d(3단계)·z는 그대로여야 한다.
+  final notes = [doc('a', '결제'), doc('b', '결제'), doc('c', '결제'), doc('d', '결제'), doc('z', '배포')];
   const links = [
     NoteLink(fromId: 'a', toId: 'b', kind: 'link'),
     NoteLink(fromId: 'b', toId: 'c', kind: 'link'),
+    NoteLink(fromId: 'c', toId: 'd', kind: 'link'),
   ];
-  const layout = {'a': Point(0.0, 0.0), 'b': Point(90.0, 0.0), 'c': Point(180.0, 0.0), 'z': Point(180.0, 220.0)};
+  const layout = {
+    'a': Point(0.0, 0.0),
+    'b': Point(90.0, 0.0),
+    'c': Point(180.0, 0.0),
+    'd': Point(270.0, 0.0),
+    'z': Point(180.0, 220.0),
+  };
 
   late ProviderContainer container;
 
-  Future<void> pump(WidgetTester tester, Widget child, {NeuralLayout? neural}) async {
+  Future<void> pump(WidgetTester tester, Widget child, {
+    NeuralLayout? neural,
+    List extra = const [],
+    bool ownGraph = false,
+    List<IndexedDoc>? withNotes,
+    List<NoteLink>? withLinks,
+    Map<String, Point<double>>? withLayout,
+  }) async {
     tester.view.physicalSize = const Size(1000, 700) * tester.view.devicePixelRatio;
     addTearDown(tester.view.resetPhysicalSize);
     container = ProviderContainer(
       retry: (_, _) => null,
       overrides: [
-        notesProvider.overrideWithValue(notes),
-        linksProvider.overrideWithValue(links),
-        graphLayoutProvider.overrideWith((ref) async => layout),
+        notesProvider.overrideWithValue(withNotes ?? notes),
+        linksProvider.overrideWithValue(withLinks ?? links),
+        if (!ownGraph) graphLayoutProvider.overrideWith((ref) async => withLayout ?? layout),
         if (neural != null) neuralLayoutProvider.overrideWith((ref) async => neural),
+        ...extra.cast(),
       ],
     );
     addTearDown(container.dispose);
@@ -206,5 +224,241 @@ void main() {
       await tester.pumpAndSettle();
       expect(neuralZoom, 1);
     });
+  });
+
+  group('노드 끌기·[원래대로]', () {
+    GraphMotion motion() => graphMotionForTest!;
+
+    /// 그래프 좌표 → 화면 좌표 (그림 원점은 노드 범위 왼쪽 위 - 여백 80·60 - 끌기 여유).
+    Offset screenOf(WidgetTester tester, Point<double> world) {
+      final viewer = tester.getRect(find.byType(InteractiveViewer));
+      return viewer.topLeft + MatrixUtils.transformPoint(controller(tester).value, Offset(world.x + 80 + graphDragRoom, world.y + 60 + graphDragRoom));
+    }
+
+    Point<double> now(String id) => motion().moved[id] ?? layout[id]!;
+    double moved(String id) => (Offset(now(id).x, now(id).y) - Offset(layout[id]!.x, layout[id]!.y)).distance;
+
+    Future<void> drag(WidgetTester tester, String id, Offset by, {int steps = 20}) async {
+      final g = await tester.startGesture(screenOf(tester, layout[id]!), kind: PointerDeviceKind.mouse);
+      for (var i = 0; i < steps; i++) {
+        await g.moveBy(by / steps.toDouble());
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+    }
+
+    testWidgets('노드를 끌면 그 노드가 옮겨지고 이웃이 따라온다. 멀리 있는 노드·화면 이동은 그대로', (tester) async {
+      await pump(tester, const GraphView());
+      final view = controller(tester).value.clone();
+      final scale = view.getMaxScaleOnAxis();
+      final g = await tester.startGesture(screenOf(tester, layout['a']!), kind: PointerDeviceKind.mouse);
+      // 끄는 도중 (아래로 100px)
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(const Offset(0, 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(now('a').y, closeTo(100 / scale, 0.5), reason: '끈 노드는 손을 따라온다');
+      expect(moved('b'), greaterThan(1), reason: '바로 이웃은 고무줄처럼 따라온다');
+      await g.up();
+      final dropped = now('a');
+      await tester.pumpAndSettle();
+      expect(now('a'), dropped, reason: '놓은 노드는 그 자리에 머문다');
+      expect(moved('b'), greaterThan(5));
+      expect(motion().moved.containsKey('z'), isFalse, reason: '연결 없는 먼 노드는 움직이지 않는다');
+      expect(motion().moved.containsKey('d'), isFalse, reason: '3단계 노드는 움직이지 않는다 (끈 노드 주변만)');
+      expect(motion().live, isNot(contains('z')));
+      expect(motion().live, unorderedEquals(['a', 'b', 'c']));
+      // 이웃은 연결 길이를 대체로 지킨다 (쉬는 길이 90)
+      final ab = Offset(now('a').x - now('b').x, now('a').y - now('b').y).distance;
+      expect(ab, closeTo(90, 20));
+      for (var i = 0; i < 16; i++) {
+        expect(controller(tester).value.storage[i], view.storage[i], reason: '노드를 끌면 화면은 옮겨지지 않는다');
+      }
+      expect(container.read(selectedNoteProvider), isNull, reason: '끌기는 고르기가 아니다');
+    });
+
+    testWidgets('움직이지 않고 누르면 지금처럼 고른다. 빈 곳을 끌면 화면이 옮겨진다', (tester) async {
+      await pump(tester, const GraphView());
+      await tester.tapAt(screenOf(tester, layout['b']!));
+      await tester.pumpAndSettle();
+      expect(container.read(selectedNoteProvider), 'b');
+      expect(motion().hasMoved, isFalse);
+
+      final before = controller(tester).value.getTranslation();
+      final empty = screenOf(tester, const Point(60, 150)); // 노드 없는 곳
+      final g = await tester.startGesture(empty, kind: PointerDeviceKind.mouse);
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(const Offset(8, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(controller(tester).value.getTranslation().x, greaterThan(before.x + 40), reason: '빈 곳 끌기 = 화면 이동');
+      expect(motion().hasMoved, isFalse);
+    });
+
+    testWidgets('[원래대로]: 옮긴 것이 있을 때만 켜지고, 0.4초 동안 돌아가 저장된 배치와 같아진다. 저장된 배치는 그대로', (tester) async {
+      final temp = Directory.systemTemp.createTempSync('graph_motion_');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final vault = Vault(p.join(temp.path, 'vault'))..ensure();
+      final dbPath = p.join(temp.path, 'index.db');
+      final index = SearchIndex.open(vault, path: dbPath);
+      addTearDown(index.close);
+      index.saveGraphPositions(layout);
+      final savedBefore = index.graphPositions();
+      final bytesBefore = File(dbPath).readAsBytesSync();
+      await pump(
+        tester,
+        const GraphView(),
+        extra: [
+          searchIndexProvider.overrideWithValue(index),
+          graphLayoutProvider.overrideWith((ref) async => ref.watch(searchIndexProvider).graphPositions()),
+        ],
+        ownGraph: true,
+      );
+      final graphMap = container.read(graphLayoutProvider).value!;
+
+      // 옮긴 것이 없으면 꺼져 있다 (눌러도 아무 일 없음)
+      await tester.tap(find.text('원래대로'));
+      await tester.pumpAndSettle();
+      expect(motion().hasMoved, isFalse);
+
+      await drag(tester, 'a', const Offset(0, 120));
+      await drag(tester, 'c', const Offset(-60, -90));
+      await tester.pumpAndSettle();
+      expect(moved('a'), greaterThan(30));
+      expect(moved('c'), greaterThan(20));
+      final away = {for (final id in ['a', 'b', 'c']) id: moved(id)};
+
+      await tester.tap(find.text('원래대로'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      // 중간: 돌아가는 중 (원래 자리와 옮긴 자리 사이)
+      expect(moved('a'), inExclusiveRange(0.5, away['a']!));
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(motion().hasMoved, isFalse);
+      expect(motion().moved, isEmpty);
+      for (final id in layout.keys) {
+        expect(now(id), graphMap[id], reason: '$id 노드가 저장된 배치 자리로');
+      }
+      // 끌어서 바꾼 자리는 저장하지 않는다: graph_pos·색인 파일 그대로
+      expect(index.graphPositions(), savedBefore);
+      expect(File(dbPath).readAsBytesSync(), bytesBefore);
+    });
+
+    testWidgets('움직임 줄이기: 끈 노드만 움직이고, [원래대로]는 바로', (tester) async {
+      await pump(tester, const MediaQuery(data: MediaQueryData(disableAnimations: true), child: GraphView()));
+      await drag(tester, 'a', const Offset(0, 100));
+      await tester.pumpAndSettle();
+      expect(moved('a'), greaterThan(30));
+      expect(moved('b'), 0);
+      await tester.tap(find.text('원래대로'));
+      await tester.pump();
+      expect(motion().moved, isEmpty);
+    });
+  });
+
+  // 끝난 기준 (5.6): 노트 1만 개에서 끌기 중 한 프레임 시간. 시간을 재는 시험이라 따로 돌린다:
+  // GRAPH_DRAG_FRAME=1 flutter test test/graph_motion_test.dart --plain-name 프레임
+  // flutter test(디버그·JIT)의 빌드·배치·그리기 기록 시간이다. 실제 GPU 그리기(래스터)는 앱에서 따로 잰다.
+  testWidgets('프레임: 노트 1만 개에서 노드 끌기 한 프레임 시간', skip: Platform.environment['GRAPH_DRAG_FRAME'] == null, (tester) async {
+    final rnd = Random(7);
+    const topics = 13;
+    final bigNotes = <IndexedDoc>[];
+    final bigLayout = <String, Point<double>>{};
+    final bigLinks = <NoteLink>[];
+    for (var i = 0; i < 10000; i++) {
+      final t = i % topics;
+      bigNotes.add(doc('n$i', '주제$t'));
+      final center = t * 2 * pi / topics;
+      final r = sqrt(rnd.nextDouble()) * 900, a = rnd.nextDouble() * 2 * pi;
+      bigLayout['n$i'] = Point(cos(center) * 2600 + cos(a) * r, sin(center) * 2600 + sin(a) * r);
+    }
+    // 같은 주제의 가까운 번호끼리 1~2개 + 주제마다 허브(n0~n12)에 약 1.5%
+    for (var i = topics; i < 10000; i++) {
+      for (var j = 0, k = 1 + rnd.nextInt(2); j < k; j++) {
+        final other = i - topics * (1 + rnd.nextInt(20));
+        if (other >= 0) bigLinks.add(NoteLink(fromId: 'n$i', toId: 'n$other', kind: 'link'));
+      }
+      if (rnd.nextDouble() < 0.015) bigLinks.add(NoteLink(fromId: 'n$i', toId: 'n${i % topics}', kind: 'link'));
+    }
+    await pump(tester, const GraphView(), withNotes: bigNotes, withLinks: bigLinks, withLayout: bigLayout);
+    final viewer = tester.getRect(find.byType(InteractiveViewer));
+
+    Future<String> measure(String name, String id, {required int zoomSteps}) async {
+      await tester.tap(find.text('맞추기'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < zoomSteps; i++) {
+        await tester.tap(find.text('+'));
+        await tester.pumpAndSettle();
+      }
+      // 노드를 화면 가운데로 옮겨 놓고 잡는다 (확대해도 화면 안에 있게)
+      final m = controller(tester).value;
+      final p = bigLayout[id]!;
+      final xs = bigLayout.values.map((q) => q.x), ys = bigLayout.values.map((q) => q.y);
+      final local = Offset(p.x - (xs.reduce(min) - 80 - graphDragRoom), p.y - (ys.reduce(min) - 60 - graphDragRoom));
+      final shift = viewer.center - (viewer.topLeft + MatrixUtils.transformPoint(m, local));
+      controller(tester).value = Matrix4.identity()
+        ..translateByDouble(shift.dx, shift.dy, 0, 1)
+        ..multiply(m);
+      await tester.pumpAndSettle();
+      // 견줄 값: 노드에 마우스를 올린 프레임 (지금도 노드마다 그물 전체를 다시 빌드한다, 바탕은 다시 그리지 않음)
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: viewer.center + const Offset(0, 200));
+      await tester.pumpAndSettle();
+      final hoverWatch = Stopwatch()..start();
+      await mouse.moveTo(viewer.center);
+      await tester.pump(const Duration(milliseconds: 16));
+      final hoverMs = hoverWatch.elapsedMicroseconds / 1000;
+      await mouse.removePointer();
+      await tester.pumpAndSettle();
+      final paintsBefore = graphPaintCount;
+      final g = await tester.startGesture(viewer.center, kind: PointerDeviceKind.mouse);
+      final frames = <double>[];
+      for (var i = 0; i < 90; i++) {
+        final sw = Stopwatch()..start();
+        await g.moveBy(Offset(4, i.isEven ? 2 : 1));
+        await tester.pump(const Duration(milliseconds: 16));
+        frames.add(sw.elapsedMicroseconds / 1000);
+      }
+      final release = <double>[];
+      await g.up();
+      await g.removePointer();
+      for (var i = 0; i < 60; i++) {
+        final sw = Stopwatch()..start();
+        await tester.pump(const Duration(milliseconds: 16));
+        release.add(sw.elapsedMicroseconds / 1000);
+      }
+      await tester.pumpAndSettle();
+      final dragged = graphMotionForTest!.dragging ?? graphMotionForTest!.live.length;
+      final first = frames.first;
+      final rest = frames.skip(3).toList()..sort();
+      final settle = release.toList()..sort();
+      double at(List<double> v, double q) => v[(v.length * q).floor().clamp(0, v.length - 1)];
+      final line =
+          '[5.6 끌기] $name: 함께 움직인 노드 $dragged개, 첫 프레임(바탕 다시 그림 포함) ${first.toStringAsFixed(1)}ms, '
+          '끄는 중 가운데 ${at(rest, 0.5).toStringAsFixed(1)}ms·p90 ${at(rest, 0.9).toStringAsFixed(1)}ms·최대 ${rest.last.toStringAsFixed(1)}ms, '
+          '놓은 뒤 자리 잡기 가운데 ${at(settle, 0.5).toStringAsFixed(1)}ms·최대 ${settle.last.toStringAsFixed(1)}ms, '
+          '마우스 올림 한 프레임 ${hoverMs.toStringAsFixed(1)}ms, 바탕 다시 그림 ${graphPaintCount - paintsBefore}번 (배율 ${controller(tester).value.getMaxScaleOnAxis().toStringAsFixed(2)})';
+      // ignore: avoid_print
+      print(line);
+      expect(graphPaintCount - paintsBefore, lessThanOrEqualTo(2), reason: '끄는 동안 바탕(1만 개)을 다시 그리면 안 된다');
+      // [원래대로] 한 번 (다음 측정을 깨끗하게)
+      await tester.tap(find.text('원래대로'));
+      await tester.pumpAndSettle();
+      return line;
+    }
+
+    // 보통 노드 (연결 2~4개)와 허브(연결 약 150개 — 주변 상한 80개)
+    final degree = <String, int>{};
+    for (final l in bigLinks) {
+      degree.update(l.fromId, (n) => n + 1, ifAbsent: () => 1);
+      degree.update(l.toId, (n) => n + 1, ifAbsent: () => 1);
+    }
+    final plain = degree.entries.firstWhere((e) => e.value == 3 && int.parse(e.key.substring(1)) > 5000).key;
+    await measure('보통 노드(연결 3) 맞춘 배율', plain, zoomSteps: 0);
+    await measure('보통 노드(연결 3) 확대 ×1.25⁸', plain, zoomSteps: 8);
+    await measure('허브(연결 ${degree['n3']}) 확대 ×1.25⁸', 'n3', zoomSteps: 8);
   });
 }

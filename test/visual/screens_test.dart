@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -8,6 +11,7 @@ import 'package:secondbrain/core/background_tasks.dart';
 import 'package:secondbrain/core/brain_providers.dart';
 import 'package:secondbrain/features/connect/connect_page.dart';
 import 'package:secondbrain/features/connect/system_check_provider.dart';
+import 'package:secondbrain/features/home/graph_view.dart';
 import 'package:secondbrain/features/home/home_page.dart';
 import 'package:secondbrain/features/home/neural_view.dart';
 import 'package:secondbrain/features/lessons/lessons_page.dart';
@@ -266,4 +270,74 @@ void main() {
     await settle(tester);
     await capture(tester, '08e_neural_1000_selected');
   });
+
+  // 그래프 움직임 (설계서_프롬프트이후 5.6): 노드 끌기 중간·놓은 뒤·[원래대로] 중간·뒤. 뒤 그림은 끌기 전 그림과 같아야 한다.
+  visualTest('9 그물: 노드 끌기·원래대로', (tester) async {
+    fx.fillStandard();
+    setSurface(tester, window);
+    final check = await systemCheck(tester);
+    final container = await pumpApp(
+      tester,
+      brightness: Brightness.dark,
+      overrides: fx.overrides(systemCheck: check),
+      child: const AppShell(current: AppPage.home, child: HomePage()),
+    );
+    final layout = container.read(graphLayoutProvider).value!;
+    // 확정 연결이 가장 많은 노드를 끈다 (이웃이 따라오는 것이 보이게)
+    final degree = <String, int>{};
+    for (final l in fx.links()) {
+      if (l.isSuggested || !layout.containsKey(l.fromId) || !layout.containsKey(l.toId)) continue;
+      degree.update(l.fromId, (n) => n + 1, ifAbsent: () => 1);
+      degree.update(l.toId, (n) => n + 1, ifAbsent: () => 1);
+    }
+    final hub = (degree.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).first.key;
+    final viewer = tester.getRect(find.byType(InteractiveViewer));
+    final origin = Offset(
+      layout.values.map((q) => q.x).reduce(min) - 80 - graphDragRoom,
+      layout.values.map((q) => q.y).reduce(min) - 60 - graphDragRoom,
+    );
+    Offset screenOf(Point<double> w) {
+      final m = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer)).transformationController!.value;
+      return viewer.topLeft + MatrixUtils.transformPoint(m, Offset(w.x, w.y) - origin);
+    }
+
+    final before = await capture(tester, '09a_graph_before_drag');
+    // 앱처럼 마우스를 먼저 올려(끌 노드가 밝아짐) 누른 뒤 끈다.
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: screenOf(layout[hub]!) - const Offset(40, 40));
+    await g.moveTo(screenOf(layout[hub]!));
+    await tester.pump();
+    await g.down(screenOf(layout[hub]!));
+    for (var i = 0; i < 24; i++) {
+      await g.moveBy(const Offset(-10, 6)); // 가운데 쪽으로 (화면 안에서 보이게)
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await capture(tester, '09b_graph_dragging');
+    await g.up();
+    await g.moveTo(viewer.bottomRight + const Offset(40, 40)); // 마우스를 그래프 밖으로 (끌기 전 그림과 견주게)
+    await g.removePointer();
+    await settle(tester);
+    await capture(tester, '09c_graph_dropped');
+    final motion = graphMotionForTest!;
+    // ignore: avoid_print
+    print('[visual] 끈 노드 ${degree[hub]}개 연결, 함께 움직인 노드 ${motion.live.length}개, 옮긴 노드 ${motion.moved.length}개');
+    await tester.tap(find.text('원래대로'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    await capture(tester, '09d_graph_resetting');
+    await settle(tester);
+    final after = await capture(tester, '09e_graph_after_reset');
+    final same = File(before).readAsBytesSync().length == File(after).readAsBytesSync().length &&
+        _sameBytes(File(before).readAsBytesSync(), File(after).readAsBytesSync());
+    // ignore: avoid_print
+    print('[visual] 원래대로 뒤 그림이 끌기 전과 같음: $same');
+  });
+}
+
+bool _sameBytes(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
