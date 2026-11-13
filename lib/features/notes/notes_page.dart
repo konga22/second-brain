@@ -186,7 +186,7 @@ class _NoteRow extends StatelessWidget {
             const SizedBox(width: 12),
             Flexible(
               child: Text(
-                '${doc.id} · ${doc.topic}',
+                '${doc.id} · ${doc.topicPath}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.muted,

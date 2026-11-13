@@ -23,14 +23,14 @@ void main() {
     final vault = Vault(vaultRoot)..ensure();
     final index = SearchIndex.open(vault);
     indexDir = p.dirname(vault.indexPath);
-    final notes = NoteStore(vault, index);
+    final notes = NoteStore(vault, index, zoned: true);
     // 실제 지식 폴더와 비슷한 크기: 주제 5개, 노트 30개, 실수 노트 5개.
     for (var i = 0; i < 30; i++) {
       notes.add(
         title: '결제 웹훅 재시도 규칙 $i',
         summary: '웹훅 실패 시 3번까지 간격을 늘려 재시도한다 (사례 $i)',
         body: '결제 웹훅이 실패하면 1분·5분·30분 간격으로 3번까지 다시 보낸다.\n\n- 이유: 결제사 서버 일시 장애가 대부분 30분 안에 풀렸다.\n',
-        topic: ['결제', '배포', '검색', '아이폰', '맥 관리'][i % 5],
+        topic: ['개발 지식/결제', '개발 지식/배포', '개발 지식/검색', '생활·기기/아이폰', '생활·기기/맥 관리'][i % 5],
       );
     }
     final lessons = LessonStore(vault, index);
@@ -239,7 +239,7 @@ void main() {
   });
 
   test('brain write로 제목·요약도 고친다 (v1.3.25, 한반도감 n_0059)', () async {
-    final added = await brain(['add', '--title', '배포 결정 Render', '--summary', 'Render로 간다', '--topic', '배포'], stdin: '처음 결정');
+    final added = await brain(['add', '--title', '배포 결정 Render', '--summary', 'Render로 간다', '--topic', '개발 지식/배포'], stdin: '처음 결정');
     final id = RegExp(r'n_\d{4}').firstMatch(added)!.group(0)!;
     final show = await brain(['show', id]);
     final hash = RegExp(r'해시 ([0-9a-f]+)').firstMatch(show)!.group(1)!;

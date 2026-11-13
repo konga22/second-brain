@@ -34,7 +34,7 @@ void main() {
     final vault = Vault(root);
     final index = SearchIndex.open(vault);
     final title = '바깥 노트 시험 ${DateTime.now().millisecondsSinceEpoch}';
-    final (id, _) = NoteStore(vault, index).add(title: title, summary: '앱 밖에서 더한 노트', body: '본문', topic: '시험', draft: true);
+    final (id, _) = NoteStore(vault, index).add(title: title, summary: '앱 밖에서 더한 노트', body: '본문', topic: '개발 지식/시험', draft: true);
     index.close();
 
     var seenAfterMs = -1;

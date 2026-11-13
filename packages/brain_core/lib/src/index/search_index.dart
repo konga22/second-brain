@@ -11,6 +11,7 @@ import '../lessons/lesson.dart';
 import '../note/note.dart';
 import '../note/note_assets.dart';
 import '../note/wiki_links.dart';
+import '../note/zones.dart';
 import '../vault/vault.dart';
 import '../text/nfc.dart';
 import 'bigram.dart';
@@ -49,11 +50,22 @@ class IndexedDoc {
 
   bool get isMerged => status == NoteStatus.merged;
 
-  /// `wiki/결제/a.md` → `결제`. wiki 바로 아래 파일이면 `미분류`.
+  /// 구역 (설계서_프롬프트이후 5.1): `wiki/개발 지식/Flutter/a.md` → `개발 지식`. 구역 밖(예전 방식) 노트는 null.
+  String? get zone {
+    final parts = path.split('/');
+    return parts.length >= 4 && noteZones.contains(parts[1]) ? parts[1] : null;
+  }
+
+  /// 주제 이름: `wiki/개발 지식/Flutter/a.md` → `Flutter`, 예전 `wiki/결제/a.md` → `결제`. wiki 바로 아래 파일이면 `미분류`.
+  /// 구역이 달라도 이름이 같을 수 있으니 묶을 때는 [topicPath]를 쓴다.
   String get topic {
-    final parts = p.split(path);
+    final parts = path.split('/');
+    if (zone != null) return parts[2];
     return parts.length >= 3 ? parts[1] : '미분류';
   }
+
+  /// 주제 폴더의 wiki 기준 경로: `개발 지식/Flutter` 또는 예전 `결제`. 묶기·범위 찾기·옮기기 대상에 쓴다.
+  String get topicPath => zone == null ? topic : '$zone/$topic';
 
   /// `wiki/결제` 처럼 파일이 든 폴더.
   String get folder => p.dirname(path);
@@ -312,6 +324,8 @@ class SearchIndex {
     if (last == null || now - last > fullEvery.inMilliseconds) return sync();
     final dirs = {
       vault.wikiDir,
+      // 구역 폴더: 다른 프로세스가 구역 안에 새 주제 폴더를 만들면 바뀌는 것은 구역 폴더의 시각뿐이다 (설계서_프롬프트이후 5.1)
+      for (final zone in noteZones) p.join(vault.wikiDir, zone),
       p.join(vault.root, 'raw'),
       vault.lessonsDir,
       // 폴더 이름은 SQL에서 뽑는다 (경로 1만 개를 Dart로 옮겨 자르는 것보다 빠름): 마지막 '/'까지 남기기
@@ -367,7 +381,7 @@ class SearchIndex {
     final startedAt = DateTime.now().millisecondsSinceEpoch;
     final existing = {
       for (final row in _db.select(
-        'select rowid, path, mtime, size, hash from docs',
+        'select rowid, path, mtime, size, hash, kind, id, title from docs',
       ))
         row['path'] as String: row,
     };
@@ -413,15 +427,55 @@ class SearchIndex {
     // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
     if (ownsTransaction) _db.execute('begin immediate');
     try {
-      // 2) 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
-      //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
+      // 2) 옮기기만 한 파일(내용이 같고 번호·제목이 머리말에 있음)은 색인 줄의 경로만 바꾼다 (설계서_프롬프트이후 5.1).
+      //    폴더 정리로 1만 개를 옮기면 지우고 다시 색인하는 데 약 20초 걸렸다. 줄 번호가 그대로라 연결·추천도 그대로다.
+      final gone = <String, List<Row>>{}; // 내용 해시 → 없어진 경로의 줄
       for (final entry in existing.entries) {
-        if (seen.contains(entry.key)) continue;
-        _deleteRow(entry.value['rowid'] as int);
-        removed++;
+        if (!seen.contains(entry.key)) gone.putIfAbsent(entry.value['hash'] as String, () => []).add(entry.value);
       }
-      // 3) 바뀐 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
+      final moved = <String>{};
+      final contents = <String, String>{}; // 한 번 읽은 새 파일 (3에서 다시 읽지 않게)
+      if (gone.isNotEmpty) {
+        for (final (rel, kind, file) in files) {
+          if (existing.containsKey(rel) || (kind != 'note' && kind != 'raw')) continue;
+          final String content;
+          try {
+            content = file.readAsStringSync();
+          } on FileSystemException {
+            continue; // 3에서 다시 읽고 건너뜀 목록에 넣는다
+          }
+          final candidates = gone[contentHash(content)];
+          final note = candidates == null
+              ? null
+              : Note.parse(content, fallbackId: '', fallbackTitle: p.basenameWithoutExtension(rel));
+          final row = candidates?.where((r) => r['kind'] == kind && r['id'] == note!.id && r['title'] == note.title).firstOrNull;
+          if (row == null) {
+            contents[rel] = content;
+            continue;
+          }
+          candidates!.remove(row);
+          final stat = file.statSync();
+          _db.execute('update docs set path = ?, mtime = ?, size = ? where rowid = ?', [
+            rel,
+            stat.modified.millisecondsSinceEpoch,
+            stat.size,
+            row['rowid'],
+          ]);
+          moved.add(rel);
+          updated++;
+        }
+      }
+      // 3) 남은 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
+      //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
+      for (final rows in gone.values) {
+        for (final row in rows) {
+          _deleteRow(row['rowid'] as int);
+          removed++;
+        }
+      }
+      // 4) 바뀐 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
       for (final (rel, kind, file) in files) {
+        if (moved.contains(rel)) continue;
         final stat = file.statSync();
         final mtime = stat.modified.millisecondsSinceEpoch;
         final old = existing[rel];
@@ -430,7 +484,7 @@ class SearchIndex {
         }
         final String content;
         try {
-          content = file.readAsStringSync();
+          content = contents[rel] ?? file.readAsStringSync();
         } on FileSystemException catch (e) {
           // 읽지 못한 파일은 건너뛰고(이전 색인 줄은 그대로) 목록으로 알린다.
           skipped.add((rel, e.osError?.message ?? e.message));
@@ -565,9 +619,17 @@ class SearchIndex {
         : note.status.value;
     if (rowid != null) _deleteRow(rowid);
     // 같은 id가 다른 파일에 이미 있으면(복사한 파일) 경로 기반 id로 바꾼다.
+    // 그 파일이 이미 없으면 복사가 아니라 옮긴 것이다: 폴더 목록을 읽는 사이 다른 프로세스가 옮기면(폴더 정리 1만 개,
+    // 설계서_프롬프트이후 5.1) 옛 경로와 새 경로가 함께 목록에 잡힌다. 그때 새 경로가 f_ 번호를 받으면 다음 동기화에서도
+    // 그대로 남아 노트 번호가 바뀌었다 → 옛 줄을 지우고 번호를 이어받는다.
     var id = note.id;
-    if (_db.select('select 1 from docs where id = ?', [id]).isNotEmpty) {
-      id = 'f_${contentHash(rel)}';
+    final holders = _db.select('select rowid, path from docs where id = ?', [id]);
+    for (final holder in holders) {
+      if (File(p.join(vault.root, holder['path'] as String)).existsSync()) {
+        id = 'f_${contentHash(rel)}';
+        break;
+      }
+      _deleteRow(holder['rowid'] as int);
     }
     _stmt(
       'insert into docs(id, path, kind, title, summary, tags, status, mtime, size, hash) '
@@ -665,7 +727,7 @@ class SearchIndex {
   /// [note]의 핵심 단어 5개 중 상대 노트에 나오는 수. AI 호출이 없다.
   ///
   /// 초안·합쳐짐은 뺀다: 정리 대기 카드에 "이미 있는 지식"으로, `brain add`에 "고칠 옛 노트"로 보여 주는 것이라
-  /// 확인 전 초안을 근거로 쓰면 안 된다(4.1). [topic]을 주면 그 주제 폴더 안에서만 찾는다.
+  /// 확인 전 초안을 근거로 쓰면 안 된다(4.1). [topic](주제 경로 [IndexedDoc.topicPath])을 주면 그 주제 폴더 안에서만 찾는다.
   /// 저장 전 노트([note]가 색인에 없음)에도 쓴다: 핵심 단어 수만큼 FTS 질의라 1만 개에서도 빠르다.
   List<SimilarNote> similarNotes(
     Note note, {
@@ -693,7 +755,7 @@ class SearchIndex {
       if (rows.isEmpty) continue;
       final doc = IndexedDoc.fromRow(rows.first);
       if (doc.id == excludeId || doc.id == note.id) continue;
-      if (topic != null && doc.topic != topic) continue;
+      if (topic != null && doc.topicPath != topic) continue; // 주제 경로(구역/주제)로 본다: 구역이 다르면 다른 주제
       out.add(SimilarNote(doc: doc, shared: count, terms: terms.length));
     }
     // 점수가 같으면 최근에 고친 노트가 먼저 (지금 쓰는 결정일 가능성이 크다)
@@ -956,13 +1018,16 @@ class SearchIndex {
     final strict = toBigramQuery(query);
     if (strict == null) return const [];
     final wanted = kinds ?? {'note', if (includeRaw) 'raw'};
-    // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다.
-    final prefix = topic == null ? null : 'wiki/$topic/';
+    // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다 — `구역/주제`, 구역 하나 통째(`개발 지식`),
+    // 예전 주제 이름 모두 접두다. 구역 없이 주제 이름만 주면(`Flutter`, 옛 스킬) 구역 안 그 이름의 주제도 본다 (설계서_프롬프트이후 5.1).
+    final scope = topic == null ? null : toNfc(topic.trim());
+    final prefix = scope == null ? null : 'wiki/$scope/';
+    final byName = scope != null && !scope.contains('/') && !isZone(scope);
+    bool inScope(IndexedDoc d) =>
+        d.path.startsWith(prefix!) || (byName && d.zone != null && d.topic.toLowerCase() == scope.toLowerCase());
     List<IndexedDoc> match(String q, int n) {
       final found = _match(q, prefix == null ? n : n * 20, wanted, includeDrafts: includeDrafts);
-      return prefix == null
-          ? found
-          : found.where((d) => d.path.startsWith(prefix)).take(n).toList();
+      return prefix == null ? found : found.where(inScope).take(n).toList();
     }
 
     final results = match(strict, limit);
@@ -979,9 +1044,27 @@ class SearchIndex {
     return results;
   }
 
-  /// 주제 폴더 목록 (빈 폴더 포함, 자동 생성 목차·숨김 폴더 제외).
+  /// 주제 폴더 목록 (빈 폴더 포함, 숨김 폴더 제외). 구역 안 주제는 `구역/주제`, 구역 밖(예전 방식)은 `주제`
+  /// (설계서_프롬프트이후 5.1). 구역 폴더 자체는 주제가 아니라 넣지 않는다.
   List<String> topics() {
     final dir = Directory(vault.wikiDir);
+    if (!dir.existsSync()) return const [];
+    final out = <String>[];
+    for (final d in dir.listSync().whereType<Directory>()) {
+      final name = toNfc(p.basename(d.path));
+      if (name.startsWith('.')) continue;
+      if (isZone(name)) {
+        out.addAll([for (final t in zoneTopics(name)) '$name/$t']);
+      } else {
+        out.add(name);
+      }
+    }
+    return out..sort();
+  }
+
+  /// 한 구역의 주제 폴더 이름 (빈 폴더 포함). AI가 저장 전에 기존 주제 전체를 본다 (`brain topics`, 설계서_프롬프트이후 5.1).
+  List<String> zoneTopics(String zone) {
+    final dir = Directory(p.join(vault.wikiDir, zone));
     if (!dir.existsSync()) return const [];
     return [
       for (final d in dir.listSync().whereType<Directory>())

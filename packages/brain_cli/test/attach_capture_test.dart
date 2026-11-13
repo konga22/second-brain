@@ -84,7 +84,7 @@ void main() {
   test('끝난 기준: 1장 → assets/ 1개, 같은 사진을 다른 노트에 → 그대로 1개, 두 본문이 링크한다', () async {
     final shot = png('스크린샷 2026-11-13 오후 3.12.45.png');
     final (code1, out1, err1) = await brain(
-      ['add', '--title', '서명 오류 화면', '--summary', 'Xcode 서명 오류 캡처', '--topic', 'Flutter', '--attach', shot],
+      ['add', '--title', '서명 오류 화면', '--summary', 'Xcode 서명 오류 캡처', '--topic', '개발 지식/Flutter', '--attach', shot],
       stdin: 'Xcode 서명 오류가 났다.\n',
     );
     expect(code1, 0, reason: err1);
@@ -92,15 +92,16 @@ void main() {
     expect(assets(), hasLength(1));
     final name = p.basename(assets().single.path);
     final first = noteText(savedPath(out1));
-    expect(first, contains('](../../assets/$name)'));
+    // 구역/주제 아래라 한 단계 더 깊다 (설계서_프롬프트이후 5.1)
+    expect(first, contains('](../../../assets/$name)'));
 
     final (code2, out2, err2) = await brain(
-      ['add', '--title', '같은 캡처 다른 노트', '--summary', '같은 사진', '--topic', '배포', '--attach', shot],
+      ['add', '--title', '같은 캡처 다른 노트', '--summary', '같은 사진', '--topic', '개발 지식/배포', '--attach', shot],
       stdin: '같은 사진을 다시 붙였다.\n',
     );
     expect(code2, 0, reason: err2);
     expect(assets(), hasLength(1), reason: '같은 사진은 한 번만 저장한다');
-    expect(noteText(savedPath(out2)), contains('](../../assets/$name)'));
+    expect(noteText(savedPath(out2)), contains('](../../../assets/$name)'));
   });
 
   test('--attach 여러 번: 2장 붙임', () async {
@@ -130,7 +131,7 @@ void main() {
 
   test('AI 세션에서 붙여 저장해도 초안이다 (4.1 그대로)', () async {
     final (code, out, err) = await brain(
-      ['add', '--title', 'AI 캡처', '--summary', '요약', '--attach', png('a.png')],
+      ['add', '--title', 'AI 캡처', '--summary', '요약', '--topic', '개발 지식/캡처', '--attach', png('a.png')],
       stdin: '본문\n',
       env: {'CLAUDECODE': '1'},
     );

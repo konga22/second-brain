@@ -422,7 +422,7 @@ class UndoCommand extends Command<int> {
       }
       for (final b in batches) {
         stdout.writeln(
-          '${b.id}  ${shortDate(b.at)} ${b.at.hour.toString().padLeft(2, '0')}:${b.at.minute.toString().padLeft(2, '0')}  파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
+          '${b.id}  ${shortDate(b.at)} ${b.at.hour.toString().padLeft(2, '0')}:${b.at.minute.toString().padLeft(2, '0')}  파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}${b.isPathMoved ? '  (경로 바뀜: 뒤에 옮긴 묶음을 먼저 되돌려야 함)' : ''}',
         );
       }
       return 0;

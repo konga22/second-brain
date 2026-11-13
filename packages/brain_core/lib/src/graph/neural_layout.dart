@@ -23,7 +23,7 @@ class NeuralNoteSpec {
   final String id;
   final String title;
 
-  /// 주제 이름. 화면 쪽이 `IndexedDoc.topic`으로 넘긴다 (폴더 구조는 여기서 풀지 않는다).
+  /// 주제 묶음 이름. 화면 쪽이 `IndexedDoc.topicPath`(구역/주제)로 넘긴다 (폴더 구조는 여기서 풀지 않는다).
   final String topic;
   final bool isDraft;
 

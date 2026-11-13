@@ -35,7 +35,8 @@ final neuralLayoutProvider = FutureProvider.autoDispose<NeuralLayout>((ref) {
     vault.indexPath,
     [
       for (final d in notes)
-        if (!d.isMerged) (id: d.id, path: d.path, title: d.title, topic: d.topic, isDraft: d.isDraft),
+        // 주제는 구역/주제 경로로 묶는다: 같은 이름 주제가 다른 구역에 있을 수 있다 (5.1, 그물 보기와 같음)
+        if (!d.isMerged) (id: d.id, path: d.path, title: d.title, topic: d.topicPath, isDraft: d.isDraft),
     ],
     // 추천 연결은 실제 관계가 아니라 뺀다 (선은 모두 실제 관계)
     [for (final l in links) if (!l.isSuggested) (l.fromId, l.toId)],

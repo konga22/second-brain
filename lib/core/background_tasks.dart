@@ -299,6 +299,41 @@ Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, 
       }
     });
 
+/// [폴더 정리] 첫 제안과 30개 넘는 주제 (설계서_프롬프트이후 5.1). 읽기만 한다.
+Future<({List<FolderProposal> proposals, Map<String, int> oversized, Map<String, List<String>> zoneTopics})>
+folderPlanInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    index.sync();
+    return (
+      proposals: proposeFolderMoves(index),
+      oversized: oversizedTopics(index),
+      zoneTopics: {for (final zone in noteZones) zone: index.zoneTopics(zone)},
+    );
+  } finally {
+    index.close();
+  }
+});
+
+/// [폴더 정리] 실행 한 덩어리. 화면이 진행을 보이도록 부르는 쪽이 200개씩 나눠 부르고, 같은 [batch]라
+/// 모두 한 되돌리기 묶음이다. 색인·자동 목차는 마지막 덩어리([syncAfter])에서만 맞춘다 (1만 개에서 덩어리마다 맞추면 느림).
+Future<MoveResult> moveNotesInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<FolderMove> moves, {
+  required String batch,
+  required bool syncAfter,
+}) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return NoteStore(vault, index).moveMany(moves, batch: batch, syncAfter: syncAfter);
+  } finally {
+    index.close();
+  }
+});
+
 /// 신경망 보기 층 배치 (설계서_프롬프트이후 5.3). 노트 출처(`sources:`)는 색인에 없어 노트 파일 머리말을 읽는다 —
 /// 노트 1만 개에서 파일 읽기 + 배치 약 0.6초라 화면 스레드에서 하지 않는다. 넘기는 것은 글자·참거짓 값뿐이다 (L-0004).
 /// 원본 문서 id·제목은 색인에서 읽고, 색인을 못 열면(처음 색인 중 잠김 등) 원본 파일 머리말로 대신한다.
