@@ -77,7 +77,8 @@ void main() {
     expect(lessons.match('Push 해'), hasLength(1));
   });
 
-  test('근거 횟수를 남기고 온보딩 요약에 자주 받은 교정이 들어간다', () {
+  // 온보딩 요약(_profile.md)에 넣던 "자주 받은 교정"은 뺐다 (설계서_프롬프트이후 5.2, persona_test가 지킨다).
+  test('근거 횟수를 남긴다', () {
     final (id, _) = lessons.add(
       trigger: '커밋할 때',
       action: '매번 허락을 받는다',
@@ -88,11 +89,6 @@ void main() {
     lessons.recordEvidence(id, kept: false);
     final lesson = lessons.read(id)!;
     expect((lesson.kept, lesson.recorrected), (1, 1));
-    notes.add(title: '아무 노트', summary: '요약', body: '본문');
-    expect(
-      File(vault.profilePath).readAsStringSync(),
-      contains('자주 받은 교정: 커밋할 때 → 매번 허락을 받는다'),
-    );
   });
 
   test('AI 질문 근거: 노트 상위 5개 + 맞는 규칙, 적으면 검색어 다시 만들기', () {

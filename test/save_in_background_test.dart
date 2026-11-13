@@ -114,6 +114,28 @@ void main() {
     );
   });
 
+  test('나에 대해의 금지어가 든 노트는 편집 창 저장도 막고, 어느 말인지 예외로 돌아온다 (설계서_프롬프트이후 5.2)', () async {
+    const Persona(forbidden: ['연봉']).save(vault);
+    Future<String> save(String? id, String? hash, String body) => saveNoteInBackground(
+      vault.root,
+      indexPath,
+      id: id,
+      expectHash: hash,
+      title: '이직 준비',
+      summary: '면접 질문',
+      body: body,
+      tags: const [],
+      aliases: const [],
+    );
+    await expectLater(
+      save(null, null, '올해 연봉협상 메모'),
+      throwsA(isA<ForbiddenTermException>().having((e) => e.term, 'term', '연봉')),
+    );
+    final (id, hash) = addDirect('이직 준비', '자기소개 1분');
+    await expectLater(save(id, hash, '희망 연봉 적기'), throwsA(isA<ForbiddenTermException>()));
+    expect(bodyOf(id), '자기소개 1분');
+  });
+
   test('노트 패널·사이드바 쓰기: 확정·잇기·옮기기·지우기, 실패는 예외로', () async {
     final (draftId, _) = (() {
       final index = SearchIndex.open(vault, path: indexPath);

@@ -12,6 +12,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
 import '../connect/auto_tidy.dart';
+import '../persona/persona_card.dart';
 import '../../shared/safe_set_state.dart';
 
 /// 설정 (설계서 3절 `/settings`, 4.1, 5.7): 지식 폴더 위치·Finder 열기, 백업·복원, 온보딩 요약.
@@ -381,7 +382,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
         const SizedBox(height: 16),
         ShadCard(
           title: const Text('Claude Code 온보딩 요약'),
-          description: const Text('새 세션을 시작할 때 주요 주제와 자주 받은 교정(150토큰 이하)을 넣습니다.'),
+          description: const Text('새 세션을 시작할 때 주요 주제와 [나에 대해]의 하는 일·답 방식 한 줄을 넣습니다.'),
           child: Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Row(
@@ -396,6 +397,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        // 4문항 답 고치기 (설계서_프롬프트이후 5.2). 폴더를 바꾸면 그 폴더의 me.md를 다시 읽는다.
+        PersonaCard(key: ValueKey(vault.mePath), title: '나에 대해 (4문항)'),
         const SizedBox(height: 16),
         _autoCard(context),
         const SizedBox(height: 16),

@@ -271,6 +271,19 @@ class AddCommand extends Command<int> {
       usageException('본문을 표준 입력으로 주세요 (예: brain add ... <<\'EOF\').');
     }
     final args = argResults!;
+    try {
+      // 금지어(me.md)는 세션 사본을 지식 폴더에 남기기 전에 본다 (설계서_프롬프트이후 5.2). 저장 때 한 번 더 본다.
+      context.notes.checkForbidden(
+        title: args['title'] as String,
+        summary: args['summary'] as String,
+        body: body,
+        tags: (args['tags'] as String).split(','),
+        aliases: (args['aliases'] as String).split(','),
+      );
+    } on NoteStoreException catch (e) {
+      stderr.writeln(e.message);
+      return 1;
+    }
     final sources = <String>[
       for (final s in (argResults!['sources'] as String).split(','))
         if (s.trim().isNotEmpty) s.trim(),
