@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/app_config_provider.dart';
 import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
 import '../../shared/page_header.dart';
@@ -31,6 +32,17 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
     bumpVault(ref);
   }
 
+  /// 비슷한 두 규칙을 한 문장으로 (설계서_프롬프트이후 4.5). 최근 쪽을 남겨 세션 시작 목록에서 밀려나지 않게 한다.
+  Future<void> _onMerge(Lesson a, Lesson b) async {
+    final (keep, drop) = Lesson.recentFirst(a, b) <= 0 ? (a, b) : (b, a);
+    await showShadDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _MergeLessonDialog(keep: keep, drop: drop),
+    );
+    bumpVault(ref);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -38,6 +50,8 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
     final store = ref.watch(lessonStoreProvider);
     ref.watch(vaultRevisionProvider);
     final shown = lessons.where((l) => l.status == _tab).toList();
+    final active = lessons.where((l) => l.status == LessonStatus.active).toList();
+    final isLegacyOrder = ref.watch(appConfigProvider).usesLegacy(AppConfig.legacyLessons);
     final tests = store.allTests();
     final checklist = store.checklist();
     return ListView(
@@ -56,9 +70,15 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
         ),
         const SizedBox(height: 6),
         Text(
-          '교정에서 나온 규칙(언제 → 무엇을 → 왜)입니다. 적용 중인 규칙은 Claude Code 세션 시작 때 한 줄씩 늘 들어가고(최대 30개), 요청과 맞으면 이유까지 다시 붙습니다(최대 3개).',
+          '교정에서 나온 규칙(언제 → 무엇을 → 왜)입니다. 적용 중인 규칙은 Claude Code 세션 시작 때 한 줄씩 늘 들어가고'
+          '(최대 ${LessonStore.maxSessionLessons}개, ${isLegacyOrder ? '번호 순' : '최근에 만들었거나 다시 교정된 것부터'}), '
+          '요청과 맞으면 이유까지 다시 붙습니다(최대 3개).',
           style: theme.textTheme.muted,
         ),
+        if (active.length > LessonStore.maxSessionLessons) ...[
+          const SizedBox(height: 12),
+          MergeNotice(active: active, isLegacyOrder: isLegacyOrder, onMerge: _onMerge),
+        ],
         const SizedBox(height: 16),
         Wrap(
           runSpacing: 4,
@@ -117,6 +137,142 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
           Text('기본: 근거 노트에 있는 내용인가 · diff와 맞는가 · 규칙의 action을 따랐는가', style: theme.textTheme.muted),
         for (final (i, item) in checklist.indexed) Text('${i + 1}. $item', style: const TextStyle(fontSize: 12)),
       ],
+    );
+  }
+}
+
+/// "합치기 필요" (설계서_프롬프트이후 4.5): 적용 중 규칙이 30개를 넘으면 오래된 규칙이 세션 시작 안내에서 빠진다.
+/// 비슷한 규칙 쌍(단어가 겹치는 것, AI 호출 없음)을 보여 주고 사용자가 한 문장으로 합친다.
+class MergeNotice extends StatelessWidget {
+  const MergeNotice({super.key, required this.active, required this.isLegacyOrder, required this.onMerge});
+
+  final List<Lesson> active;
+  final bool isLegacyOrder;
+  final void Function(Lesson a, Lesson b) onMerge;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final colors = AppColors.of(context);
+    final rest = active.length - LessonStore.maxSessionLessons;
+    final pairs = LessonStore.similarPairs(active);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border.all(color: colors.warning),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('합치기 필요', style: theme.textTheme.small),
+          const SizedBox(height: 2),
+          Text(
+            '적용 중 규칙이 ${active.length}개라 세션 시작 안내에 다 들어가지 않습니다. '
+            '${isLegacyOrder ? '번호가 큰(최근)' : '오래되고 다시 교정되지 않은'} 규칙 $rest개는 요청과 맞을 때만 붙습니다. '
+            '비슷한 규칙을 한 문장으로 합치거나 안 쓰는 규칙을 보관하세요.',
+            style: theme.textTheme.muted,
+          ),
+          const SizedBox(height: 8),
+          if (pairs.isEmpty) Text('비슷한 규칙 쌍을 찾지 못했습니다.', style: theme.textTheme.muted),
+          for (final (a, b, _) in pairs)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${a.id}  ${a.line}', style: const TextStyle(fontSize: 12)),
+                        Text('${b.id}  ${b.line}', style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ShadButton.outline(size: ShadButtonSize.sm, onPressed: () => onMerge(a, b), child: const Text('합치기')),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 두 규칙의 문장을 이어 채워 두고, 사용자가 한 문장으로 고쳐 저장한다. [keep]을 고치고 [drop]은 보관한다.
+class _MergeLessonDialog extends ConsumerStatefulWidget {
+  const _MergeLessonDialog({required this.keep, required this.drop});
+
+  final Lesson keep;
+  final Lesson drop;
+
+  @override
+  ConsumerState<_MergeLessonDialog> createState() => _MergeLessonDialogState();
+}
+
+class _MergeLessonDialogState extends ConsumerState<_MergeLessonDialog> {
+  late final _fields = {
+    'trigger': TextEditingController(text: _both(widget.keep.trigger, widget.drop.trigger)),
+    'action': TextEditingController(text: _both(widget.keep.action, widget.drop.action)),
+    'reason': TextEditingController(text: _both(widget.keep.reason, widget.drop.reason)),
+  };
+  String? _error;
+
+  static String _both(String a, String b) => a.trim() == b.trim() ? a : '$a / $b';
+
+  @override
+  void dispose() {
+    for (final c in _fields.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _onSave() {
+    try {
+      ref.read(lessonStoreProvider).merge(
+        widget.keep.id,
+        widget.drop.id,
+        trigger: _fields['trigger']!.text,
+        action: _fields['action']!.text,
+        reason: _fields['reason']!.text,
+        batch: newBatchId(),
+      );
+      Navigator.of(context).pop();
+    } on NoteStoreException catch (e) {
+      setState(() => _error = e.message);
+    }
+  }
+
+  Widget _input(String key, String hint) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: ShadInput(controller: _fields[key], placeholder: Text(hint)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadDialog(
+      title: const Text('규칙 합치기'),
+      description: Text(
+        '${widget.keep.id}을 고쳐 남기고 ${widget.drop.id}는 보관합니다(복원 가능). '
+        '두 규칙 문장을 이어 두었으니 한 문장으로 고쳐 저장하세요.',
+      ),
+      constraints: const BoxConstraints(maxWidth: 620),
+      actions: [
+        ShadButton.outline(onPressed: () => Navigator.of(context).pop(), child: const Text('취소')),
+        ShadButton(onPressed: _onSave, child: const Text('합쳐 저장')),
+      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _input('trigger', '언제'),
+          _input('action', '무엇을'),
+          _input('reason', '왜'),
+          if (_error != null) Text(_error!, style: const TextStyle(color: Color(0xffdc2626))),
+        ],
+      ),
     );
   }
 }
