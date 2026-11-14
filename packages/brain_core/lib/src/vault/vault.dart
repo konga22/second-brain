@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -225,10 +226,20 @@ class AppConfig {
   );
 }
 
+/// 임시 파일 이름 끝 16자: 시각(마이크로초) + 프로세스·난수. 시각만 쓰면 두 프로세스가 같은 순간 같은 파일을 쓸 때
+/// 이름이 겹쳐 한쪽이 "파일 없음"으로 실패했다 (데이터 안전 감사 11/14). 길이는 그대로 16자다 (파일 이름 255바이트 계산).
+String _tempTag() {
+  final time = DateTime.now().microsecondsSinceEpoch.toRadixString(36).padLeft(11, '0');
+  final salt = (pid * 7919 + _tempRandom.nextInt(1 << 30)) % 60466176; // 36^5
+  return '${time.substring(time.length - 11)}${salt.toRadixString(36).padLeft(5, '0')}';
+}
+
+final _tempRandom = Random();
+
 /// 임시 파일에 쓰고 이름을 바꾼다. 쓰다가 꺼져도 반쪽 파일이 남지 않는다.
 void writeFileAtomic(String path, String content) {
   Directory(p.dirname(path)).createSync(recursive: true);
-  final temp = File('$path.tmp-${DateTime.now().microsecondsSinceEpoch}');
+  final temp = File('$path.tmp-${_tempTag()}');
   temp.writeAsStringSync(content, flush: true);
   temp.renameSync(path);
 }
@@ -239,7 +250,7 @@ void writeFileAtomic(String path, String content) {
 /// `brain`을 실행할 수 있었다 (11/11 K-22). 이름 바꾸기는 한 번에 일어나고, 이미 실행 중인 `brain`은 옛 파일을 계속 읽는다.
 void writeBytesAtomic(String path, List<int> bytes, {bool executable = false}) {
   Directory(p.dirname(path)).createSync(recursive: true);
-  final temp = File('$path.tmp-${DateTime.now().microsecondsSinceEpoch}');
+  final temp = File('$path.tmp-${_tempTag()}');
   try {
     temp.writeAsBytesSync(bytes, flush: true);
     if (executable) {

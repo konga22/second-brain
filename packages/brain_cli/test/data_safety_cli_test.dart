@@ -9,12 +9,7 @@ import 'package:test/test.dart';
 /// 데이터 안전 전체 감사 (Fable 5.2 작업 지시서 2번, 11/14) — 실제 `brain`을 프로세스로 돌려 보는 쪽.
 /// 코어 쪽 시험은 `brain_core/test/data_safety_audit_test.dart`.
 ///
-/// 시험은 모두 **안전한 결과**를 기대한다. 지금 깨지는 시험(재현된 버그)은 [openBug]로 표시해 평소 실행에서는
-/// 건너뛴다. 재현: `AUDIT_REPRO=1 dart test test/data_safety_cli_test.dart --timeout 3x` (실패가 곧 재현이다).
-final openBug = Platform.environment['AUDIT_REPRO'] == '1'
-    ? null
-    : '재현된 버그(고치기 전) — AUDIT_REPRO=1로 돌리면 실패한다';
-
+/// 시험은 모두 **안전한 결과**를 기대한다. 감사 때(11/14)는 이 가운데 8개가 고치기 전 코드에서 실패했다 — 같은 날 고친 뒤 모두 통과한다.
 void main() {
   late Directory temp;
   late String exe;
@@ -128,7 +123,7 @@ void main() {
       await brain(['undo', writeBatch]); // 거절해도 되고, 되돌려도 노트가 둘이 되면 안 된다
 
       expect(filesWithId(id), 1, reason: 'brain undo 뒤 같은 번호($id)의 파일이 둘이다: ${wikiFiles().map((f) => p.basename(f.path)).toList()}');
-    }, skip: openBug);
+    });
   });
 
   group('잠금 없이 읽고 고쳐 쓰는 파일', () {
@@ -145,7 +140,7 @@ void main() {
         lost += said - kept;
       }
       expect(lost, 0, reason: '"추천 칸에 넣음"이라고 답한 24개 가운데 $lost개가 todos.md에 없다');
-    }, skip: openBug);
+    });
 
     test('brain add 4개를 한꺼번에 불러도 모두 끝까지 가고 번호가 겹치지 않는다', () async {
       // 색인 파일은 먼저 만들어 둔다 (노트는 아직 없는 작은 지식 폴더).
@@ -170,13 +165,13 @@ void main() {
         isEmpty,
         reason: '4개 중 ${failed.length}개가 오류로 끝났고, 그중 ${savedButFailed.length}개는 노트가 이미 저장된 뒤였다',
       );
-    }, skip: openBug);
+    });
 
     test('색인 파일이 아직 없는 새 지식 폴더에서 첫 명령 4개를 한꺼번에 불러도 색인을 여는 데서 실패하지 않는다', () async {
       final results = await Future.wait([for (var i = 0; i < 4; i++) brain(['topics'])]);
       final failed = [for (final r in results) if (r.$1 != 0) r.$3.split('\n').first];
       expect(failed, isEmpty, reason: '읽기 명령 4개 중 ${failed.length}개가 실패했다 (아무것도 쓰기 전이라 노트 손실은 없다)');
-    }, skip: openBug);
+    });
 
     test('[안전 확인] 같은 해시로 동시에 고치면 하나만 되고, 다른 하나는 충돌 사본으로 남는다', () async {
       final id = await addNote('토큰 만료', '15분.\n');
@@ -211,7 +206,7 @@ void main() {
       final (_, second, _) = await brain(['sessions', 'corrections']);
 
       expect(second, contains('테스트 키로 먼저 확인'), reason: '실제보다 큰 수가 적힌 세션은 뒤에 한 말(교정)이 다시는 보이지 않는다: $second');
-    }, skip: openBug);
+    });
 
     test('놓친 교정 표시 파일의 값이 숫자가 아니어도 명령이 죽지 않는다', () async {
       writeSession('cafe1234-0000-4000-8000-000000000002', [('하나', '네'), ('둘', '네')]);
@@ -221,7 +216,7 @@ void main() {
 
       expect(err, isNot(contains('is not a subtype')), reason: '표시 파일을 손으로 고쳤거나 깨졌을 때 놓친 교정 줍기가 통째로 멈춘다');
       expect(out, contains('사용자: "하나"'));
-    }, skip: openBug);
+    });
 
     test('AI 대화 안에서는 적용 중인 실수 노트를 보관하거나 승인 대기로 내리지 못한다 (끄는 것은 사용자가 앱에서)', () async {
       final vault = Vault(vaultRoot);
@@ -240,7 +235,7 @@ void main() {
       expect(list, contains(id), reason: 'AI가 근거 없이 규칙을 껐다 (종료 코드 $archiveCode, 출력: ${archiveOut.trim()}). 세션 시작 안내에서 빠지고 앱에는 알림이 없다');
       await brain(['lesson', 'set', id, '--status', 'pending'], ai: true);
       expect((await brain(['lesson', 'list', '--status', 'active'])).$2, contains(id), reason: 'AI가 적용 중 규칙을 승인 대기로 내렸다');
-    }, skip: openBug);
+    });
 
     test('PreToolUse 훅은 쓰기 명령(sessions corrections --done)에 붙은 파이프를 떼어 자동 허용하지 않는다', () {
       // 읽기(목록 보기)는 지금처럼 파이프를 떼고 허용한다
@@ -248,7 +243,7 @@ void main() {
       // --done은 `_meta/correction_scan.json`을 고치는 쓰기다 (sessions mark와 같은 종류, L-0010)
       expect(HookCommand.cleanBrainPipe('brain sessions corrections --done cafe1234:3 | head -5'), isNull);
       expect(HookCommand.cleanBrainPipe('brain sessions corrections --done=cafe1234:3 2>&1'), isNull);
-    }, skip: openBug);
+    });
 
     test('[안전 확인] 목차 표시 파일은 지식 폴더 밖에 있고, 세션 id에 경로 글자가 있어도 그 폴더를 벗어나지 않는다', () async {
       await addNote('결제 웹훅 재시도 규칙', '3번까지 간격을 늘려 재시도.\n', topic: '개발 지식/결제');

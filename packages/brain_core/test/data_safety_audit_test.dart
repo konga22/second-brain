@@ -9,13 +9,8 @@ import 'package:test/test.dart';
 /// 노트를 잃거나 겹치게 하지 않는지 본다. 11/13 검토(n_0092)가 고친 것(옮기기 ↔ 되돌리기, 합치기 중 실패,
 /// 정리 보드 [되돌리기])은 다시 넣지 않았다 — `folder_move_safety_test`·`merge_draft_test`·`ai_edits_test`에 있다.
 ///
-/// 시험은 모두 **안전한 결과**를 기대한다. 지금 깨지는 시험(재현된 버그)은 [openBug]로 표시해 평소 실행에서는
-/// 건너뛴다 — 빨간 시험이 다른 실패를 가리지 않게. 재현하려면
-/// `AUDIT_REPRO=1 dart test test/data_safety_audit_test.dart` (실패가 곧 재현이다). 고치면 `skip:`을 뗀다.
-final openBug = Platform.environment['AUDIT_REPRO'] == '1'
-    ? null
-    : '재현된 버그(고치기 전) — AUDIT_REPRO=1로 돌리면 실패한다';
-
+/// 시험은 모두 **안전한 결과**를 기대한다(거절해도, 안전하게 되돌려도 통과). 감사 때(11/14)는 이 가운데 14개가
+/// 고치기 전 코드에서 실패했다(`2500cc5`의 재현 기록) — 같은 날 고친 뒤 모두 통과한다 ([데이터안전감사](../../../docs/데이터안전감사.md) 10절).
 void main() {
   late Directory temp;
   late Vault vault;
@@ -85,7 +80,7 @@ void main() {
 
       expect(wikiText(), contains('다시 저장한 맞는 내용.'), reason: '새 노트가 버린 노트의 옛 내용으로 덮였다 (휴지통에도 없다)');
       expect(index.byId(fresh), isNotNull, reason: '새 노트 $fresh가 색인에서 사라졌다');
-    }, skip: openBug);
+    });
 
     test('세션 묶음을 되돌릴 때, 그 자리에 지금 있는 다른 세션의 노트를 휴지통으로 보내지 않는다', () {
       final (a, pathA) = store.add(title: '배포 요일', summary: '화·목', body: 'A 세션이 저장한 내용.\n', topic: '프로젝트/쇼핑몰', draft: true, batch: 's_aaaaaaaa');
@@ -97,7 +92,7 @@ void main() {
 
       expect(wikiText(), contains('B 세션이 저장한 내용.'), reason: 'A 세션 묶음을 되돌렸는데 B 세션의 노트가 지식 폴더에서 빠졌다');
       expect(index.byId(b), isNotNull);
-    }, skip: openBug);
+    });
 
     test('고친 뒤 제목을 바꾼 노트: 앞의 고침을 되돌려도 같은 번호의 노트가 둘이 되지 않는다', () {
       final (id, _) = store.add(title: '배포 요일', summary: '화·목', body: '화·목 배포.\n', topic: '프로젝트/쇼핑몰', batch: 'b_add');
@@ -109,7 +104,7 @@ void main() {
       tryUndo('b_write');
 
       expect(filesWithId(id), 1, reason: '옛 파일 이름으로 고치기 전 노트가 다시 생겨 같은 번호($id)가 두 파일이다');
-    }, skip: openBug);
+    });
 
     test('제목을 바꾼 뒤 고친 노트: 제목 바꾸기를 되돌려도 뒤의 고침이 지식 폴더에서 사라지지 않는다', () {
       final (id, _) = store.add(title: '배포 요일', summary: '화·목', body: '화·목 배포.\n', topic: '프로젝트/쇼핑몰', batch: 'b_add');
@@ -122,7 +117,7 @@ void main() {
       expect(wikiText(), contains('제목을 바꾼 뒤 고친 내용.'), reason: '뒤의 고침이 휴지통으로 가고 옛 내용만 남았다');
       tryUndo('b_write');
       expect(filesWithId(id), 1, reason: '이어서 뒤 묶음을 되돌리자 같은 번호가 두 파일이 됐다');
-    }, skip: openBug);
+    });
 
     test('고친 뒤 버린 노트: 앞의 고침을 되돌려도 버린 노트가 지식 폴더에 되살아나지 않는다', () {
       final (id, _) = store.add(title: '옛 초안', summary: '요약', body: '처음.\n', topic: '공부/운영체제', draft: true, batch: 'b_add');
@@ -133,7 +128,7 @@ void main() {
       tryUndo('b_write');
 
       expect(filesWithId(id), 0, reason: '사용자가 버린 노트가 고치기 전 내용으로 다시 생겼다');
-    }, skip: openBug);
+    });
 
     test('[알려진 약점, 기능검토 1-5] 같은 노트를 두 번 고친 뒤 앞 묶음을 되돌려도 뒤의 고침은 남는다', () {
       final (id, _) = store.add(title: '토큰 만료', summary: '15분', body: '15분.\n', topic: '개발 지식/로그인', batch: 'b_add');
@@ -143,7 +138,7 @@ void main() {
       tryUndo('b_first');
 
       expect(store.read(id)!.$2.body, contains('둘째 고침: 60분.'), reason: '앞 묶음을 되돌리자 뒤의 고침까지 사라졌다 (사본도 없다)');
-    }, skip: openBug);
+    });
 
     test('AI가 할 일을 추천한 뒤 사용자가 적은 할 일은, 추천 묶음을 되돌려도 남는다', () {
       final todos = TodoStore(vault, index);
@@ -155,7 +150,7 @@ void main() {
 
       final file = File(p.join(vault.root, 'todos.md'));
       expect(file.existsSync() ? file.readAsStringSync() : '', contains('사용자가 직접 적은 일'), reason: '할 일 파일이 통째로 추천 전 상태가 됐다');
-    }, skip: openBug);
+    });
 
     test('새 노트를 만든 묶음을 되돌렸다고 하면(거절하지 않았으면) 그 노트는 지식 폴더에 없다', () {
       final (id, _) = store.add(title: '배포 요일', summary: '화·목', body: '화·목 배포.\n', topic: '프로젝트/쇼핑몰', batch: 'b_add');
@@ -167,7 +162,41 @@ void main() {
       if (undone) {
         expect(filesWithId(id), 0, reason: '"되돌림"으로 적혔는데 노트는 그대로 남았다 (다시 되돌릴 수도 없다)');
       }
-    }, skip: openBug);
+    });
+
+    test('정상 순서(가장 최근 묶음부터)로는 그대로 되돌린다: 제목 바꾸기 → 고침 → 새로 만들기', () {
+      final (id, path) = store.add(title: '배포 요일', summary: '화·목', body: '화·목 배포.\n', topic: '프로젝트/쇼핑몰', batch: 'b_add');
+      store.write(id, '화·목·금 배포.\n', expectHash: store.read(id)!.$3, batch: 'b_write');
+      final (_, note, hash) = store.read(id)!;
+      store.update(id, expectHash: hash, title: '배포 일정 결정', summary: note.summary, body: note.body, batch: 'b_rename');
+      for (final batch in ['b_rename', 'b_write', 'b_add']) {
+        expect(tryUndo(batch), isTrue, reason: '$batch를 거절했다');
+      }
+      expect(filesWithId(id), 0);
+      expect(File(p.join(vault.root, path)).existsSync(), isFalse);
+    });
+
+    test('--force로 되돌리면 덮거나 치운 지금 파일은 휴지통에 남는다 (버린 초안 자리의 새 노트)', () {
+      final (old, _) = store.add(title: 'SQLite 동시 열기', summary: '틀린 초안', body: '틀린 초안 내용.\n', topic: '개발 지식/SQLite', draft: true, batch: 'b_add_old');
+      store.delete(old, batch: 'b_discard');
+      store.add(title: 'SQLite 동시 열기', summary: '다시 저장', body: '다시 저장한 맞는 내용.\n', topic: '개발 지식/SQLite', batch: 'b_add_new');
+      expect(() => undoBatch(vault, 'b_discard'), throwsA(isA<UndoDriftError>()));
+      undoBatch(vault, 'b_discard', force: true);
+      final trash = Directory(p.join(vault.metaDir, 'trash'));
+      final kept = [for (final f in trash.listSync(recursive: true).whereType<File>()) if (f.readAsStringSync().contains('다시 저장한 맞는 내용.')) f];
+      expect(kept, hasLength(1), reason: '강제로 되돌릴 때 덮은 새 노트가 휴지통에 없다');
+    });
+
+    test('"바꾼 뒤" 기록이 없는 옛 묶음은 기본 거절, --force면 되돌린다', () {
+      final (id, _) = store.add(title: '토큰 만료', summary: '15분', body: '15분.\n', topic: '개발 지식/로그인', batch: 'b_add');
+      store.write(id, '30분.\n', expectHash: store.read(id)!.$3, batch: 'b_old');
+      File(p.join(vault.metaDir, 'undo', 'b_old', 'after.jsonl')).deleteSync(); // 11/13 전 묶음 흉내
+      expect(() => undoBatch(vault, 'b_old'), throwsA(isA<UndoDriftError>().having((e) => e.message, 'message', contains('--force'))));
+      expect(store.read(id)!.$2.body, contains('30분.'));
+      undoBatch(vault, 'b_old', force: true);
+      index.sync();
+      expect(store.read(id)!.$2.body, contains('15분.'));
+    });
   });
 
   group('합치기·보관 뒤에 일어나는 일', () {
@@ -188,7 +217,7 @@ void main() {
         final resolved = p.normalize(p.join(p.dirname(p.join(vault.root, doc.path)), link.group(2)!));
         expect(File(resolved).existsSync(), isTrue, reason: '합친 뒤 사진 링크 ${link.group(2)}가 가리키는 파일이 없다 ($resolved)');
       }
-    }, skip: openBug);
+    });
 
     test('합쳐진 옛 노트가 가리키는 새 노트를 지우면, 옛 노트가 다시 보이거나 점검이 알려 준다', () {
       final (oldId, _) = store.add(title: '배포 요일 결정', summary: '화·목 배포', body: '배포는 화요일과 목요일에 한다.\n', topic: '프로젝트/쇼핑몰');
@@ -203,7 +232,7 @@ void main() {
         isTrue,
         reason: '배포 요일 지식이 AI 찾기에서 모두 사라졌는데(옛 노트는 합쳐짐, 새 노트는 휴지통) 점검도 알려 주지 않는다',
       );
-    }, skip: openBug);
+    });
   });
 
   group('잠금 없이 읽고 고쳐 쓰는 파일을 동시에 고칠 때', () {
@@ -221,7 +250,7 @@ void main() {
         reason: '동시에 넣은 추천 ${workers * each}개 중 $lost개가 사라졌고, 쓰다가 난 오류가 ${errors.length}번이다'
             '${errors.isEmpty ? '' : ' (예: ${errors.first})'}',
       );
-    }, skip: openBug);
+    });
 
     test('실수 노트 근거 횟수를 동시에 올려도 덜 세지 않는다 (lessons/L-xxxx.md)', () async {
       final lessons = LessonStore(vault, index);
@@ -232,7 +261,7 @@ void main() {
         (kept: workers * each, errors: 0),
         reason: '지킴 ${workers * each}번을 적었는데 덜 세졌거나 쓰다가 오류가 났다${errors.isEmpty ? '' : ' (예: ${errors.first})'}',
       );
-    }, skip: openBug);
+    });
 
     test('세션을 읽은 범위를 동시에 적어도 다른 세션의 기록이 사라지지 않는다 (_meta/session_reads.json)', () async {
       vault.ensure();
@@ -243,7 +272,7 @@ void main() {
           if (reads.unread('session-$w', each * 100).isNotEmpty) 'session-$w',
       ];
       expect(missing, isEmpty, reason: '읽었다고 적은 범위가 사라진 세션');
-    }, skip: openBug);
+    });
 
     test('다른 연결이 색인을 맞추는 동안 저장해도 오류로 끝나지 않는다 (저장됐는데 실패로 보이면 다시 저장해 중복이 생긴다)', () async {
       for (var i = 0; i < 30; i++) {
@@ -269,7 +298,7 @@ void main() {
         reason: '저장 80번 중 ${addErrors.length}번이 오류로 끝났고 그중 ${savedButFailed.length}번은 노트가 이미 저장된 뒤였다. '
             '색인만 맞추던 쪽 오류 ${syncErrors.length}번${addErrors.isEmpty ? '' : ' (예: ${addErrors.first.split('|').last})'}',
       );
-    }, skip: openBug);
+    });
 
     test('[안전 확인] 새 노트를 동시에 저장해도 번호와 파일이 겹치지 않는다 (잠금 안)', () async {
       final ids = (await Future.wait([for (var w = 0; w < 4; w++) _addNotes(vault.root, indexPath, w, 5)])).expand((x) => x).toList();

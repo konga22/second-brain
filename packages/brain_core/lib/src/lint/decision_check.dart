@@ -76,7 +76,7 @@ class DecisionCheck {
     }
   }
 
-  void _save({DateTime? lastRun, List<DecisionPair>? pairs, Set<String>? kept}) {
+  void _save({DateTime? lastRun, List<DecisionPair>? pairs, Set<String>? kept}) => withVaultLock(vault, () {
     final state = _load();
     writeFileAtomic(
       _file.path,
@@ -86,7 +86,7 @@ class DecisionCheck {
         'kept': kept == null ? (state['kept'] ?? const []) : ([...kept]..sort()),
       }),
     );
-  }
+  });
 
   DateTime? get lastRun => DateTime.tryParse('${_load()['lastRun'] ?? ''}');
 

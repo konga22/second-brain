@@ -224,7 +224,11 @@ class _SessionsCorrections extends Command<int> {
           stderr.writeln('세션 ${m.group(1)}을 찾지 못했습니다.');
           return 1;
         }
-        marks[session.sessionId] = int.parse(m.group(2)!);
+        // AI가 끝 줄의 값을 잘못 옮겨 실제보다 큰 수를 적으면 그 세션에서 뒤에 한 말이 다시는 안 보였다 (데이터 안전 감사 11/14).
+        // 그 세션의 지금 사용자 말 수를 넘지 않게 자른다.
+        final count = context.sessions.exchanges(session).length;
+        final value = int.parse(m.group(2)!);
+        marks[session.sessionId] = value > count ? count : value;
       }
       state.markScanned(marks);
       stdout.writeln('훑은 곳을 적음: 세션 ${marks.length}개');

@@ -20,7 +20,11 @@ class CorrectionScanState {
     try {
       final json = jsonDecode(_file.readAsStringSync());
       if (json is! Map) return {};
-      return {for (final e in json.entries) '${e.key}': (e.value as num).toInt()};
+      // 손으로 고쳤거나 깨진 값(숫자가 아님)은 그 세션만 처음부터 다시 훑는다 — 명령 전체를 멈추지 않는다
+      return {
+        for (final e in json.entries)
+          if (e.value is num) '${e.key}': (e.value as num).toInt(),
+      };
     } on FormatException {
       return {};
     }

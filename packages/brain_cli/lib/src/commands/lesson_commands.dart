@@ -201,6 +201,18 @@ class _LessonSet extends Command<int> {
     try {
       final id = argResults!.rest.first;
       final status = LessonStatus.parse(argResults!['status']);
+      // 적용 중 규칙을 끄는 것(보관·승인 대기로 내리기)은 사용자가 정한다 (데이터 안전 감사 11/14, 사용자 결정).
+      // AI 대화에서 한 줄로 꺼지면 세션 시작 안내에서 빠지고 알림도 없었다. AI는 근거(사용자 말)가 있어야 켤 수 있어 되돌리지도 못했다.
+      if (status != LessonStatus.active && isAiSessionEnv(Platform.environment)) {
+        final lesson = context.lessons.read(id);
+        if (lesson != null && lesson.status == LessonStatus.active) {
+          stderr.writeln(
+            '$id는 적용 중인 규칙이라 AI 대화에서는 끄지 않습니다. 끄거나 보관하는 것은 사용자가 앱 [배운 것]에서 합니다. '
+            '규칙이 틀렸다고 보면 사용자에게 그 까닭과 함께 알린다.',
+          );
+          return 1;
+        }
+      }
       if (status == LessonStatus.active) {
         final lesson = context.lessons.read(id);
         if (lesson == null) {
@@ -402,7 +414,13 @@ class _LessonChecklist extends Command<int> {
 
 /// `brain undo [묶음 id]`: AI 작업 한 번을 통째로 되돌린다. id 없이 부르면 최근 묶음.
 class UndoCommand extends Command<int> {
-  UndoCommand(this.context);
+  UndoCommand(this.context) {
+    argParser.addFlag(
+      'force',
+      help: '그 뒤 바뀌었거나 확인할 수 없는 파일이 있어도 되돌린다. 덮거나 치우는 지금 파일은 _meta/trash/에 남긴다',
+      negatable: false,
+    );
+  }
 
   final BrainContext context;
 
@@ -428,10 +446,12 @@ class UndoCommand extends Command<int> {
       return 0;
     }
     try {
-      final count = undoBatch(context.vault, argResults!.rest.first);
+      final count = undoBatch(context.vault, argResults!.rest.first, force: argResults!['force'] as bool);
       context.index.sync();
       VaultSummary(context.vault, context.index).writeAll();
-      stdout.writeln('되돌림: 파일 $count개 (새로 생겼던 파일은 _meta/trash/로 옮김)');
+      stdout.writeln(
+        '되돌림: 파일 $count개 (새로 생겼던 파일${argResults!['force'] as bool ? '과 덮은 지금 파일' : ''}은 _meta/trash/로 옮김)',
+      );
       return 0;
     } on ArgumentError catch (e) {
       stderr.writeln(e.message);

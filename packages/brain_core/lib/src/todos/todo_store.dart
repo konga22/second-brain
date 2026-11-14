@@ -75,7 +75,10 @@ class TodoStore {
   }
 
   /// AI 추천 할 일을 "## 추천 (확인 전)" 칸에 넣는다. 같은 내용이 있으면 넣지 않는다.
-  bool suggest(String text, {String? source, String? batch}) {
+  ///
+  /// 할 일 쓰기는 모두 지식 폴더 잠금 안에서 읽고 쓴다: AI가 한 메시지에서 `brain todo suggest`를 여러 개 부르면
+  /// 서로의 줄을 덮어 "넣음"이라고 답한 추천이 사라졌다 (데이터 안전 감사 11/14, 3개 동시 20번 중 20번).
+  bool suggest(String text, {String? source, String? batch}) => withVaultLock(vault, () {
     final clean = maskSecrets(text.trim().replaceAll('\n', ' '));
     if (clean.isEmpty) return false;
     if (_items().any((t) => t.text == clean)) return false;
@@ -91,10 +94,10 @@ class TodoStore {
     );
     appendChangeLog(vault, 'todo-suggest', clean, batch: batch);
     return true;
-  }
+  });
 
   /// 추천을 받아들인다: 추천 칸에서 빼고 확정 목록에 넣는다.
-  void accept(Todo todo, {String? batch}) {
+  void accept(Todo todo, {String? batch}) => withVaultLock(vault, () {
     remove(todo, batch: batch);
     final current = file.readAsStringSync();
     final i = current.indexOf(suggestionHeader);
@@ -105,9 +108,9 @@ class TodoStore {
       i < 0 ? '$current$line' : '${current.substring(0, i)}$line\n${current.substring(i)}',
     );
     appendChangeLog(vault, 'todo-accept', todo.text, batch: batch);
-  }
+  });
 
-  void add(String text, {String? batch}) {
+  void add(String text, {String? batch}) => withVaultLock(vault, () {
     final clean = maskSecrets(text.trim().replaceAll('\n', ' '));
     if (clean.isEmpty) return;
     final current = file.existsSync() ? file.readAsStringSync() : '# 할 일\n\n';
@@ -120,7 +123,7 @@ class TodoStore {
       i < 0 ? '$body- [ ] $clean\n' : '${body.substring(0, i)}- [ ] $clean\n\n${body.substring(i)}',
     );
     appendChangeLog(vault, 'todo-add', clean, batch: batch);
-  }
+  });
 
   void toggle(Todo todo, {String? batch}) => _editLine(todo, (line) {
     final m = _item.firstMatch(line)!;
@@ -135,7 +138,7 @@ class TodoStore {
     String? Function(String line) edit,
     String action,
     String? batch,
-  ) {
+  ) => withVaultLock(vault, () {
     final lines = file.readAsLinesSync();
     if (todo.line >= lines.length || !lines[todo.line].contains(todo.text)) {
       throw StateError('할 일 목록이 그사이 바뀌었습니다. 다시 불러오세요.');
@@ -149,7 +152,7 @@ class TodoStore {
     recordBeforeChange(vault, file.path, batch: batch);
     writeFileAtomic(file.path, '${lines.join('\n')}\n');
     appendChangeLog(vault, action, todo.text, batch: batch);
-  }
+  });
 
   static final _todoLike = RegExp(
     r'(남은 ?(것|일|작업)|다음 할 일|할 일|해야 ?(한다|함|할)|확인 필요|시험 필요|TODO|마감)',
