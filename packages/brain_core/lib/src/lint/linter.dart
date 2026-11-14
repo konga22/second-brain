@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../index/search_index.dart';
+import '../lessons/lesson_store.dart';
 import '../links/dismissed_links.dart';
 import '../log/change_log.dart';
 import '../note/note.dart';
@@ -181,6 +182,18 @@ class Linter {
           type: LintType.unreadable,
           id: rel,
           message: '색인에서 건너뜀 — UTF-8 텍스트로 다시 저장하거나 지식 폴더 밖으로 옮기기 ($reason)',
+        ),
+      );
+    }
+
+    // 실수 노트 번호를 받지 못한 `lessons/` 파일 (번호가 겹친 사본 등). 실수 노트로 읽지 않으므로 알린다 (보안 감사 11/14).
+    for (final doc in index.docsOf('lesson')) {
+      if (LessonStore.idPattern.hasMatch(doc.id)) continue;
+      issues.add(
+        LintIssue(
+          type: LintType.format,
+          id: doc.path,
+          message: '실수 노트로 읽지 않음 — 번호가 겹치는 사본이면 지우고, 새 규칙이면 brain lesson add로 넣기',
         ),
       );
     }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:brain_core/brain_core.dart';
 
@@ -53,4 +54,11 @@ Duration? parseSince(String value) {
   }
   final n = int.parse(match.group(1)!);
   return Duration(days: match.group(2) == 'w' ? n * 7 : n);
+}
+
+/// AI에게 가는 데이터 덩어리의 시작·끝 표시에 넣는 값: 실행마다 다른 16진수 6자리. 안의 글(노트·대화)이 끝 표시를 미리 적어
+/// 데이터 밖인 척하지 못하게 한다 (11/11 K-30, 보안 감사 11/14: 내용 해시는 미리 맞출 수 있었다).
+String randomMark() {
+  final random = Random.secure();
+  return [for (var i = 0; i < 3; i++) random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
 }

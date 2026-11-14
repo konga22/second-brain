@@ -108,6 +108,10 @@ class _DoctorCommand extends Command<int> {
       for (final (rel, reason) in context.index.unreadable) {
         stdout.writeln('[주의] 읽을 수 없는 파일 $rel — UTF-8로 다시 저장하거나 지식 폴더 밖으로 ($reason)');
       }
+      // 번호가 겹친 사본은 실수 노트로 읽지 않는다 (보안 감사 11/14: 예전에는 훅 전체가 빈 글이 됐다).
+      for (final rel in context.lessons.strayFiles()) {
+        stdout.writeln('[주의] 실수 노트로 읽지 않은 파일 $rel — 번호가 겹치는 사본이면 지우고, 새 규칙이면 brain lesson add로 넣는다');
+      }
     }
     // 원격이 붙은 git 폴더 안이면 push 한 번에 지식이 올라간다. 경고만 하고 실패로 치지 않는다 (설계서_프롬프트이후 4.6).
     final exposure = findGitRemoteExposure(context.vault.root);

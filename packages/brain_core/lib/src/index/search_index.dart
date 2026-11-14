@@ -719,7 +719,9 @@ class SearchIndex {
     // 그 파일이 이미 없으면 복사가 아니라 옮긴 것이다: 폴더 목록을 읽는 사이 다른 프로세스가 옮기면(폴더 정리 1만 개,
     // 설계서_프롬프트이후 5.1) 옛 경로와 새 경로가 함께 목록에 잡힌다. 그때 새 경로가 f_ 번호를 받으면 다음 동기화에서도
     // 그대로 남아 노트 번호가 바뀌었다 → 옛 줄을 지우고 번호를 이어받는다.
-    var id = note.id;
+    // 머리말의 번호는 사람·AI가 쓴 글이라 모양을 본다: 여러 줄 글을 번호 칸에 넣으면 훅 목차·찾기 줄에 가짜 안내 줄이
+    // 그대로 섰다 (보안 감사 11/14). 모양이 아니면 경로·내용 기반 번호로 본다 (실제 지식 폴더 11/15: 해당 0개).
+    var id = _idShape.hasMatch(note.id) ? note.id : fallbackId;
     final holders = _db.select('select rowid, path from docs where id = ? and rowid != ?', [id, rowid ?? -1]);
     for (final holder in holders) {
       if (File(p.join(vault.root, holder['path'] as String)).existsSync()) {
@@ -780,6 +782,9 @@ class SearchIndex {
     }
     return sameSearch ? null : (newRowid, note);
   }
+
+  /// 문서 번호로 받는 모양: `n_0001`·`f_…`·`r_…`·`L-0001`·`T-0001`처럼 글자·숫자로 시작하는 짧은 한 낱말.
+  static final _idShape = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$');
 
   /// 글 여러 개의 FNV-1a 64비트 값 (16진수). 처음 색인에서 sha1([contentHash])은 1만 개에 약 0.5초 더 걸렸다.
   /// 같은 값이면 찾기 색인을 다시 만들지 않을 뿐이라, 드물게 겹쳐도 추천 연결이 한 번 덜 갱신될 뿐 노트는 다치지 않는다.

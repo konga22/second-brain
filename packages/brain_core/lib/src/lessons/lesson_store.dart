@@ -139,9 +139,17 @@ class LessonStore {
     if (syncOnRead) index.syncIfStale();
     return [
       for (final doc in index.docsOf('lesson'))
-        if (status == null || doc.statusText == status.value) ?read(doc.id),
+        if (idPattern.hasMatch(doc.id) && (status == null || doc.statusText == status.value)) ?read(doc.id),
     ];
   }
+
+  /// `lessons/` 안인데 실수 노트 번호를 받지 못한 파일 (지식 폴더 기준 경로). Finder 복제(`L-0002 2.md`)·동기화 충돌 사본처럼
+  /// 번호가 겹치면 색인이 경로 기반 번호(`f_…`)를 준다. 예전에는 [all]이 이 번호로 [read]를 불러 예외가 났고, 훅이 통째로
+  /// 아무것도 내지 않아 규칙 목록이 조용히 빠졌다 (보안 감사 11/14). [all]은 건너뛰고 `brain doctor`·`brain lint`가 알린다.
+  List<String> strayFiles() => [
+    for (final doc in index.docsOf('lesson'))
+      if (!idPattern.hasMatch(doc.id)) doc.path,
+  ];
 
   /// 고치기는 지식 폴더 잠금 안에서 한다 (읽고 고쳐 쓰는 [setStatus]·[recordEvidence]도 읽기부터 잠금 안).
   /// 예전에는 훅·검증 에이전트가 동시에 근거 횟수를 올리면 덜 세졌다 (데이터 안전 감사 11/14: 90번 → 85).
