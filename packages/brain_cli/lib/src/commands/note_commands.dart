@@ -427,6 +427,9 @@ class AddCommand extends Command<int> {
         '${isForcedDraft ? '\nAI 대화에서 저장한 노트는 사용자가 확인하기 전까지 초안이다 (찾기·자동 주입에 안 나옴).' : ''}'
         '${isPartial ? '\n세션 ${sessionId!.substring(0, 8)}은 다 읽지 않아 "일부 저장"으로 적었습니다. 다음 정리 때 안 읽은 곳부터 이어 읽습니다.' : ''}',
       );
+      // 상태 문장 알림 (설계서_프롬프트이후 5.10 ③): 막지 않고 한 덩어리만 알린다.
+      final hint = statusSentenceHint(id, summary: args['summary'] as String, body: body);
+      if (hint != null) stdout.writeln(hint);
       return 0;
     } on NoteStoreException catch (e) {
       stderr.writeln(e.message);
@@ -571,8 +574,19 @@ class WriteCommand extends Command<int> {
           return 1;
         }
       }
+      // 상태 문장 알림은 이번에 새로 들어온 문장만 (원래 있던 것은 매번 알리지 않는다, 5.10 ③)
+      final before = context.notes.read(id)?.$2;
+      void hintNewStatus(String newSummary, String newBody) {
+        final old = before == null ? const <String>[] : statusSentences('${before.summary}\n${before.body}', limit: 1000);
+        final added = [for (final s in statusSentences('$newSummary\n$newBody', limit: 1000)) if (!old.contains(s)) s];
+        if (added.isEmpty) return;
+        final hint = statusSentenceHint(id, summary: '', body: added.join('\n'));
+        if (hint != null) stdout.writeln(hint);
+      }
+
       if (!hasMeta) {
         stdout.writeln(context.notes.write(id, body!, expectHash: expect));
+        hintNewStatus(before?.summary ?? '', body);
         markSession();
         return 0;
       }
@@ -593,6 +607,7 @@ class WriteCommand extends Command<int> {
         aliases: note.aliases,
       );
       stdout.writeln(newHash);
+      hintNewStatus(summary ?? note.summary, hasBody ? body : note.body);
       markSession();
       return 0;
     } on NoteStoreException catch (e) {
