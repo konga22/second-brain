@@ -21,6 +21,7 @@ export 'src/lessons/lesson_safety.dart';
 export 'src/lessons/lesson_store.dart';
 export 'src/lint/decision_check.dart';
 export 'src/lint/linter.dart';
+export 'src/lint/status_sentences.dart';
 export 'src/log/ai_edits.dart';
 export 'src/log/change_history.dart';
 export 'src/log/change_log.dart';

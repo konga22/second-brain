@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:brain_core/brain_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +10,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/app_config_provider.dart';
 import '../../shared/date_text.dart';
 import '../../core/brain_providers.dart';
+import '../../core/claude_code.dart';
 import '../../shared/page_header.dart';
 
 /// AI가 배운 것 (설계서 3절 `/lessons`, 5.4): 실수 노트·교정 diff·회귀 시험·검사 기준.
@@ -20,6 +24,82 @@ class LessonsPage extends ConsumerStatefulWidget {
 
 class _LessonsPageState extends ConsumerState<LessonsPage> {
   LessonStatus _tab = LessonStatus.pending;
+  bool _isFinding = false;
+  String _step = '';
+  Duration _elapsed = Duration.zero;
+  String? _findResult;
+  String? _findError;
+  Process? _process;
+
+  @override
+  void dispose() {
+    _process?.kill();
+    super.dispose();
+  }
+
+  /// 놓친 교정 줍기 (설계서_프롬프트이후 5.10 ①). 대화 중에는 교정이 실수 노트로 잘 넘어가지 않아서(8번 조사: 11/10 뒤 0/13),
+  /// 지난 대화의 사용자 말을 다른 맥락(싼 모델)이 나중에 훑는다. 올린 것은 모두 승인 대기다.
+  Future<void> _onFindMissed() async {
+    final budget = ClaudeCode.correctionsBudgetUsd.toStringAsFixed(2);
+    final isConfirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text('놓친 교정 찾기'),
+        description: Text(
+          '이 맥의 Claude Code가 지난 대화에서 사용자 말과 바로 앞 AI 답 끝만 읽고, AI가 놓친 교정을 규칙 후보로 '
+          '승인 대기에 올립니다(한 번에 최대 ${ClaudeCode.correctionsMaxLessons}개, 바로 적용하지 않음). '
+          '싼 모델(Haiku)을 쓰고 한 번에 최대 $budget달러까지 씁니다. '
+          '이미 훑은 대화는 다시 읽지 않습니다. 우리 서버는 거치지 않습니다.',
+        ),
+        actions: [
+          ShadButton.outline(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
+          ShadButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('동의하고 찾기')),
+        ],
+      ),
+    );
+    if (isConfirmed != true) return;
+    final before = ref.read(lessonsProvider).where((l) => l.status == LessonStatus.pending).length;
+    final startedAt = DateTime.now();
+    final timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _elapsed = DateTime.now().difference(startedAt));
+    });
+    setState(() {
+      _isFinding = true;
+      _step = 'Claude Code 시작 중';
+      _findResult = null;
+      _findError = null;
+    });
+    String? error;
+    try {
+      final result = await ref.read(claudeCodeProvider).findMissedCorrections(
+        onStart: (p) => _process = p,
+        onStep: (step) {
+          if (mounted) setState(() => _step = step);
+        },
+      );
+      if (!result.ok) {
+        error = result.needsLogin ? '터미널에서 claude를 실행해 /login 한 뒤 다시 시도하세요.' : '찾지 못했습니다: ${result.message}';
+      }
+    } on Object catch (e) {
+      error = '찾지 못했습니다: $e';
+    } finally {
+      timer.cancel();
+      _process = null;
+      bumpVault(ref);
+    }
+    if (!mounted) return;
+    final after = ref.read(lessonsProvider).where((l) => l.status == LessonStatus.pending).length;
+    setState(() {
+      _isFinding = false;
+      _findError = error;
+      if (error == null) {
+        _findResult = after > before
+            ? '승인 대기에 ${after - before}개를 올렸습니다. 읽어 보고 맞는 것만 승인하세요.'
+            : '새로 올린 규칙 후보가 없습니다.';
+        if (after > before) _tab = LessonStatus.pending;
+      }
+    });
+  }
 
   void _onSetStatus(Lesson lesson, LessonStatus status) {
     ref.read(lessonStoreProvider).setStatus(lesson.id, status, batch: newBatchId());
@@ -60,6 +140,16 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
         PageHeader(
           title: 'AI가 배운 것',
           actions: [
+            if (_isFinding)
+              ShadButton.outline(size: ShadButtonSize.sm, onPressed: () => _process?.kill(), child: const Text('멈추기'))
+            else
+              ShadButton.outline(
+                size: ShadButtonSize.sm,
+                leading: const Icon(LucideIcons.search, size: 14),
+                onPressed: _onFindMissed,
+                child: const Text('놓친 교정 찾기'),
+              ),
+            const SizedBox(width: 6),
             ShadButton(
               size: ShadButtonSize.sm,
               leading: const Icon(LucideIcons.plus, size: 14),
@@ -68,6 +158,22 @@ class _LessonsPageState extends ConsumerState<LessonsPage> {
             ),
           ],
         ),
+        if (_isFinding) ...[
+          const SizedBox(height: 10),
+          const ShadProgress(),
+          const SizedBox(height: 4),
+          Text('$_step · ${_elapsed.inSeconds}초', style: theme.textTheme.muted),
+        ],
+        if (_findResult != null || _findError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _findError ?? _findResult!,
+            style: TextStyle(
+              fontSize: 13,
+              color: _findError != null ? AppColors.of(context).danger : AppColors.of(context).text,
+            ),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
           '교정에서 나온 규칙(언제 → 무엇을 → 왜)입니다. 적용 중인 규칙은 Claude Code 세션 시작 때 한 줄씩 늘 들어가고'

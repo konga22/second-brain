@@ -185,6 +185,29 @@ class ClaudeSessions {
     ];
   }
 
+  /// 놓친 교정 줍기용 (설계서_프롬프트이후 5.10 ①): 사용자 문장마다 바로 앞 AI 답의 끝과 짝지어 돌려준다.
+  /// 교정은 "사용자 말 + 바로 앞 AI 답 끝"만 있으면 가려진다 — 도구 출력은 넣지 않는다 (8번 조사, Haiku에 준 것과 같다).
+  /// 비밀값은 가리고, 사용자 문장은 [userMax]자, AI 답 끝은 [aiTail]자로 자른다.
+  List<({String ai, String user})> exchanges(ClaudeSession session, {int userMax = 300, int aiTail = 140}) {
+    final (_, lines) = _parse(File(session.path));
+    final out = <({String ai, String user})>[];
+    var lastAi = '';
+    for (final line in lines) {
+      if (line.role == 'ai') {
+        lastAi = line.text;
+      } else if (line.role == 'user') {
+        final ai = lastAi.replaceAll(RegExp(r'\s+'), ' ').trim();
+        final user = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+        out.add((
+          ai: maskSecrets(ai.length <= aiTail ? ai : '…${ai.substring(ai.length - aiTail)}'),
+          user: maskSecrets(user.length <= userMax ? user : '${user.substring(0, userMax)}…'),
+        ));
+        lastAi = '';
+      }
+    }
+    return out;
+  }
+
   static String _date(DateTime time) {
     final t = time.toLocal();
     return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';

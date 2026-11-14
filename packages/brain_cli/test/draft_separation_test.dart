@@ -144,6 +144,107 @@ void main() {
     expect(out, isNot(contains('$draft  ')), reason: 'AI용 찾기는 번호로도 확인 전 초안을 내주지 않는다');
   });
 
+  test('상태 문장 알림 (5.10 ③): brain add는 알리고, brain write는 새로 들어온 상태 문장만 알린다', () async {
+    final (code, out, _) = await brain(
+      ['add', '--title', '결제 웹훅 재시도', '--summary', '3번까지 다시 보낸다', '--tags', '결제', '--topic', '개발 지식/결제', '--new-topic'],
+      stdin: '결제 웹훅은 3번까지 다시 보낸다. 운영에서는 아직 안 돌렸다.\n',
+    );
+    expect(code, 0);
+    final id = RegExp(r'(n_\d{4}) 저장함').firstMatch(out)!.group(1)!;
+    expect(out, contains('상태 문장 1개'));
+    expect(out, contains('"운영에서는 아직 안 돌렸다."'));
+    expect(out, contains('--source $id'));
+
+    Future<String> hash() async => RegExp(r'해시 ([0-9a-f]{12})').firstMatch((await brain(['show', id])).$2)!.group(1)!;
+    // 원래 있던 상태 문장은 다시 알리지 않는다
+    final (_, same, _) = await brain(['write', id, '--expect-hash', await hash()],
+        stdin: '결제 웹훅은 3번까지 다시 보낸다. 운영에서는 아직 안 돌렸다.\n간격은 1분이다.\n');
+    expect(same, isNot(contains('상태 문장')));
+    // 새로 들어온 상태 문장만 알린다
+    final (_, added, _) = await brain(['write', id, '--expect-hash', await hash(), '--summary', '3번, 간격은 미정'],
+        stdin: '결제 웹훅은 3번까지 다시 보낸다. 운영에서는 아직 안 돌렸다.\n간격은 1분이다.\n');
+    expect(added, contains('상태 문장 1개'));
+    expect(added, contains('"3번, 간격은 미정"'));
+    expect(added, isNot(contains('아직 안 돌렸다')));
+    // 상태 문장이 없는 저장은 조용하다
+    final (_, quiet, _) = await brain(
+      ['add', '--title', '결제 웹훅 간격', '--summary', '1분·5분·30분', '--tags', '결제', '--topic', '개발 지식/결제'],
+      stdin: '간격은 1분, 5분, 30분.\n',
+    );
+    expect(quiet, contains('저장함'));
+    expect(quiet, isNot(contains('상태 문장')));
+  });
+
+  test('놓친 교정 줍기 (5.10 ①): brain sessions corrections가 사용자 말·앞 AI 답 끝만 보이고, --done 뒤에는 새 말만', () async {
+    final home = Directory(p.join(temp.path, 'case', 'home'))..createSync();
+    final projects = Directory(p.join(home.path, '.claude', 'projects', '-Users-me-app'))..createSync(recursive: true);
+    void writeSession(String id, List<(String, String)> turns) {
+      final lines = [
+        for (final (role, text) in turns)
+          jsonEncode({
+            'type': role == 'user' ? 'user' : 'assistant',
+            'sessionId': id,
+            'cwd': '/Users/me/app',
+            'timestamp': '2026-11-10T10:00:00.000Z',
+            'message': role == 'user'
+                ? {'role': 'user', 'content': text}
+                : {
+                    'content': [
+                      {'type': 'text', 'text': text},
+                    ],
+                  },
+          }),
+      ];
+      File(p.join(projects.path, '$id.jsonl')).writeAsStringSync(lines.join('\n'));
+    }
+
+    writeSession('aaaaaaaa-1111', [
+      ('user', '결제 웹훅 고쳐 줘'),
+      ('ai', '고쳤습니다. 배포는 직접 실행해 주세요.'),
+      ('user', '너가 할 수 있잖아 그냥 너가 해'),
+      ('user', '<agent-message from="x">다른 세션이 보낸 글</agent-message>'),
+    ]);
+    writeSession('bbbbbbbb-2222', [
+      ('user', '지금 대화'),
+      ('ai', '네'),
+      ('user', '지금 대화 둘'),
+    ]);
+    final env = {'HOME': home.path, 'CLAUDE_CODE_SESSION_ID': 'bbbbbbbb-2222'};
+
+    final (code, out, _) = await brain(['sessions', 'corrections', '--since', 'all'], env: env);
+    expect(code, 0);
+    expect(out, contains('[aaaaaaaa #2] AI 끝: "고쳤습니다. 배포는 직접 실행해 주세요."'));
+    expect(out, contains('사용자: "너가 할 수 있잖아 그냥 너가 해"'));
+    expect(out, isNot(contains('다른 세션이 보낸 글')), reason: '사람이 친 말이 아닌 줄은 보이지 않는다');
+    expect(out, isNot(contains('지금 대화')), reason: '지금 진행 중인 세션은 뺀다');
+    expect(out, contains('--done aaaaaaaa:3'));
+    expect(out, contains('(이것이 마지막)'));
+
+    // 쪽 나누기: 한 쪽에 하나만
+    final (_, page, _) = await brain(['sessions', 'corrections', '--since', 'all', '--max-chars', '40'], env: env);
+    expect(page, contains('--done aaaaaaaa:1'));
+    expect(page, contains('남은 세션 1개·문장 2개'));
+
+    final (doneCode, done, _) = await brain(['sessions', 'corrections', '--done', 'aaaaaaaa:3'], env: env);
+    expect(doneCode, 0);
+    expect(done, contains('세션 1개'));
+    final (_, after, _) = await brain(['sessions', 'corrections', '--since', 'all'], env: env);
+    expect(after, contains('훑을 새 사용자 말이 없습니다'));
+
+    // 세션이 이어지면 늘어난 말만
+    writeSession('aaaaaaaa-1111', [
+      ('user', '결제 웹훅 고쳐 줘'),
+      ('ai', '고쳤습니다. 배포는 직접 실행해 주세요.'),
+      ('user', '너가 할 수 있잖아 그냥 너가 해'),
+      ('user', '<agent-message from="x">다른 세션이 보낸 글</agent-message>'),
+      ('ai', '알겠습니다.'),
+      ('user', '내부 번호 말고 쉬운 말로 써'),
+    ]);
+    final (_, more, _) = await brain(['sessions', 'corrections', '--since', 'all'], env: env);
+    expect(more, contains('[aaaaaaaa #4] AI 끝: "알겠습니다."'));
+    expect(more, isNot(contains('너가 할 수 있잖아')));
+  });
+
   test('brain show의 연결 줄에 초안 제목이 나오지 않는다 (이전 방식이면 나온다)', () async {
     final draft = addNote('결제 웹훅 재시도 횟수 변경', '결제 웹훅은 10번까지 즉시 재시도한다', draft: true);
     final vault = Vault(vaultRoot);
