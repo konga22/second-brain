@@ -72,7 +72,13 @@ class HookCommand extends Command<int> {
     if (!config.isAutoCaptureOff) {
       lines.add(config.usesLegacy(AppConfig.legacyFolders) ? autoCaptureLine : autoCaptureZoneLine);
     }
-    lines.addAll(lessonLines(context.lessons, legacy: config.usesLegacy(AppConfig.legacyLessons)));
+    // 규칙을 읽다 실패해도 나머지 안내(주제·찾기·자동 저장·프로젝트)는 낸다: 예전에는 실수 노트 폴더의 사본 파일 하나로
+    // 훅 전체가 빈 글이 됐다 (보안 감사 11/14).
+    try {
+      lines.addAll(lessonLines(context.lessons, legacy: config.usesLegacy(AppConfig.legacyLessons)));
+    } on Object catch (e) {
+      stderr.writeln('실수 노트를 읽지 못해 규칙 목록을 뺐습니다: $e');
+    }
     // 프로젝트 폴더 안이면 그 프로젝트의 지금 상태·다음 할 일 (설계서_프롬프트이후 5.4). 밖이면 0자라 평소와 같다.
     lines.addAll(projectLines(context.vault, cwd));
     // 압축 직후에만 덧붙인다. 평소 시작(startup·resume·clear)은 지금과 한 글자도 같아야 세션 캐시가 산다 (compact_hook_test).
@@ -96,7 +102,11 @@ class HookCommand extends Command<int> {
   static List<String> projectLines(Vault vault, String cwd) {
     if (cwd.isEmpty) return const [];
     try {
-      return ProjectContext(vault).find(cwd)?.sessionLines() ?? const [];
+      final projects = ProjectContext(vault);
+      final page = projects.find(cwd);
+      if (page == null) return const [];
+      final ai = projects.aiWritten(page.name);
+      return page.sessionLines(aiState: ai.state, aiNext: ai.next) ?? const [];
     } on Object catch (e) {
       stderr.writeln('프로젝트 문맥을 읽지 못해 뺐습니다: $e');
       return const [];
@@ -207,7 +217,8 @@ class HookCommand extends Command<int> {
     );
   }
 
-  static const _readOnly = {'find', 'show', 'topics', 'toc', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'bench', 'lint', '--help', '-h'};
+  // `bench`는 뺐다: `--queries`·`--lessons`로 아무 경로의 파일을 읽어 질문 줄을 보여 준다 (보안 감사 11/14). 사람이 쓰는 측정 명령이다.
+  static const _readOnly = {'find', 'show', 'topics', 'toc', 'lesson', 'sessions', 'review', 'todo', 'help', 'doctor', 'lint', '--help', '-h'};
   static final _tailPipe = RegExp(r'^[ \t]*(head|tail)([ \t]+-n[ \t]*\d+|[ \t]+-\d+|[ \t]+--lines=\d+)?[ \t]*$');
 
   /// 명령 끝에 붙은 `2>&1`·`2>/dev/null`. 가운데 있는 것은 떼지 않는다(따옴표 안 글자를 바꾸지 않게).
@@ -329,12 +340,25 @@ class HookCommand extends Command<int> {
   /// 단어 일치로는 못 붙는다: 요청은 만들 대상("응모 자동화")을 말하고 노트는 진행 방식("초반 설계 순서")을 말한다.
   /// 11/14 응모 세션에서 AI가 주제어로만 3번 찾아 n_0086을 놓쳤고, 지적 뒤 L-0029가 생겼다 — 문장 대신 훅이 붙인다(L-0013).
   /// [docs]는 이미 읽은 노트 목록 — 목차와 함께 쓸 때 1만 개를 두 번 읽지 않게 한다 (설계서_프롬프트이후 5.11).
-  static List<IndexedDoc> methodNotes(SearchIndex index, {int limit = 2, List<IndexedDoc>? docs}) {
+  ///
+  /// AI 대화가 고치고 사용자가 아직 [확인함]을 누르지 않은 노트는 붙이지 않는다 (보안 감사 11/14, 사용자 결정): 정리된 노트에
+  /// AI가 이 태그를 달면 "진행 순서는 이 노트를 따른다"는 말과 함께 모든 만들기 요청에 붙었다. 초안은 원래 빠진다.
+  /// 확인 기록을 읽지 못하면 하나도 붙이지 않는다(확인 못 한 것을 "따른다"로 내보내지 않는 쪽).
+  static List<IndexedDoc> methodNotes(SearchIndex index, Vault vault, {int limit = 2, List<IndexedDoc>? docs}) {
     if (docs == null) index.syncIfStale();
-    return [
+    final candidates = [
       for (final d in docs ?? index.notes())
         if (d.kind == 'note' && !d.isDraft && !d.isMerged && d.tags.contains(methodTag)) d,
-    ].take(limit).toList();
+    ];
+    if (candidates.isEmpty) return const [];
+    final Set<String> unconfirmed;
+    try {
+      unconfirmed = {for (final e in AiEditReview(vault, index).pending()) e.noteId};
+    } on Object catch (e) {
+      stderr.writeln('AI가 고친 노트 기록을 읽지 못해 작업 방식 노트를 뺐습니다: $e');
+      return const [];
+    }
+    return [for (final d in candidates) if (!unconfirmed.contains(d.id)) d].take(limit).toList();
   }
 
   /// 만들기 요청 안내 (기존, 목차 없음). 이전 방식(`BRAIN_LEGACY=toc`)과 지식 폴더가 비었을 때 쓴다.
@@ -443,9 +467,16 @@ class HookCommand extends Command<int> {
     // 백그라운드 작업 알림 같은 시스템 입력은 사용자 요청이 아니라 건너뛴다 (사용기 #13).
     if (_systemInput.hasMatch(prompt)) return;
     final cwd = input['cwd'] as String? ?? '';
+    var matched = const <Lesson>[];
+    try {
+      matched = context.lessons.match(prompt);
+    } on Object catch (e) {
+      stderr.writeln('실수 노트를 읽지 못해 규칙 줄을 뺐습니다: $e');
+    }
+    // 규칙 문장은 한 줄로 편다: 줄바꿈 낀 "무엇을"이 가짜 규칙 줄(`- L-9999 …`)이 됐다 (보안 감사 11/14). 세션 시작 목록과 같다.
     final lines = <String>[
-      for (final lesson in context.lessons.match(prompt))
-        '- ${lesson.id} ${lesson.line} (이유: ${clip(lesson.reason, 40)})',
+      for (final lesson in matched)
+        '- ${lesson.id} ${clip(lesson.line, 400)} (이유: ${clip(lesson.reason, 40)})',
     ];
     final isCorrection = _correction.hasMatch(prompt) && !context.vault.contains(cwd);
     // 만들기·구현 요청이면 관련 지식을 먼저 검토하고 도입을 제안하게 한다 (11/07 사용자 요청).
@@ -455,7 +486,7 @@ class HookCommand extends Command<int> {
     // 작업 방식 노트와 목차가 같은 노트 목록을 쓴다: 한 번만 읽는다 (관련 노트 찾기가 앞에서 색인을 맞췄다).
     final allNotes = isBuild ? context.index.notes() : const <IndexedDoc>[];
     final methods = isBuild
-        ? [for (final d in methodNotes(context.index, docs: allNotes)) if (related.every((r) => r.id != d.id)) d]
+        ? [for (final d in methodNotes(context.index, context.vault, docs: allNotes)) if (related.every((r) => r.id != d.id)) d]
         : const <IndexedDoc>[];
     // 목차 먼저 보여 주기 (설계서_프롬프트이후 5.11): 세션의 첫 만들기 요청에 제목 목록, 그 뒤에는 한 줄.
     final (toc, tocAbove) = isBuild ? buildToc(input, includeDrafts: drafts, docs: allNotes) : (null, false);

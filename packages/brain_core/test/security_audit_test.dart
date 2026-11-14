@@ -161,7 +161,7 @@ void main() {
       expect(text, isNot(contains('S3cretPass')));
     });
 
-    test('[뚫림] AI 답 끝 140자가 키 가운데에서 시작하면 키 뒷부분이 그대로 나간다 (자른 뒤에 가림)', () {
+    test('[고침] AI 답 끝 140자가 키 가운데에서 시작하면 키 뒷부분이 그대로 나간다 (자른 뒤에 가림)', () {
       final key = 'sk-ant-api03-${'Qq7' * 30}';
       writeSession('aaaaaaaa-0000-0000-0000-000000000002', [
         user('배포 환경 파일 만들어 줘'),
@@ -171,9 +171,9 @@ void main() {
       final session = sessions().list(vault: vault).single;
       final shown = sessions().exchanges(session).last.ai;
       expect(shown, isNot(contains('Qq7Qq7Qq7')), reason: '같은 대화를 brain sessions show로 보면 [가림]이다 (전체를 먼저 가림)');
-    }, skip: _repro);
+    });
 
-    test('[뚫림] 300자를 넘는 개인 키 블록은 끝 줄이 잘려 가려지지 않는다', () {
+    test('[고침] 300자를 넘는 개인 키 블록은 끝 줄이 잘려 가려지지 않는다', () {
       final pem = [
         '-----BEGIN OPENSSH PRIVATE KEY-----',
         for (var i = 0; i < 30; i++) 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn${i.toString().padLeft(2, '0')}',
@@ -186,9 +186,9 @@ void main() {
       ]);
       final session = sessions().list(vault: vault).single;
       expect(sessions().exchanges(session).last.user, isNot(contains('b3BlbnNzaC1rZXktdjEAAAAABG5vbmU')));
-    }, skip: _repro);
+    });
 
-    test('[뚫림] 세션 목록 제목(첫 사용자 말)에 비밀값이 가림 없이 들어간다', () {
+    test('[고침] 세션 목록 제목(첫 사용자 말)에 비밀값이 가림 없이 들어간다', () {
       final key = 'sk-ant-api03-${'Zz9' * 30}';
       writeSession('aaaaaaaa-0000-0000-0000-000000000004', [
         user('$key 이 키로 배포 스크립트 좀 돌려 줘'),
@@ -197,9 +197,9 @@ void main() {
       ]);
       final session = sessions().list(vault: vault).single;
       expect(session.title, isNot(contains('sk-ant-api03-Zz9')), reason: '제목은 brain sessions 목록·앱 세션 목록·raw/sessions 노트 제목에 쓰인다');
-    }, skip: _repro);
+    });
 
-    test('[뚫림] 사람이 치지 않은 첫 작업 지시(origin 없음·promptSource=sdk)가 사용자 말로 세어진다', () {
+    test('[고침] 사람이 치지 않은 첫 작업 지시(origin 없음·promptSource=sdk)가 사용자 말로 세어진다', () {
       // 다른 세션이 연 세션의 첫 메시지, 화면 없는 실행의 프롬프트가 이 모양이다. 압축 뒤 되살리기(CompactRecall)는 빼는데
       // 축약본·놓친 교정·실수 노트 근거 검사(userTexts)는 사람 말로 본다.
       writeSession('aaaaaaaa-0000-0000-0000-000000000005', [
@@ -211,7 +211,7 @@ void main() {
       ]);
       final session = sessions().list(vault: vault).single;
       expect(sessions().userTexts(session).join('\n'), isNot(contains('CANARY')));
-    }, skip: _repro);
+    });
   });
 
   group('버린 내용이 남는 곳', () {

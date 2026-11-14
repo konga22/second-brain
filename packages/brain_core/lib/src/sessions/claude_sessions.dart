@@ -65,7 +65,7 @@ class ClaudeSession {
   };
 
   /// 요약을 만드는 규칙이 바뀌면 올린다. 다른 판으로 만든 캐시는 다시 읽는다 (2: 작업 알림 빼기, 11/12).
-  static const summaryVersion = 2;
+  static const summaryVersion = 3; // 3: 제목 가림, 사람이 치지 않은 첫 작업 지시 빼기 (보안 감사 11/14)
 
   static ClaudeSession fromJson(Map<String, dynamic> json) => ClaudeSession(
     sessionId: json['sessionId'] as String,
@@ -196,11 +196,13 @@ class ClaudeSessions {
       if (line.role == 'ai') {
         lastAi = line.text;
       } else if (line.role == 'user') {
-        final ai = lastAi.replaceAll(RegExp(r'\s+'), ' ').trim();
-        final user = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+        // 가린 **뒤에** 자른다: 자른 뒤 가리면 경계에 걸린 키는 머리(`sk-`)가 잘려 그대로 나갔다 — 90자 키의 89자
+        // (보안 감사 11/14). 서버로 보내는 길(ChatContext)과 세션 축약본도 같은 순서다.
+        final ai = maskSecrets(lastAi).replaceAll(RegExp(r'\s+'), ' ').trim();
+        final user = maskSecrets(line.text).replaceAll(RegExp(r'\s+'), ' ').trim();
         out.add((
-          ai: maskSecrets(ai.length <= aiTail ? ai : '…${ai.substring(ai.length - aiTail)}'),
-          user: maskSecrets(user.length <= userMax ? user : '${user.substring(0, userMax)}…'),
+          ai: ai.length <= aiTail ? ai : '…${ai.substring(ai.length - aiTail)}',
+          user: user.length <= userMax ? user : '${user.substring(0, userMax)}…',
         ));
         lastAi = '';
       }
@@ -306,9 +308,10 @@ class ClaudeSessions {
         )
         .text;
     final title = (customTitle != null && customTitle.isNotEmpty)
-        ? customTitle
+        ? maskSecrets(customTitle)
+        // 첫 사용자 말은 가린 뒤 자른다: 제목은 세션 목록·앱·raw/sessions 노트 제목에 쓰인다 (보안 감사 11/14).
         : String.fromCharCodes(
-            firstUser.replaceAll(RegExp(r'\s+'), ' ').runes.take(50),
+            maskSecrets(firstUser).replaceAll(RegExp(r'\s+'), ' ').runes.take(50),
           );
     return (
       ClaudeSession(
@@ -337,6 +340,10 @@ class ClaudeSessions {
     final origin = record['origin'];
     if (origin is Map && origin['kind'] != null && origin['kind'] != 'human') return true;
     if (record['promptSource'] == 'system') return true;
+    // origin 없이 promptSource만 있는 줄은 사람이 친 말이 아니다: 다른 세션이 연 세션의 첫 작업 지시, 앱이 넣은 말
+    // ("I hit my usage limit … Please continue"). 압축 뒤 되살리기는 이미 뺐는데, 축약본·놓친 교정·실수 노트 근거 검사는
+    // 사람 말로 셌다 — 다른 세션이 보낸 글이 `--quote` 근거로 통했다 (보안 감사 11/14). origin·promptSource 둘 다 없는 옛 기록은 그대로.
+    if (origin == null && record['promptSource'] != null) return true;
     // origin이 없던 옛 기록
     final text = content is String
         ? content

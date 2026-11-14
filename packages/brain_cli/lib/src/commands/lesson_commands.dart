@@ -60,7 +60,7 @@ class _LessonFind extends Command<int> {
       return 0;
     }
     for (final lesson in found) {
-      stdout.writeln('${lesson.id}  ${lesson.line}');
+      stdout.writeln('${lesson.id}  ${clip(lesson.line, 400)}');
     }
     return 0;
   }
@@ -111,6 +111,7 @@ class _LessonAdd extends Command<int> {
             action: a['action'] as String,
             reason: a['reason'] as String,
             quote: a['quote'] as String?,
+            diff: a['diff'] as String,
           )
         : const <String>[];
     if (problems.isNotEmpty) status = LessonStatus.pending;
@@ -170,7 +171,7 @@ class _LessonList extends Command<int> {
     }
     for (final l in all) {
       stdout.writeln(
-        '${l.id}  [${l.status.label}]  ${l.line}  (지킴 ${l.kept} · 다시 교정 ${l.recorrected})',
+        '${l.id}  [${l.status.label}]  ${clip(l.line, 400)}  (지킴 ${l.kept} · 다시 교정 ${l.recorrected})',
       );
     }
     return 0;
@@ -225,6 +226,7 @@ class _LessonSet extends Command<int> {
           action: lesson.action,
           reason: lesson.reason,
           quote: argResults!['quote'] as String?,
+          diff: lesson.diff,
         );
         if (problems.isNotEmpty) {
           stdout.writeln('$id → ${lesson.status.label} (바꾸지 않음)');
@@ -289,8 +291,18 @@ class _LessonEdit extends Command<int> {
             action: edited.action,
             reason: edited.reason,
             quote: a['quote'] as String?,
+            diff: edited.diff,
           )
         : const <String>[];
+    // AI 대화에서 적용 중 규칙을 근거 없이 고치려 하면 아무것도 바꾸지 않는다. 예전에는 고친 문장을 저장한 채 승인 대기로 내려
+    // 사용자가 켠 규칙이 한 줄로 꺼졌다 — `brain lesson set` 보관 거절을 돌아가는 길이었다 (보안 감사 11/14).
+    if (problems.isNotEmpty && isAiSessionEnv(Platform.environment)) {
+      stderr.writeln(
+        '$id는 적용 중인 규칙이라 고치지 않았습니다 (${problems.join(' · ')}). 고친 문장이 맞다고 보면 사용자에게 그 까닭과 함께 알리고, '
+        '사용자가 앱 [배운 것]에서 고치거나, 사용자가 고쳐 달라고 한 말을 --quote로 줍니다.',
+      );
+      return 1;
+    }
     if (problems.isNotEmpty) edited = edited.copyWith(status: LessonStatus.pending);
     context.lessons.save(edited, action: 'lesson-edit');
     stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}${problems.isEmpty ? '' : ' (승인 대기로 바뀜)'}');
@@ -445,8 +457,24 @@ class UndoCommand extends Command<int> {
       }
       return 0;
     }
+    final batch = argResults!.rest.first;
+    // AI 대화는 그 대화가 만든 묶음만 되돌린다. 예전에는 사용자가 앱에서 한 규칙 승인·노트 확인 묶음도 되돌려, 적용 중 규칙을
+    // 끄는 길이 됐다 (보안 감사 11/14). 사람이 터미널·앱에서 하는 되돌리기는 그대로다.
+    final env = Platform.environment;
+    if (isAiSessionEnv(env)) {
+      final current = env['CLAUDE_CODE_SESSION_ID'] ?? '';
+      final events = [for (final e in readChangeHistory(context.vault, months: 12)) if (e.batch == batch) e];
+      final isMine = events.isNotEmpty && events.every((e) => e.isAi && (current.isEmpty || e.aiSession == current));
+      if (!isMine) {
+        stderr.writeln(
+          '$batch는 이 AI 대화가 만든 묶음이 아니라 되돌리지 않았습니다. 사용자의 작업(앱에서 한 승인·편집 포함)은 사용자가 '
+          '앱 [설정] 되돌리기나 터미널의 brain undo로 되돌립니다.',
+        );
+        return 1;
+      }
+    }
     try {
-      final count = undoBatch(context.vault, argResults!.rest.first, force: argResults!['force'] as bool);
+      final count = undoBatch(context.vault, batch, force: argResults!['force'] as bool);
       context.index.sync();
       VaultSummary(context.vault, context.index).writeAll();
       stdout.writeln(
@@ -469,6 +497,7 @@ List<String> activationProblems(
   required String action,
   required String reason,
   String? quote,
+  String? diff,
 }) {
   final problems = lessonSafetyProblems(trigger: trigger, action: action, reason: reason);
   final said = quote?.trim() ?? '';
@@ -482,6 +511,9 @@ List<String> activationProblems(
     problems.add('지금 세션 기록을 찾지 못해 사용자 말을 확인할 수 없음');
   } else if (!isQuoteFromUser(said, context.sessions.userTexts(session))) {
     problems.add('--quote가 이 세션의 사용자 말에 없음');
+  }
+  if (!isQuoteRelated(said, '$trigger\n$action\n$reason\n${diff ?? ''}')) {
+    problems.add('--quote가 규칙 문장과 겹치는 말이 없음 (그 규칙을 만든 사용자 말을 그대로 준다)');
   }
   return problems;
 }
