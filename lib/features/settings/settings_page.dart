@@ -184,6 +184,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
       (AppConfig.legacyLessons, '실수 노트 목록을 번호 순 앞 30개로 (4.5 최근순을 끔)'),
       (AppConfig.legacyDecisions, 'brain add가 저장 전에 비슷한 정리된 노트를 보이거나 멈추지 않는다 (4.4 저장 때 안내를 끔)'),
       (AppConfig.legacyFolders, '새 노트를 구역 없이 wiki/<주제>/<제목>.md에 둔다 (5.1 폴더 구조를 끔. 이미 옮긴 노트는 그대로)'),
+      (AppConfig.legacyToc, '만들기 요청에 노트 제목 목록(목차)을 붙이지 않고, 찾기가 빈손일 때 brain toc를 알리지 않는다 (5.11 목차 먼저 보여 주기를 끔)'),
     ];
     return ShadCard(
       title: const Text('이전 방식'),

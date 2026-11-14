@@ -80,7 +80,7 @@ class AppConfig {
   });
 
   /// 프롬프트 이후(v2)에 바뀐 동작을 항목별로 이전 방식(v1)으로 되돌리는 스위치 (설계서_프롬프트이후 7.3).
-  /// 값은 [legacyDrafts]·[legacyLessons]·[legacyFolders]·[legacyDecisions]. 기본은 비어 있음 = 모두 새 방식.
+  /// 값은 [legacyDrafts]·[legacyLessons]·[legacyFolders]·[legacyDecisions]·[legacyToc]. 기본은 비어 있음 = 모두 새 방식.
   final Set<String> legacy;
 
   /// 4.1 초안 분리: 이전 방식이면 확인 전 초안도 AI 찾기·자동 주입에 나온다.
@@ -94,6 +94,9 @@ class AppConfig {
 
   /// 4.4 저장 때 안내: 이전 방식이면 `brain add`가 비슷한 정리된 노트를 보이지도, 멈추지도 않는다.
   static const legacyDecisions = 'decisions';
+
+  /// 5.11 목차 먼저 보여 주기: 이전 방식이면 만들기 요청에 목차를 붙이지 않고, `brain find`가 빈손일 때 `brain toc`를 알리지 않는다.
+  static const legacyToc = 'toc';
 
   /// [item]을 이전 방식으로 쓰는가. 환경변수 `BRAIN_LEGACY`(쉼표 구분, 빈 값 = 모두 새 방식)가 있으면 설정보다 먼저 본다 —
   /// 측정에서 같은 실행 파일로 v1과 v2를 견주고, 시험이 사용자 설정을 타지 않게 한다.

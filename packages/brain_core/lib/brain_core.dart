@@ -49,3 +49,4 @@ export 'src/vault/project_context.dart';
 export 'src/vault/vault.dart';
 export 'src/vault/vault_access.dart';
 export 'src/vault/vault_summary.dart';
+export 'src/vault/vault_toc.dart';

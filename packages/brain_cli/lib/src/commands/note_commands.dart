@@ -60,7 +60,7 @@ class FindCommand extends Command<int> {
       hits = context.index.search(query, limit: limit, includeRaw: argResults!['raw'] as bool, includeDrafts: drafts);
     }
     if (hits.isEmpty) {
-      stdout.writeln('찾은 노트 없음: $query (검색어를 바꿔 보세요)${drafts ? '' : _draftHint(query)}');
+      stdout.writeln('찾은 노트 없음: $query (${_tocHint ? '검색어를 바꾸거나 brain toc로 제목 목록에서 고른다' : '검색어를 바꿔 보세요'})${drafts ? '' : _draftHint(query)}');
       return 0;
     }
     // E8 --here: 더 넓게 찾은 뒤 지금 폴더에서 나온 노트를 앞으로 (순서는 그 안에서 그대로)
@@ -92,7 +92,8 @@ class FindCommand extends Command<int> {
       ];
       if (strong.isEmpty) {
         stdout.writeln(
-          '확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. 다른 말로 다시 찾을 수 있음)'
+          '확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. '
+          '${_tocHint ? '다른 말로 다시 찾거나 brain toc로 제목 목록에서 고른다' : '다른 말로 다시 찾을 수 있음'})'
           '${drafts ? '' : _draftHint(query)}',
         );
         return 0;
@@ -140,6 +141,10 @@ class FindCommand extends Command<int> {
     }
     return 0;
   }
+
+  /// 빈손일 때 `brain toc`를 알릴까 (설계서_프롬프트이후 5.11). 검색은 글자가 같아야 찾힌다 — 찾을 말을 짐작하다 놓치는 자리에서
+  /// 제목 목록으로 보낸다. 만들기 요청이 아닌 질문과 AI가 스스로 찾을 때를 단어 규칙 없이 받친다. 이전 방식이면 옛 글 그대로.
+  bool get _tocHint => !AppConfig.load().usesLegacy(AppConfig.legacyToc);
 
   /// 확인된 노트가 없을 때만 붙이는 한 줄: 방금 저장한 초안을 AI가 "없다"고 단정하지 않게 (설계서_프롬프트이후 8.3).
   /// 초안 내용은 보이지 않는다 — 수만 알린다.

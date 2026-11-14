@@ -30,6 +30,7 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(AddCommand(context))
         ..addCommand(WriteCommand(context))
         ..addCommand(TopicsCommand(context))
+        ..addCommand(TocCommand(context))
         ..addCommand(ProjectCommand(context))
         ..addCommand(MoveCommand(context))
         ..addCommand(SessionsCommand(context))
