@@ -343,7 +343,8 @@ class ClaudeCode {
         '--verbose',
       ],
       workingDirectory: vault.root,
-      environment: _environment,
+      // 화면 없는 실행 표시: 요청 전 훅이 파이프 떼기 허락을 내지 않아 --allowedTools 밖 명령이 실행되지 않는다 (보안 감사 11/15)
+      environment: {..._environment, headlessEnvKey: '1'},
       includeParentEnvironment: false,
     );
     // 입력 파이프를 닫지 않으면 claude -p가 표준 입력을 기다리며 멈출 수 있다.

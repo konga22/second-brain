@@ -199,7 +199,12 @@ class HookCommand extends Command<int> {
   /// (`Bash(brain *)`) 밖이라 거부되거나 매번 허락을 묻는다. 안내 문장만으로는 안 지켜져서(한반도감 세션 3번)
   /// 읽기 명령에 붙은 `2>&1`·`| head`·`| tail`만 떼고 실행을 허락한다. 그 밖은 아무것도 내지 않는다(그대로 진행).
   /// 허락 조건은 [cleanBrainPipe]가 정한다 (v1.3.27에서 좁힘).
+  ///
+  /// 앱의 화면 없는 실행([isHeadlessEnv])에서는 아무것도 내지 않는다: 앱이 실행마다 좁혀 둔 허용 명령(`--allowedTools`)을 이 훅의
+  /// allow가 넘어섰다 — 놓친 교정 찾기(명령 4개만 허용)에서 `brain show n_0001`은 거부되는데 `| head -3`을 붙이면 실행됐다
+  /// (보안 감사 11/15 실제 AI 시험). 그 실행에서는 파이프 붙은 명령도 Claude Code의 허용 목록대로 판단된다. 사람 세션은 그대로다.
   void _preTool(Map<String, dynamic> input) {
+    if (isHeadlessEnv(Platform.environment)) return;
     if (input['tool_name'] != 'Bash') return;
     final toolInput = input['tool_input'];
     if (toolInput is! Map) return;

@@ -58,6 +58,7 @@ void main() {
     bool ai = false,
     String? cwd,
     Duration? timeout,
+    Map<String, String> env = const {},
   }) async {
     final process = await Process.start(exe, args, workingDirectory: cwd, environment: {
       'HOME': home,
@@ -67,6 +68,8 @@ void main() {
       'CLAUDE_CODE_SESSION_ID': ai ? _aiSession : '',
       'CLAUDECODE': ai ? '1' : '',
       'BRAIN_LEGACY': '',
+      'BRAIN_HEADLESS': '',
+      ...env,
     });
     if (stdin != null) process.stdin.write(stdin);
     await process.stdin.close();
@@ -612,6 +615,32 @@ void main() {
     test('[고침] 요청 전 훅이 `brain bench --queries <폴더 밖 파일> | head`를 자동 허락한다', () {
       expect(HookCommand.cleanBrainPipe('brain bench --queries /etc/hosts | head'), isNull);
       expect(HookCommand.cleanBrainPipe('brain bench --lessons /Users/x/list.yaml 2>/dev/null'), isNull);
+    });
+  });
+
+  group('앱의 화면 없는 실행', () {
+    Future<String> preTool(String command, {bool headless = false}) async {
+      final (_, out, _) = await brain(
+        ['hook', 'pre-tool'],
+        stdin: jsonEncode({'tool_name': 'Bash', 'tool_input': {'command': command}}),
+        ai: true,
+        env: {if (headless) 'BRAIN_HEADLESS': '1'},
+      );
+      return out;
+    }
+
+    // 11/15 고친 뒤 실제 AI 시험(Haiku, 놓친 교정 찾기와 같은 허용 명령 4개): `brain show n_0001`은 거부됐는데
+    // `brain show n_0001 | head -3`은 이 훅의 allow로 실행됐다 (보안감사 14.1).
+    test('[고침] 앱이 표시(BRAIN_HEADLESS=1)를 넘긴 실행에서는 요청 전 훅이 파이프 떼기 허락을 내지 않는다', () async {
+      for (final command in ['brain show n_0001 | head -3', 'brain find 웹훅 2>&1 | head', 'brain sessions show dddddddd | tail -5']) {
+        expect(await preTool(command, headless: true), isEmpty, reason: command);
+      }
+    });
+
+    test('[막힘] 사람이 쓰는 세션(표시 없음)은 그대로 파이프를 떼고 허락한다', () async {
+      final out = jsonDecode(await preTool('brain find 웹훅 | head -5')) as Map;
+      expect(out['hookSpecificOutput']['permissionDecision'], 'allow');
+      expect(out['hookSpecificOutput']['updatedInput']['command'], 'brain find 웹훅');
     });
   });
 
