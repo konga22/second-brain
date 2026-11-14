@@ -134,15 +134,22 @@ List<BatchDrift> driftSinceBatches(Vault vault, List<String> batches) {
     final after = _afterHashes(dir);
     for (final line in manifest.readAsLinesSync()) {
       if (line.trim().isEmpty) continue;
-      final entry = jsonDecode(line) as Map<String, dynamic>;
+      final entry = _jsonLine(line);
+      if (entry == null) continue;
       final rel = entry['path'] as String;
       final now = expected.containsKey(rel) ? expected[rel] : fileHash(p.join(vault.root, rel));
       final isUnknown = !after.containsKey(rel);
-      if ((isUnknown || after[rel] != now) && !out.any((d) => d.path == rel)) {
+      final backup = entry['backup'] as String?;
+      final existed = entry['existed'] == true && backup != null;
+      final before = existed ? fileHash(p.join(dir, backup)) : null;
+      // 이미 바꾸기 전 내용 그대로면 되돌려도 바뀌는 것이 없다. 새로 만든 파일이 없어진 것은 그렇게 보지 않는다 —
+      // 그 뒤 다른 묶음이 이름을 바꾸거나 옮겼을 수 있다(되돌리면 아무것도 안 하고 "되돌림"이 된다). 다만 "바꾼 뒤" 기록이
+      // 없는 줄(중간에 끊긴 묶음의 마지막 파일)은 아직 안 만들어졌을 수 있어 같이 본다.
+      final isUntouched = now == before && (existed || isUnknown);
+      if ((isUnknown || after[rel] != now) && !isUntouched && !out.any((d) => d.path == rel)) {
         out.add((path: rel, isUnknown: isUnknown));
       }
-      final backup = entry['backup'] as String?;
-      expected[rel] = entry['existed'] == true && backup != null ? fileHash(p.join(dir, backup)) : null;
+      expected[rel] = before;
     }
   }
   return out;
@@ -330,7 +337,8 @@ List<String> _laterBatchesOnMovedPaths(Vault vault, String batch, String dir) {
   final mine = <String, int?>{}; // 경로 → 이 묶음이 처음 바꾼 시각
   for (final line in File(p.join(dir, 'manifest.jsonl')).readAsLinesSync()) {
     if (line.trim().isEmpty) continue;
-    final entry = jsonDecode(line) as Map<String, dynamic>;
+    final entry = _jsonLine(line);
+    if (entry == null) continue;
     final path = entry['path'] as String;
     if (moved.contains(path)) mine[path] = entry['at'] as int?;
   }
@@ -364,6 +372,15 @@ List<String> _laterBatchesOnMovedPaths(Vault vault, String batch, String dir) {
     }
   }
   return out..sort();
+}
+
+/// 깨진 줄(전원이 꺼져 반쯤 쓰인 줄)은 건너뛴다.
+Map<String, dynamic>? _jsonLine(String line) {
+  try {
+    return jsonDecode(line) as Map<String, dynamic>;
+  } on FormatException {
+    return null;
+  }
 }
 
 /// 묶음 폴더 [dir]의 "경로 바뀜" 표시 중 아직 살아 있는 것 (옮긴 묶음을 되돌렸으면 풀림).
@@ -452,9 +469,27 @@ void _removeEmptyWikiDirs(Vault vault, Set<String> dirs) {
   }
 }
 
+/// 되돌리기를 거절했다: 묶음이 바꾼 파일이 그 뒤 다른 곳에서 바뀌었거나, "바꾼 뒤" 기록이 없어 확인할 수 없다.
+/// [ArgumentError]라 예전처럼 잡는 곳(`brain undo`, 설정 [되돌리기])은 그대로 메시지를 보인다. [force]로 다시 부를 수 있다.
+class UndoDriftError extends ArgumentError {
+  UndoDriftError(this.batch, this.drift, String message) : super(message);
+
+  final String batch;
+  final List<BatchDrift> drift;
+}
+
 /// 묶음 하나를 통째로 되돌린다. 원래 있던 파일은 되살리고, 새로 생긴 파일은
 /// 지우지 않고 `_meta/trash/<묶음>/`으로 옮긴다. 반환: 되돌린 파일 수.
-int undoBatch(Vault vault, String batch) {
+///
+/// 되돌리기 전에 묶음이 바꾼 파일이 모두 **그 묶음이 남긴 그대로**인지 본다 ([driftSinceBatches], 데이터 안전 감사 11/14).
+/// 예전에는 경로만 보고 덮거나 치워, 버린 초안 자리에 새로 저장한 노트가 사본 없이 사라지고(되살린 초안이 덮음),
+/// 제목을 바꾼 노트의 앞 고침을 되돌리면 같은 번호의 노트가 둘이 됐다. 하나라도 다르면 아무것도 바꾸지 않고
+/// [UndoDriftError]를 던진다. "바꾼 뒤" 기록이 없는 11/13 전 묶음과 중간에 끊긴 묶음도 확인할 수 없어 거절한다.
+/// [force]면 그래도 되돌리되, 덮거나 치울 지금 파일은 모두 휴지통(`_meta/trash/<묶음>/`)에 먼저 남긴다.
+/// 지식 폴더 잠금 안에서 한다 (그사이 저장이 끼어들지 않게).
+int undoBatch(Vault vault, String batch, {bool force = false}) => withVaultLock(vault, () => _undoBatch(vault, batch, force: force));
+
+int _undoBatch(Vault vault, String batch, {required bool force}) {
   final dir = _undoDir(vault, batch);
   final manifest = File(p.join(dir, 'manifest.jsonl'));
   if (!manifest.existsSync()) {
@@ -480,8 +515,22 @@ int undoBatch(Vault vault, String batch) {
   }
   final entries = [
     for (final line in manifest.readAsLinesSync())
-      if (line.trim().isNotEmpty) jsonDecode(line) as Map<String, dynamic>,
+      if (line.trim().isNotEmpty) ?_jsonLine(line),
   ].reversed;
+  final drift = driftSinceBatches(vault, [batch]);
+  if (drift.isNotEmpty && !force) {
+    final changed = [for (final d in drift) if (!d.isUnknown) d.path];
+    final unknown = [for (final d in drift) if (d.isUnknown) d.path];
+    throw UndoDriftError(
+      batch,
+      drift,
+      '$batch 묶음을 되돌리지 않았습니다 — 되돌리면 지금 파일이 사라질 수 있습니다. '
+      '${changed.isEmpty ? '' : '그 뒤 다른 작업이 바꾼 파일: ${changed.take(5).join(', ')}${changed.length > 5 ? ' 외 ${changed.length - 5}개' : ''}. '}'
+      '${unknown.isEmpty ? '' : '바꾼 뒤 상태 기록이 없어 확인할 수 없는 파일(11/13 전 묶음이거나 중간에 끊긴 묶음): ${unknown.take(5).join(', ')}${unknown.length > 5 ? ' 외 ${unknown.length - 5}개' : ''}. '}'
+      '더 최근 묶음을 먼저 되돌리거나, 그래도 되돌리려면 brain undo $batch --force (지금 파일은 _meta/trash/에 남깁니다).',
+    );
+  }
+  final drifted = {for (final d in drift) d.path};
   var count = 0;
   final emptied = <String>{}; // 새로 생겼던 파일을 치운 폴더
   final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -500,6 +549,13 @@ int undoBatch(Vault vault, String batch) {
     final target = p.join(vault.root, entry['path'] as String);
     if (entry['existed'] == true) {
       final backup = File(p.join(dir, entry['backup'] as String));
+      // 강제로 되돌릴 때 그 뒤 바뀐 지금 파일은 덮기 전에 휴지통에 남긴다 (무엇을 해도 내용이 사라지지 않게)
+      final current = File(target);
+      if (drifted.contains(entry['path']) && current.existsSync()) {
+        final keep = p.join(vault.metaDir, 'trash', trashName, entry['path'] as String);
+        Directory(p.dirname(keep)).createSync(recursive: true);
+        current.copySync(keep);
+      }
       // 바이트로 되살린다: 첨부 사진(assets/)도 묶음에 들어온다 (설계서_프롬프트이후 5.5)
       writeBytesAtomic(target, backup.readAsBytesSync());
     } else {

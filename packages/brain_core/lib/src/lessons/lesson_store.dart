@@ -143,7 +143,9 @@ class LessonStore {
     ];
   }
 
-  void save(Lesson lesson, {String action = 'lesson-update', String? batch}) {
+  /// 고치기는 지식 폴더 잠금 안에서 한다 (읽고 고쳐 쓰는 [setStatus]·[recordEvidence]도 읽기부터 잠금 안).
+  /// 예전에는 훅·검증 에이전트가 동시에 근거 횟수를 올리면 덜 세졌다 (데이터 안전 감사 11/14: 90번 → 85).
+  void save(Lesson lesson, {String action = 'lesson-update', String? batch}) => withVaultLock(vault, () {
     checkId(lesson.id);
     final path = p.join(vault.lessonsDir, '${lesson.id}.md');
     recordBeforeChange(vault, path, batch: batch);
@@ -155,9 +157,9 @@ class LessonStore {
       batch: batch,
     );
     index.sync();
-  }
+  });
 
-  void setStatus(String id, LessonStatus status, {String? batch}) {
+  void setStatus(String id, LessonStatus status, {String? batch}) => withVaultLock(vault, () {
     final lesson = read(id);
     if (lesson == null) throw NoteStoreException('$id 실수 노트가 없습니다.');
     save(
@@ -165,10 +167,10 @@ class LessonStore {
       action: 'lesson-status',
       batch: batch,
     );
-  }
+  });
 
   /// 규칙을 지켜 문제없었으면 kept, 다시 교정됐으면 recorrected를 하나 올린다.
-  void recordEvidence(String id, {required bool kept, String? batch}) {
+  void recordEvidence(String id, {required bool kept, String? batch}) => withVaultLock(vault, () {
     final lesson = read(id);
     if (lesson == null) throw NoteStoreException('$id 실수 노트가 없습니다.');
     save(
@@ -182,7 +184,7 @@ class LessonStore {
       action: 'lesson-evidence',
       batch: batch,
     );
-  }
+  });
 
   /// 세션 시작 안내에 넣을 적용 중 규칙: 최근에 만들었거나 다시 교정된 것부터 [maxSessionLessons]개
   /// (설계서_프롬프트이후 4.5, K-41: 번호 순이면 규칙 40개에서 최근 10개가 0/10 전달).
@@ -327,7 +329,7 @@ class LessonStore {
 
   /// 회귀 시험 하나를 지운다 (상한에서 자리를 만들 때). 그 시험을 가진 실수 노트의 목록에서도 뺀다.
   /// 지우기 전 사본을 남겨 `brain undo <묶음>`으로 되돌릴 수 있다.
-  void removeTest(String testId, {String? batch}) {
+  void removeTest(String testId, {String? batch}) => withVaultLock(vault, () {
     checkId(testId);
     if (!testId.startsWith('T-')) throw NoteStoreException('회귀 시험 id가 아닙니다: $testId (예: T-0001)');
     final batchId = batch ?? newBatchId();
@@ -347,7 +349,7 @@ class LessonStore {
     }
     appendChangeLog(vault, 'lesson-test-remove', '$testId ${owner.isEmpty ? '' : owner}'.trim(), batch: batchId);
     index.sync();
-  }
+  });
 
   List<LessonTest> allTests() => [
     for (final doc in index.docsOf('test')) ?_readTest(doc.path),
@@ -372,7 +374,7 @@ class LessonStore {
     ];
   }
 
-  void addCheckItem(String item, {String? batch}) {
+  void addCheckItem(String item, {String? batch}) => withVaultLock(vault, () {
     final items = checklist();
     if (items.length >= maxChecklist) {
       throw const NoteStoreException('검사 기준이 30항목입니다. 비슷한 항목을 합친 뒤 추가하세요.');
@@ -388,5 +390,5 @@ class LessonStore {
       ].join('\n'),
     );
     appendChangeLog(vault, 'verifier-add', item.trim(), batch: batch);
-  }
+  });
 }

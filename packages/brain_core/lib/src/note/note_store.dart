@@ -84,6 +84,9 @@ class NoteStore {
   /// 새 노트·옮기기 대상에 구역을 쓰는가 (false = 이전 방식 `wiki/<주제>/<제목>.md`).
   final bool isZoned;
 
+  /// 마지막 [add]가 노트는 저장했지만 색인·목차를 맞추지 못했으면 그 안내 (아니면 null).
+  String? indexWarning;
+
   File fileOf(IndexedDoc doc) => File(p.join(vault.root, doc.path));
 
   (IndexedDoc, Note, String)? read(String id) {
@@ -259,7 +262,15 @@ class NoteStore {
       for (final MapEntry(key: assetRel, value: isNew) in assets.entries) {
         appendChangeLog(vault, 'attach', '$id $assetRel ${isNew ? '새 파일' : '이미 있음'}', batch: batch);
       }
-      _afterChange();
+      indexWarning = null;
+      try {
+        _afterChange();
+      } on Object catch (e) {
+        // 노트 파일·변경 기록은 이미 썼다. 여기서 실패로 끝내면 부른 쪽(AI·사용자)이 다시 저장해 같은 노트가 둘이 됐다
+        // (데이터 안전 감사 11/14). 번호는 변경 기록이 지키므로 다시 쓰이지 않는다 — 저장으로 알리고 색인은 다음에 맞춘다.
+        indexWarning = '색인을 맞추지 못했습니다(${'$e'.split('\n').first}). 노트는 저장됐고 다음 명령 때 찾기에 나옵니다 — 다시 저장하지 않는다.';
+        return (id, rel);
+      }
       // 색인에 안 들어갔으면 "저장함"이라고 하지 않는다 (찾을 수 없는 노트, 같은 id 재사용을 막는다).
       if (index.byId(id) == null) {
         throw NoteStoreException(
@@ -681,7 +692,7 @@ class NoteStore {
   /// - 대상에 이 초안의 "합친 초안" 머리가 이미 있으면(예전 판에서 끊긴 경우) 또 붙이지 않고 초안 표시만 한다
   String mergeDraftInto(String draftId, String targetId, {String? batch}) => withVaultLock(vault, () {
     final batchId = batch ?? newBatchId();
-    final (_, draft, _) = _readForChange(draftId);
+    final (draftDoc, draft, _) = _readForChange(draftId);
     if (!draft.isDraft) throw NoteStoreException('$draftId 노트는 초안이 아니라 합치지 않습니다.');
     final (targetDoc, target, hash) = _readForChange(targetId);
     if (targetDoc.status != NoteStatus.active) {
@@ -695,12 +706,14 @@ class NoteStore {
     ).hasMatch(target.body);
     if (!isAppended) {
       final date = formatTime(DateTime.now()).substring(0, 10);
+      // 사진 링크는 노트 폴더 기준 상대 경로다: 폴더 깊이가 다른 노트에 붙이면 끊겼다 (데이터 안전 감사 11/14)
+      final draftBody = rebaseAssetLinks(vault, draft.body, fileOf(draftDoc).path, targetFile.path);
       update(
         targetId,
         expectHash: hash,
         title: target.title,
         summary: target.summary,
-        body: '${target.body.trimRight()}\n\n## 합친 초안: ${draft.title} ($date, $draftId)\n\n${draft.body.trim()}\n',
+        body: '${target.body.trimRight()}\n\n## 합친 초안: ${draft.title} ($date, $draftId)\n\n${draftBody.trim()}\n',
         tags: target.tags,
         aliases: target.aliases,
         batch: batchId,

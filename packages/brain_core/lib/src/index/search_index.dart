@@ -197,7 +197,18 @@ class SearchIndex {
     // 기다리기 설정을 먼저 한다: journal_mode를 바꾸는 순간에도 다른 프로세스가 WAL을 복구하고 있으면
     // 기다리지 않고 BUSY_RECOVERY(261)로 실패했다 (11/12 동시 brain add 8개 시험).
     db.execute('pragma busy_timeout = ${busyTimeout.inMilliseconds}');
-    db.execute('pragma journal_mode = wal');
+    // 색인 파일을 처음 만드는 순간 여러 프로세스가 함께 열면 WAL로 바꾸기가 기다림 없이 BUSY로 끝났다
+    // (데이터 안전 감사 11/14: 새 지식 폴더에서 첫 명령 4개 중 3개 실패). 기다리는 시간 안에서 다시 해 본다.
+    final deadline = DateTime.now().add(busyTimeout);
+    while (true) {
+      try {
+        db.execute('pragma journal_mode = wal');
+        break;
+      } on SqliteException catch (e) {
+        if ((e.resultCode != 5 && e.resultCode != 6) || DateTime.now().isAfter(deadline)) rethrow;
+        sleep(const Duration(milliseconds: 20));
+      }
+    }
     db.execute('''
       create table if not exists docs (
         rowid integer primary key,
@@ -391,6 +402,22 @@ class SearchIndex {
     if (isRebuildPending) return const SyncResult(added: 0, updated: 0, removed: 0);
     _checkVaultExists();
     final startedAt = DateTime.now().millisecondsSinceEpoch;
+    // [rebuild]가 연 트랜잭션 안에서 불리면 그 트랜잭션에 함께 들어간다.
+    final ownsTransaction = _db.autocommit;
+    // 쓰기 잠금을 먼저 잡고 나서 지금 색인 줄과 파일 목록을 읽는다. 잠금 전에 읽으면 그사이 다른 프로세스가 넣은 파일을
+    // 또 넣으려다 `UNIQUE constraint failed: docs.path`로 죽었다 — 노트를 저장한 `brain add`가 저장 뒤 여기서 죽으면
+    // "저장됐는데 실패"로 보여 다시 저장하게 됐다 (데이터 안전 감사 11/14). 읽다가 쓰기로 올리면 BUSY도 난다 (K-32).
+    if (ownsTransaction) _db.execute('begin immediate');
+    try {
+      return _syncLocked(startedAt, ownsTransaction);
+    } catch (_) {
+      _resuggest.clear();
+      if (ownsTransaction) _db.execute('rollback');
+      rethrow;
+    }
+  }
+
+  SyncResult _syncLocked(int startedAt, bool ownsTransaction) {
     final existing = {
       for (final row in _db.select(
         'select rowid, path, mtime, size, hash, kind, id, title from docs',
@@ -434,11 +461,7 @@ class SearchIndex {
     var updated = 0;
     var removed = 0;
     final changed = <(int, Note)>[];
-    // [rebuild]가 연 트랜잭션 안에서 불리면 그 트랜잭션에 함께 들어간다.
-    final ownsTransaction = _db.autocommit;
-    // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
-    if (ownsTransaction) _db.execute('begin immediate');
-    try {
+    {
       // 2) 옮기기만 한 파일(내용이 같고 번호·제목이 머리말에 있음)은 색인 줄의 경로만 바꾼다 (설계서_프롬프트이후 5.1).
       //    폴더 정리로 1만 개를 옮기면 지우고 다시 색인하는 데 약 20초 걸렸다. 줄 번호가 그대로라 연결·추천도 그대로다.
       //    옮기면서 내용도 바뀐 파일(머리말에 번호·제목을 적음, 사진 링크 다시 씀, update로 제목을 바꿔 파일 이름이 바뀜)은
@@ -569,10 +592,6 @@ class SearchIndex {
       if (ownsTransaction) _db.execute('commit');
       unreadable = skipped;
       return SyncResult(added: added, updated: updated, removed: removed);
-    } catch (_) {
-      _resuggest.clear();
-      if (ownsTransaction) _db.execute('rollback');
-      rethrow;
     }
   }
 

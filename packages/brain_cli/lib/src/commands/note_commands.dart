@@ -395,7 +395,8 @@ class AddCommand extends Command<int> {
         !(args['draft'] as bool) && isAiSession && !AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     final isDraft = args['draft'] as bool || isForcedDraft;
     try {
-      final (id, path) = context.notes.add(
+      final store = context.notes;
+      final (id, path) = store.add(
         title: args['title'] as String,
         summary: args['summary'] as String,
         body: body,
@@ -409,6 +410,7 @@ class AddCommand extends Command<int> {
         batch: sessionId == null ? null : 's_${sessionId.substring(0, 8)}',
         attachments: args['attach'] as List<String>,
       );
+      if (store.indexWarning case final warning?) stderr.writeln('$id: $warning');
       final attached = _attachedCount(id);
       if (sessionId != null) {
         context.registry.mark(sessionId, isPartial ? SessionStatus.partial : SessionStatus.saved, notes: [id]);
