@@ -31,6 +31,14 @@ String newBatchId() {
 
 /// Claude Code가 Bash 도구에 넣는 환경변수로 본 "AI 대화 안에서 부른 명령"인가.
 /// `brain add`의 초안 강제(4.1)와 변경 기록의 AI 표시(4.3)가 같은 기준을 쓴다.
+/// 앱이 화면 없이 `claude -p`를 돌릴 때 넘기는 표시 (보안 감사 11/15). Claude Code가 훅과 Bash 도구에 그대로 물려준다.
+/// 이 표시가 있으면 요청 전 훅이 파이프 떼기 허락(allow)을 내지 않는다: 앱은 실행마다 허용 명령을 좁혀 두는데
+/// (`--allowedTools`, 놓친 교정 찾기는 명령 4개), 훅의 allow가 그 목록을 넘어 `brain show … | head` 같은 읽기 명령을 실행시켰다.
+const headlessEnvKey = 'BRAIN_HEADLESS';
+
+/// 앱의 화면 없는 실행 안인가 ([headlessEnvKey]).
+bool isHeadlessEnv(Map<String, String> env) => env[headlessEnvKey] == '1';
+
 bool isAiSessionEnv(Map<String, String> env) =>
     env['CLAUDECODE'] == '1' || (env['CLAUDE_CODE_SESSION_ID'] ?? '').isNotEmpty;
 
