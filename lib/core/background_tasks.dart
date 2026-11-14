@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:math';
 
@@ -160,6 +161,9 @@ enum NoteChange {
 
   /// 추천 연결을 확정한다: 본문 끝에 `관련: [[linkTitle]]`.
   appendLink,
+
+  /// 초안을 정리된 노트([targetId])에 합친다 (설계서_프롬프트이후 4.2).
+  mergeInto,
 }
 
 Future<void> changeNoteInBackground(
@@ -169,6 +173,7 @@ Future<void> changeNoteInBackground(
   required String id,
   String? topic,
   String? linkTitle,
+  String? targetId,
   String? batch,
 }) => Isolate.run(() {
   final vault = Vault(vaultRoot);
@@ -176,6 +181,8 @@ Future<void> changeNoteInBackground(
   try {
     final store = NoteStore(vault, index);
     switch (change) {
+      case NoteChange.mergeInto:
+        store.mergeDraftInto(id, targetId!, batch: batch);
       case NoteChange.delete:
         store.delete(id, batch: batch);
       case NoteChange.confirm:
@@ -200,4 +207,186 @@ Future<void> changeNoteInBackground(
   } finally {
     index.close();
   }
+});
+
+/// 정리 대기 초안마다 비슷한 정리된 노트 최대 2개 (설계서_프롬프트이후 4.2). 초안마다 파일을 읽고 FTS 질의를 몇 번 해
+/// 초안이 많으면 화면 스레드에서 멈칫한다. 보드가 떠 있을 때만 계산한다.
+Future<Map<String, List<SimilarNote>>> draftSimilarInBackground(String vaultRoot, String indexPath) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+      try {
+        return NoteStore(vault, index).similarForDrafts();
+      } finally {
+        index.close();
+      }
+    });
+
+/// 정리 보드 "AI가 고친 노트" (설계서_프롬프트이후 4.3). 변경 기록 3달과 되돌리기 묶음을 읽는다.
+Future<List<AiEdit>> aiEditsInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, rebuildIfOld: false);
+  try {
+    return AiEditReview(vault, index).pending();
+  } finally {
+    index.close();
+  }
+});
+
+/// [바뀐 내용 보기]: AI가 처음 고치기 전 본문과 지금 본문의 줄 차이. 고치기 전 사본이 없으면 null.
+/// 읽기 전 색인 맞추기가 1만 개에서 약 80ms라 백그라운드에서 한다.
+Future<List<DiffLine>?> aiEditDiffInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    final (before, after) = AiEditReview(vault, index).beforeAfter(edit);
+    return before == null ? null : lineDiff(before, after);
+  } finally {
+    index.close();
+  }
+});
+
+/// [되돌리기]: 이 노트를 고친 AI 묶음을 최근 것부터 되돌린다. 반환: 되돌린 파일 수.
+/// [NoteStoreException](사람이 그 뒤에 또 고침)·[ArgumentError](묶음이 없음)는 그대로 다시 던져진다.
+Future<int> revertAiEditInBackground(String vaultRoot, String indexPath, AiEdit edit) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return AiEditReview(vault, index).revert(edit);
+  } finally {
+    index.close();
+  }
+});
+
+/// 주 1회 옛 결정 점검 (설계서_프롬프트이후 4.4 (나)). 최근 7일 노트마다 비슷한 노트를 찾아 노트 1만 개(최근 300개)에서
+/// 약 2초라 백그라운드에서 하고, 진행을 [onProgress](본 수, 전체 수)로 알린다.
+Future<List<DecisionPair>> decisionCheckInBackground(
+  String vaultRoot,
+  String indexPath, {
+  required void Function(int done, int total) onProgress,
+}) async {
+  final port = ReceivePort();
+  final subscription = port.listen((message) {
+    if (message case [final int done, final int total]) onProgress(done, total);
+  });
+  try {
+    return await _decisionCheck(vaultRoot, indexPath, port.sendPort);
+  } finally {
+    await subscription.cancel();
+    port.close();
+  }
+}
+
+/// 따로 둔 까닭: 위 함수의 [onProgress] 클로저까지 isolate로 보내려다 실패하지 않게 (실수 노트 L-0004).
+Future<List<DecisionPair>> _decisionCheck(String vaultRoot, String indexPath, SendPort progress) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return DecisionCheck(vault, index).run(onProgress: (done, total) => progress.send([done, total]));
+  } finally {
+    index.close();
+  }
+});
+
+/// [옛 노트 보관]: 옛 노트를 합쳐짐으로 바꾸고 새 노트를 가리키게 한다 (되돌리기 묶음 하나).
+Future<void> archiveOldDecisionInBackground(String vaultRoot, String indexPath, DecisionPair pair, String batch) =>
+    Isolate.run(() {
+      final vault = Vault(vaultRoot);
+      final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+      try {
+        DecisionCheck(vault, index).archiveOld(NoteStore(vault, index), pair, batch: batch);
+      } finally {
+        index.close();
+      }
+    });
+
+/// [폴더 정리] 첫 제안과 30개 넘는 주제 (설계서_프롬프트이후 5.1). 읽기만 한다.
+Future<({List<FolderProposal> proposals, Map<String, int> oversized, Map<String, List<String>> zoneTopics})>
+folderPlanInBackground(String vaultRoot, String indexPath) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    index.sync();
+    return (
+      proposals: proposeFolderMoves(index),
+      oversized: oversizedTopics(index),
+      zoneTopics: {for (final zone in noteZones) zone: index.zoneTopics(zone)},
+    );
+  } finally {
+    index.close();
+  }
+});
+
+/// [폴더 정리] 실행 한 덩어리. 화면이 진행을 보이도록 부르는 쪽이 200개씩 나눠 부르고, 같은 [batch]라
+/// 모두 한 되돌리기 묶음이다. 색인·자동 목차는 마지막 덩어리([syncAfter])에서만 맞춘다 (1만 개에서 덩어리마다 맞추면 느림).
+Future<MoveResult> moveNotesInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<FolderMove> moves, {
+  required String batch,
+  required bool syncAfter,
+}) => Isolate.run(() {
+  final vault = Vault(vaultRoot);
+  final index = SearchIndex.open(vault, path: indexPath, busyTimeout: userWriteWait);
+  try {
+    return NoteStore(vault, index).moveMany(moves, batch: batch, syncAfter: syncAfter);
+  } finally {
+    index.close();
+  }
+});
+
+/// 신경망 보기 층 배치 (설계서_프롬프트이후 5.3). 노트 출처(`sources:`)는 색인에 없어 노트 파일 머리말을 읽는다.
+/// 노트 1만 개에서 파일 열기만 약 0.3초라, 노트를 [_sourceReaders]덩어리로 나눠 isolate 여러 개에서 함께 읽고
+/// 배치는 isolate 하나에서 한다 (M8 첫 표시 1초 목표). 넘기는 것은 글자·참거짓 값뿐이다 (L-0004).
+///
+/// [timeout] 안에 끝나지 않으면 [TimeoutException]을 던진다: 파일 읽기가 멈춰도 화면이 "배치 중…"에 영영 남지 않고
+/// 오류 문구를 보인다 (11/13 검토 5). 보통 파일만 열어 멈출 일은 없지만(brain_core), 느린 외장 디스크 등에 대비한다.
+Future<NeuralLayout> neuralLayoutInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final paths = [for (final n in notes) n.path];
+  final size = max(500, (paths.length / _sourceReaders).ceil());
+  Future<NeuralLayout> run() async {
+    final parts = await Future.wait([
+      for (var start = 0; start < paths.length; start += size)
+        _readSourcesInBackground(vaultRoot, paths.sublist(start, min(start + size, paths.length))),
+    ]);
+    return _neuralLayoutInBackground(vaultRoot, indexPath, notes, links, [for (final part in parts) ...part]);
+  }
+
+  return run().timeout(
+    timeout,
+    onTimeout: () => throw TimeoutException('지식 폴더 파일 읽기가 ${timeout.inSeconds}초 안에 끝나지 않았습니다', timeout),
+  );
+}
+
+const _sourceReaders = 4;
+
+Future<List<List<String>>> _readSourcesInBackground(String vaultRoot, List<String> paths) =>
+    Isolate.run(() => readNoteSources(vaultRoot, paths));
+
+/// 원본 문서 id·제목은 색인에서 읽고, 색인을 못 열면(처음 색인 중 잠김 등) 원본 파일 머리말로 대신한다.
+Future<NeuralLayout> _neuralLayoutInBackground(
+  String vaultRoot,
+  String indexPath,
+  List<NeuralNoteRow> notes,
+  List<(String, String)> links,
+  List<List<String>> sources,
+) => Isolate.run(() {
+  var rawDocs = const <String, ({String id, String title})>{};
+  try {
+    final index = SearchIndex.open(Vault(vaultRoot), path: indexPath, rebuildIfOld: false);
+    try {
+      rawDocs = {for (final d in index.docsOf('raw')) d.path: (id: d.id, title: d.title)};
+    } finally {
+      index.close();
+    }
+  } on Object {
+    // 원본 파일에서 읽는다
+  }
+  return neuralLayoutFromVault(vaultRoot, notes, links, rawDocs: rawDocs, sources: sources);
 });

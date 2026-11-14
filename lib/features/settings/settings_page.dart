@@ -12,6 +12,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/app_config_provider.dart';
 import '../../core/brain_providers.dart';
 import '../connect/auto_tidy.dart';
+import '../persona/persona_card.dart';
 import '../../shared/safe_set_state.dart';
 
 /// 설정 (설계서 3절 `/settings`, 4.1, 5.7): 지식 폴더 위치·Finder 열기, 백업·복원, 온보딩 요약.
@@ -173,6 +174,49 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
     );
   }
 
+  /// 프롬프트 이후 바뀐 동작을 항목별로 이전 방식(v1)으로 되돌린다 (설계서_프롬프트이후 7.3).
+  /// 새 방식이 더 나쁘면 그 항목만 끄고 견준다. `brain` 명령·AI 질문은 바로, 세션 시작 목록은 새 세션부터. 항목은 만든 것만 보인다(5.1은 만들 때 더함).
+  Widget _legacyCard(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final config = ref.watch(appConfigProvider);
+    const items = [
+      (AppConfig.legacyDrafts, '확인 전 초안도 AI 찾기·자동 주입·AI 질문 근거에 쓴다 (4.1 초안 분리를 끔)'),
+      (AppConfig.legacyLessons, '실수 노트 목록을 번호 순 앞 30개로 (4.5 최근순을 끔)'),
+      (AppConfig.legacyDecisions, 'brain add가 저장 전에 비슷한 정리된 노트를 보이거나 멈추지 않는다 (4.4 저장 때 안내를 끔)'),
+      (AppConfig.legacyFolders, '새 노트를 구역 없이 wiki/<주제>/<제목>.md에 둔다 (5.1 폴더 구조를 끔. 이미 옮긴 노트는 그대로)'),
+      (AppConfig.legacyToc, '만들기 요청에 노트 제목 목록(목차)을 붙이지 않고, 찾기가 빈손일 때 brain toc를 알리지 않는다 (5.11 목차 먼저 보여 주기를 끔)'),
+    ];
+    return ShadCard(
+      title: const Text('이전 방식'),
+      description: const Text('11/13 교수님 프롬프트 뒤에 바뀐 동작을 하나씩 예전대로 돌립니다. 켜면 그 항목만 예전 방식입니다.'),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (item, label) in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    ShadSwitch(
+                      value: config.legacy.contains(item),
+                      onChanged: (on) => _save(
+                        config.copyWith(legacy: on ? {...config.legacy, item} : ({...config.legacy}..remove(item))),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(label)),
+                  ],
+                ),
+              ),
+            Text('찾기·AI 질문·새 노트 자리는 바로, 실수 노트 목록·저장 안내는 새 Claude Code 세션부터 적용됩니다.', style: theme.textTheme.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 자동으로 지식 넣기: 대화 중 자동 저장 + 자동 정리(안전망).
   Widget _autoCard(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -182,7 +226,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
     return ShadCard(
       title: const Text('자동으로 지식 넣기'),
       description: const Text(
-        '대화를 하다 결정·문제 해결·작업 규칙 같은 지식이 생기면 묻지 않고 정리 대기에 초안으로 넣습니다. 확인은 노트·정리 보드에서 합니다.',
+        '대화를 하다 결정·문제 해결 같은 지식이 생기면 묻지 않고 정리 대기에 초안으로 넣습니다. 어느 프로젝트에서나 지킬 선호·작업 규칙은 실수 노트 후보로 넘깁니다. 확인은 노트·정리 보드에서 합니다.',
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: 12),
@@ -311,7 +355,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
         const SizedBox(height: 16),
         ShadCard(
           title: const Text('백업·복원'),
-          description: const Text('지식 폴더를 폴더째 zip으로 내보냅니다. 색인은 다시 만들 수 있어 넣지 않습니다.'),
+          description: const Text('지식 폴더를 폴더째 zip으로 내보냅니다(첨부 사진 assets/ 포함). 색인은 다시 만들 수 있어 넣지 않습니다.'),
           child: Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Column(
@@ -341,7 +385,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
         const SizedBox(height: 16),
         ShadCard(
           title: const Text('Claude Code 온보딩 요약'),
-          description: const Text('새 세션을 시작할 때 주요 주제와 자주 받은 교정(150토큰 이하)을 넣습니다.'),
+          description: const Text('새 세션을 시작할 때 주요 주제와 [나에 대해]의 하는 일·답 방식 한 줄을 넣습니다.'),
           child: Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Row(
@@ -357,7 +401,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> with SafeSetState<S
           ),
         ),
         const SizedBox(height: 16),
+        // 4문항 답 고치기 (설계서_프롬프트이후 5.2). 폴더를 바꾸면 그 폴더의 me.md를 다시 읽는다.
+        PersonaCard(key: ValueKey(vault.mePath), title: '나에 대해 (4문항)'),
+        const SizedBox(height: 16),
         _autoCard(context),
+        const SizedBox(height: 16),
+        _legacyCard(context),
         if (_message != null)
           Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!, style: theme.textTheme.muted)),
       ],

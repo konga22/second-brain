@@ -65,6 +65,18 @@ class SessionRegistry {
     return result;
   }
 
+  /// 정리(화면 없는 brain-save)가 성공으로 끝났는데 세션에 표시가 없으면 "저장할 것 없음"으로 닫는다. 반환: 닫았으면 true.
+  ///
+  /// AI가 옛 노트만 `brain write`로 고치고 `--source-session`·`brain sessions mark`를 빠뜨리면 세션이 "저장 안 함"으로 남아
+  /// 자동 정리가 같은 세션을 또 돌려 예산을 썼다 (설계서_프롬프트이후 4.4, 11/13 검토). 스킬 문장만으로는 못 막아 앱이 닫는다.
+  /// "일부 저장"은 그대로 둔다: 다 읽지 않은 세션이라 다음 정리 때 이어 읽는다 (K-40).
+  bool closeIfOpen(String sessionId) {
+    final status = load()[sessionId] ?? SessionStatus.unsaved;
+    if (status != SessionStatus.unsaved) return false;
+    mark(sessionId, SessionStatus.skipped);
+    return true;
+  }
+
   /// SessionEnd 훅에서 부른다. 빨라야 해서 파일 끝에 한 줄만 붙인다.
   void mark(
     String sessionId,

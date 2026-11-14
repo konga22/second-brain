@@ -151,7 +151,9 @@ class AiGateway {
     String? topic,
   }) async {
     var context = ChatContext.build(vault, index, question, topic: topic);
-    if (context.needsExpansion && index.notes().isNotEmpty) {
+    // 초안만 있으면 다시 찾아도 근거가 없다 — 크레딧이 드는 검색어 만들기를 부르지 않는다 (설계서_프롬프트이후 4.1).
+    final drafts = AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
+    if (context.needsExpansion && index.notes().any((d) => drafts || !d.isDraft)) {
       final expanded = await _invoke('ai-chat', {
         'task': 'expand_query',
         'question': question,

@@ -55,7 +55,7 @@ class _CommandPaletteState extends ConsumerState<_CommandPalette> {
           (context, ref) {
             ref.read(selectedNoteProvider.notifier).select(doc.id);
           },
-          hint: '${doc.id} · ${doc.topic}',
+          hint: '${doc.id} · ${doc.topicPath}',
         ),
       _Command(
         q.isEmpty ? '새 노트' : '새 노트: "$q"',

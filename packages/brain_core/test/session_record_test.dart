@@ -70,4 +70,19 @@ void main() {
     expect(index.byId(second), isNull);
     expect(recentBatches(vault).where((b) => b.id.startsWith('s_feedbeef')), hasLength(2));
   });
+
+  // 11/13 검토 (설계서_프롬프트이후 4.4): 앱의 화면 없는 정리에서 AI가 옛 노트만 brain write로 고치면 세션 표시가
+  // 남지 않아, 자동 정리가 같은 세션을 다시 돌려 예산을 썼다. 정리가 끝났는데 표시가 없으면 앱이 닫는다.
+  test('정리가 끝났는데 표시가 없는 세션만 "저장할 것 없음"으로 닫는다 (저장함·일부 저장은 그대로)', () {
+    final registry = SessionRegistry(vault);
+    registry.mark('saved-1', SessionStatus.saved, notes: ['n_0001']);
+    registry.mark('partial-1', SessionStatus.partial);
+    expect(registry.closeIfOpen('none-1'), isTrue);
+    expect(registry.closeIfOpen('saved-1'), isFalse);
+    expect(registry.closeIfOpen('partial-1'), isFalse, reason: '일부 저장은 다음 정리 때 이어 읽어야 한다');
+    final statuses = registry.load();
+    expect(statuses['none-1'], SessionStatus.skipped);
+    expect(statuses['saved-1'], SessionStatus.saved);
+    expect(statuses['partial-1'], SessionStatus.partial);
+  });
 }

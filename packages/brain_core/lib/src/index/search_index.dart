@@ -9,7 +9,9 @@ import 'package:sqlite3/sqlite3.dart';
 import '../graph/layout_health.dart';
 import '../lessons/lesson.dart';
 import '../note/note.dart';
+import '../note/note_assets.dart';
 import '../note/wiki_links.dart';
+import '../note/zones.dart';
 import '../vault/vault.dart';
 import '../text/nfc.dart';
 import 'bigram.dart';
@@ -48,11 +50,22 @@ class IndexedDoc {
 
   bool get isMerged => status == NoteStatus.merged;
 
-  /// `wiki/결제/a.md` → `결제`. wiki 바로 아래 파일이면 `미분류`.
+  /// 구역 (설계서_프롬프트이후 5.1): `wiki/개발 지식/Flutter/a.md` → `개발 지식`. 구역 밖(예전 방식) 노트는 null.
+  String? get zone {
+    final parts = path.split('/');
+    return parts.length >= 4 && noteZones.contains(parts[1]) ? parts[1] : null;
+  }
+
+  /// 주제 이름: `wiki/개발 지식/Flutter/a.md` → `Flutter`, 예전 `wiki/결제/a.md` → `결제`. wiki 바로 아래 파일이면 `미분류`.
+  /// 구역이 달라도 이름이 같을 수 있으니 묶을 때는 [topicPath]를 쓴다.
   String get topic {
-    final parts = p.split(path);
+    final parts = path.split('/');
+    if (zone != null) return parts[2];
     return parts.length >= 3 ? parts[1] : '미분류';
   }
+
+  /// 주제 폴더의 wiki 기준 경로: `개발 지식/Flutter` 또는 예전 `결제`. 묶기·범위 찾기·옮기기 대상에 쓴다.
+  String get topicPath => zone == null ? topic : '$zone/$topic';
 
   /// `wiki/결제` 처럼 파일이 든 폴더.
   String get folder => p.dirname(path);
@@ -69,6 +82,15 @@ class IndexedDoc {
     mtime: DateTime.fromMillisecondsSinceEpoch(row['mtime'] as int),
     hash: row['hash'] as String,
   );
+}
+
+/// 비슷한 정리된 노트 한 개 ([SearchIndex.similarNotes]). [shared]는 핵심 단어 [terms]개 중 겹친 수.
+class SimilarNote {
+  const SimilarNote({required this.doc, required this.shared, required this.terms});
+
+  final IndexedDoc doc;
+  final int shared;
+  final int terms;
 }
 
 /// 노트 사이 연결 한 개 (설계서 4.2 `links`). manual = `[[제목]]`, suggested = 추천.
@@ -175,7 +197,18 @@ class SearchIndex {
     // 기다리기 설정을 먼저 한다: journal_mode를 바꾸는 순간에도 다른 프로세스가 WAL을 복구하고 있으면
     // 기다리지 않고 BUSY_RECOVERY(261)로 실패했다 (11/12 동시 brain add 8개 시험).
     db.execute('pragma busy_timeout = ${busyTimeout.inMilliseconds}');
-    db.execute('pragma journal_mode = wal');
+    // 색인 파일을 처음 만드는 순간 여러 프로세스가 함께 열면 WAL로 바꾸기가 기다림 없이 BUSY로 끝났다
+    // (데이터 안전 감사 11/14: 새 지식 폴더에서 첫 명령 4개 중 3개 실패). 기다리는 시간 안에서 다시 해 본다.
+    final deadline = DateTime.now().add(busyTimeout);
+    while (true) {
+      try {
+        db.execute('pragma journal_mode = wal');
+        break;
+      } on SqliteException catch (e) {
+        if ((e.resultCode != 5 && e.resultCode != 6) || DateTime.now().isAfter(deadline)) rethrow;
+        sleep(const Duration(milliseconds: 20));
+      }
+    }
     db.execute('''
       create table if not exists docs (
         rowid integer primary key,
@@ -188,7 +221,8 @@ class SearchIndex {
         status text not null default 'active',
         mtime integer not null,
         size integer not null,
-        hash text not null
+        hash text not null,
+        search_hash text
       );
       create virtual table if not exists docs_fts using fts5(
         title_grams, body_grams,
@@ -228,10 +262,21 @@ class SearchIndex {
     ''');
     // 스키마를 읽는 것까지 해 봐야 깨진 파일을 알 수 있다
     db.select('pragma user_version');
+    // 버전 6 색인에는 search_hash 칸이 없다. 칸만 더하고 채우기는 버전을 올려 다시 만들기가 한다.
+    if (!db.select('pragma table_info(docs)').any((row) => row['name'] == 'search_hash')) {
+      try {
+        db.execute('alter table docs add column search_hash text');
+      } on SqliteException catch (e) {
+        // 같이 연 다른 프로세스가 먼저 더했다
+        if (!e.message.contains('duplicate column')) rethrow;
+      }
+    }
   }
 
   /// 색인 표 구조가 바뀌면 올린다. 열 때 낮으면 처음부터 다시 색인한다.
-  static const schemaVersion = 6;
+  /// 7: `docs.search_hash`, 추천 연결 동점은 노트 번호 순 — 옮기기로 끊긴 추천 연결도 이때 다시 만들어진다
+  /// (설계서_프롬프트이후 5.1, 11/13 실제 옮기기에서 발견).
+  static const schemaVersion = 7;
 
   /// 추천 연결 기준: 핵심 단어 5개 중 이만큼 겹치는 노트만 잇는다 (3주차 bench로 조정).
   /// 점수 = 겹친 수 / 핵심 단어 수. 연결 이유를 사람이 읽을 수 있게 하려고 bm25 비율 대신 쓴다.
@@ -239,6 +284,16 @@ class SearchIndex {
 
   /// 노트당 추천 연결 최대 개수 (설계서 5.5).
   static const suggestLimit = 5;
+
+  /// 정리 대기 카드에 비슷한 노트를 보이는 문턱: 핵심 단어 5개 중 겹친 수 (설계서_프롬프트이후 4.2, 측정 M5).
+  /// 11/13 시험 묶음(similar_notes_test): 2는 중복 아닌 초안 20개 중 3개에 떴고, 3은 중복 10/10 표시·오표시 1/20,
+  /// 4는 중복 9/10·오표시 0/20. 놓치는 중복이 더 아까워 3.
+  static const similarShowMin = 3;
+
+  /// `brain add`가 저장을 한 번 멈추는 "강하게 맞음" 문턱 (설계서_프롬프트이후 4.4).
+  /// 같은 묶음에서 3은 바꾼 결정 9/10 멈춤·같은 주제 다른 지식 0/10, 4는 바꾼 결정 4/10뿐이었다 —
+  /// 결정을 바꾼 노트는 숫자·이름이 바뀌어 핵심 단어가 덜 겹친다.
+  static const similarStrongMin = 3;
 
   final Vault vault;
   final Database _db;
@@ -292,6 +347,8 @@ class SearchIndex {
     if (last == null || now - last > fullEvery.inMilliseconds) return sync();
     final dirs = {
       vault.wikiDir,
+      // 구역 폴더: 다른 프로세스가 구역 안에 새 주제 폴더를 만들면 바뀌는 것은 구역 폴더의 시각뿐이다 (설계서_프롬프트이후 5.1)
+      for (final zone in noteZones) p.join(vault.wikiDir, zone),
       p.join(vault.root, 'raw'),
       vault.lessonsDir,
       // 폴더 이름은 SQL에서 뽑는다 (경로 1만 개를 Dart로 옮겨 자르는 것보다 빠름): 마지막 '/'까지 남기기
@@ -345,9 +402,25 @@ class SearchIndex {
     if (isRebuildPending) return const SyncResult(added: 0, updated: 0, removed: 0);
     _checkVaultExists();
     final startedAt = DateTime.now().millisecondsSinceEpoch;
+    // [rebuild]가 연 트랜잭션 안에서 불리면 그 트랜잭션에 함께 들어간다.
+    final ownsTransaction = _db.autocommit;
+    // 쓰기 잠금을 먼저 잡고 나서 지금 색인 줄과 파일 목록을 읽는다. 잠금 전에 읽으면 그사이 다른 프로세스가 넣은 파일을
+    // 또 넣으려다 `UNIQUE constraint failed: docs.path`로 죽었다 — 노트를 저장한 `brain add`가 저장 뒤 여기서 죽으면
+    // "저장됐는데 실패"로 보여 다시 저장하게 됐다 (데이터 안전 감사 11/14). 읽다가 쓰기로 올리면 BUSY도 난다 (K-32).
+    if (ownsTransaction) _db.execute('begin immediate');
+    try {
+      return _syncLocked(startedAt, ownsTransaction);
+    } catch (_) {
+      _resuggest.clear();
+      if (ownsTransaction) _db.execute('rollback');
+      rethrow;
+    }
+  }
+
+  SyncResult _syncLocked(int startedAt, bool ownsTransaction) {
     final existing = {
       for (final row in _db.select(
-        'select rowid, path, mtime, size, hash from docs',
+        'select rowid, path, mtime, size, hash, kind, id, title from docs',
       ))
         row['path'] as String: row,
     };
@@ -388,20 +461,85 @@ class SearchIndex {
     var updated = 0;
     var removed = 0;
     final changed = <(int, Note)>[];
-    // [rebuild]가 연 트랜잭션 안에서 불리면 그 트랜잭션에 함께 들어간다.
-    final ownsTransaction = _db.autocommit;
-    // 쓰기 잠금을 먼저 잡는다: 읽다가 쓰기로 올리면 다른 프로세스와 겹칠 때 기다리지 않고 BUSY가 난다 (K-32)
-    if (ownsTransaction) _db.execute('begin immediate');
-    try {
-      // 2) 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
-      //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
+    {
+      // 2) 옮기기만 한 파일(내용이 같고 번호·제목이 머리말에 있음)은 색인 줄의 경로만 바꾼다 (설계서_프롬프트이후 5.1).
+      //    폴더 정리로 1만 개를 옮기면 지우고 다시 색인하는 데 약 20초 걸렸다. 줄 번호가 그대로라 연결·추천도 그대로다.
+      //    옮기면서 내용도 바뀐 파일(머리말에 번호·제목을 적음, 사진 링크 다시 씀, update로 제목을 바꿔 파일 이름이 바뀜)은
+      //    번호가 같은 옛 줄을 그 자리에서 다시 색인한다: 줄 번호가 바뀌면 다른 노트에서 오는 추천 연결이 사라졌다
+      //    (설계서_프롬프트이후 5.1, 11/13 실제 옮기기에서 발견: 92개를 옮기자 고아 노트 4 → 10, 다시 만들기로 4).
+      final gone = <String, List<Row>>{}; // 내용 해시 → 없어진 경로의 줄
+      final goneById = <String, Row>{}; // 종류·번호 → 없어진 경로의 줄
       for (final entry in existing.entries) {
         if (seen.contains(entry.key)) continue;
-        _deleteRow(entry.value['rowid'] as int);
-        removed++;
+        gone.putIfAbsent(entry.value['hash'] as String, () => []).add(entry.value);
+        goneById['${entry.value['kind']} ${entry.value['id']}'] = entry.value;
       }
-      // 3) 바뀐 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
+      final moved = <String>{};
+      final contents = <String, String>{}; // 한 번 읽은 새 파일 (3에서 다시 읽지 않게)
+      final reindexed = <(String, String, File, String, int)>[]; // 옮기며 내용도 바뀐 파일 → 이어받을 줄 번호
+      if (gone.isNotEmpty) {
+        final taken = <int>{};
+        for (final (rel, kind, file) in files) {
+          if (existing.containsKey(rel) || (kind != 'note' && kind != 'raw')) continue;
+          final String content;
+          try {
+            content = file.readAsStringSync();
+          } on FileSystemException {
+            continue; // 3에서 다시 읽고 건너뜀 목록에 넣는다
+          }
+          final hash = contentHash(content);
+          final candidates = gone[hash];
+          // 번호는 [_upsert]와 같은 방법으로 정한다: 머리말에 없으면 경로(노트)·내용(raw)에서
+          final note = Note.parse(
+            content,
+            fallbackId: kind == 'raw' ? 'r_$hash' : 'f_${contentHash(rel)}',
+            fallbackTitle: p.basenameWithoutExtension(rel),
+          );
+          final row = candidates
+              ?.where((r) => !taken.contains(r['rowid']) && r['kind'] == kind && r['id'] == note.id && r['title'] == note.title)
+              .firstOrNull;
+          if (row == null) {
+            contents[rel] = content;
+            final same = goneById['$kind ${note.id}'];
+            if (same != null && taken.add(same['rowid'] as int)) {
+              reindexed.add((rel, kind, file, content, same['rowid'] as int));
+              moved.add(rel);
+            }
+            continue;
+          }
+          taken.add(row['rowid'] as int);
+          final stat = file.statSync();
+          _db.execute('update docs set path = ?, mtime = ?, size = ? where rowid = ?', [
+            rel,
+            stat.modified.millisecondsSinceEpoch,
+            stat.size,
+            row['rowid'],
+          ]);
+          moved.add(rel);
+          updated++;
+        }
+        for (final rows in gone.values) {
+          rows.removeWhere((r) => taken.contains(r['rowid']));
+        }
+      }
+      // 3) 남은 없어진 파일을 먼저 지운다. 이름이 바뀐 파일(옛 경로 삭제 + 새 경로 추가)이
+      //    잠깐이라도 같은 id를 둘 갖지 않게 하려는 순서다.
+      for (final rows in gone.values) {
+        for (final row in rows) {
+          _deleteRow(row['rowid'] as int);
+          removed++;
+        }
+      }
+      // 옮기며 내용도 바뀐 파일: 옛 줄 번호 그대로 다시 색인한다 (경로 갱신은 이 안에서)
+      for (final (rel, kind, file, content, rowid) in reindexed) {
+        final stat = file.statSync();
+        final redo = _upsert(rel, kind, content, contentHash(content), stat.modified.millisecondsSinceEpoch, stat.size, rowid);
+        if (redo != null) changed.add(redo);
+        updated++;
+      }
+      // 4) 바뀐 파일만 다시 색인한다 (수정 시각·크기 → 다르면 해시).
       for (final (rel, kind, file) in files) {
+        if (moved.contains(rel)) continue;
         final stat = file.statSync();
         final mtime = stat.modified.millisecondsSinceEpoch;
         final old = existing[rel];
@@ -410,7 +548,7 @@ class SearchIndex {
         }
         final String content;
         try {
-          content = file.readAsStringSync();
+          content = contents[rel] ?? file.readAsStringSync();
         } on FileSystemException catch (e) {
           // 읽지 못한 파일은 건너뛰고(이전 색인 줄은 그대로) 목록으로 알린다.
           skipped.add((rel, e.osError?.message ?? e.message));
@@ -425,25 +563,24 @@ class SearchIndex {
           ]);
           continue;
         }
-        changed.add(
-          _upsert(
-            rel,
-            kind,
-            content,
-            hash,
-            mtime,
-            stat.size,
-            old?['rowid'] as int?,
-          ),
-        );
+        final redo = _upsert(rel, kind, content, hash, mtime, stat.size, old?['rowid'] as int?);
+        if (redo != null) changed.add(redo);
         old == null ? added++ : updated++;
       }
+      // 5) 추천 연결을 다시 고른다: 바뀐 노트, 그리고 지운·바뀐 노트를 추천하던 노트.
+      //    가리키던 노트를 지우면 그 노트는 다음 후보를 골라야 다시 만들기와 같다 (설계서_프롬프트이후 5.1, 11/13 실제 옮기기에서 발견).
+      final again = <int>{..._resuggest}..removeAll([for (final (rowid, _) in changed) rowid]);
+      _resuggest.clear();
       // 노트가 많이 바뀌면(처음 색인·대량 가져오기) 조각별 문서 수를 한 번에 읽어 둔다.
       // 노트마다 조각 수백 개를 하나씩 물으면 1만 개에 200초가 넘게 걸렸다 (11/07 측정).
-      if (changed.length >= 50) _loadVocab();
+      if (changed.length + again.length >= 50) _loadVocab();
       try {
         for (final (rowid, note) in changed) {
           _suggestFor(rowid, note);
+        }
+        for (final rowid in again) {
+          final note = _readNoteAt(rowid);
+          if (note != null) _suggestFor(rowid, note);
         }
       } finally {
         _vocab = null;
@@ -455,9 +592,22 @@ class SearchIndex {
       if (ownsTransaction) _db.execute('commit');
       unreadable = skipped;
       return SyncResult(added: added, updated: updated, removed: removed);
-    } catch (_) {
-      if (ownsTransaction) _db.execute('rollback');
-      rethrow;
+    }
+  }
+
+  /// [sync] 동안 추천 연결을 다시 골라야 하는 노트 줄 번호: 추천하던 노트가 지워졌거나 내용이 바뀌었다.
+  final _resuggest = <int>{};
+
+  /// 추천을 다시 고를 노트를 파일에서 읽는다. 노트가 아니거나 읽지 못하면 null (그 노트의 추천은 그대로 둔다).
+  Note? _readNoteAt(int rowid) {
+    final rows = _stmt("select path from docs where rowid = ? and kind = 'note'").select([rowid]);
+    if (rows.isEmpty) return null;
+    final rel = rows.first['path'] as String;
+    try {
+      final content = File(p.join(vault.root, rel)).readAsStringSync();
+      return Note.parse(content, fallbackId: '', fallbackTitle: p.basenameWithoutExtension(rel));
+    } on FileSystemException {
+      return null;
     }
   }
 
@@ -511,17 +661,29 @@ class SearchIndex {
   }
 
   void _deleteRow(int rowid) {
-    _db.execute('delete from docs_fts where rowid = ?', [rowid]);
+    _clearRow(rowid);
     _db.execute('delete from docs where rowid = ?', [rowid]);
-    _db.execute('delete from doc_names where doc_rowid = ?', [rowid]);
-    _db.execute('delete from link_targets where from_rowid = ?', [rowid]);
-    _db.execute(
-      'delete from suggested_links where from_rowid = ? or to_rowid = ?',
-      [rowid, rowid],
-    );
+    _stmt('delete from suggested_links where to_rowid = ?').execute([rowid]);
   }
 
-  (int, Note) _upsert(
+  /// 줄 번호는 남기고 내용 색인을 지운다. 이 노트를 추천하던 노트는 [sync] 끝에 다시 고른다 ([_resuggest]).
+  /// [keepSearch]면 찾기 색인(FTS)과 추천 연결은 둔다: 찾기·추천에 쓰는 글이 그대로인 노트 ([_upsert]).
+  void _clearRow(int rowid, {bool keepSearch = false}) {
+    if (!keepSearch) {
+      for (final row in _stmt('select from_rowid from suggested_links where to_rowid = ?').select([rowid])) {
+        _resuggest.add(row['from_rowid'] as int);
+      }
+      _stmt('delete from docs_fts where rowid = ?').execute([rowid]);
+      _stmt('delete from suggested_links where from_rowid = ?').execute([rowid]);
+    }
+    _stmt('delete from doc_names where doc_rowid = ?').execute([rowid]);
+    _stmt('delete from link_targets where from_rowid = ?').execute([rowid]);
+  }
+
+  /// 노트 한 개를 색인한다. [rowid]가 있으면 그 줄 번호를 이어 쓴다.
+  /// 반환: 추천 연결을 다시 골라야 하면 (줄 번호, 노트). 찾기·추천에 쓰는 글(제목·별칭·태그·요약·본문)이 그대로면 null —
+  /// 머리말에 번호·제목만 적고 옮긴 노트, 상태·날짜만 바뀐 노트는 찾기 색인과 추천을 그대로 둔다.
+  (int, Note)? _upsert(
     String rel,
     String kind,
     String content,
@@ -543,16 +705,32 @@ class SearchIndex {
     final statusText = kind == 'lesson'
         ? Lesson.parse(content, fallbackId: fallbackId).status.value
         : note.status.value;
-    if (rowid != null) _deleteRow(rowid);
-    // 같은 id가 다른 파일에 이미 있으면(복사한 파일) 경로 기반 id로 바꾼다.
-    var id = note.id;
-    if (_db.select('select 1 from docs where id = ?', [id]).isNotEmpty) {
-      id = 'f_${contentHash(rel)}';
+    // 찾기·추천이 읽는 글: 찾기 색인 글과 핵심 단어([keyTerms]: 제목·요약·본문 그대로)를 모두 정하는 칸.
+    // 본문 앞뒤 빈 줄은 뺀다: 머리말을 새로 적으면 본문 앞에 빈 줄이 하나 생기는데, 조각은 줄바꿈에서 끊겨 결과가 같다.
+    final searchHash = _searchHash([note.title, ...note.aliases, '\u0001', ...note.tags, '\u0001', note.summary, note.body.trim()]);
+    var sameSearch = false;
+    // 줄 번호를 이어 쓴다: 바꾸면 다른 노트에서 이 노트로 오는 추천 연결이 끊겼다 (설계서_프롬프트이후 5.1, 11/13 실제 옮기기에서 발견)
+    if (rowid != null) {
+      final old = _stmt('select search_hash from docs where rowid = ?').select([rowid]);
+      sameSearch = old.isNotEmpty && old.first['search_hash'] == searchHash;
+      _clearRow(rowid, keepSearch: sameSearch);
     }
-    _stmt(
-      'insert into docs(id, path, kind, title, summary, tags, status, mtime, size, hash) '
-      'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).execute([
+    // 같은 id가 다른 파일에 이미 있으면(복사한 파일) 경로 기반 id로 바꾼다.
+    // 그 파일이 이미 없으면 복사가 아니라 옮긴 것이다: 폴더 목록을 읽는 사이 다른 프로세스가 옮기면(폴더 정리 1만 개,
+    // 설계서_프롬프트이후 5.1) 옛 경로와 새 경로가 함께 목록에 잡힌다. 그때 새 경로가 f_ 번호를 받으면 다음 동기화에서도
+    // 그대로 남아 노트 번호가 바뀌었다 → 옛 줄을 지우고 번호를 이어받는다.
+    // 머리말의 번호는 사람·AI가 쓴 글이라 모양을 본다: 여러 줄 글을 번호 칸에 넣으면 훅 목차·찾기 줄에 가짜 안내 줄이
+    // 그대로 섰다 (보안 감사 11/14). 모양이 아니면 경로·내용 기반 번호로 본다 (실제 지식 폴더 11/15: 해당 0개).
+    var id = _idShape.hasMatch(note.id) ? note.id : fallbackId;
+    final holders = _db.select('select rowid, path from docs where id = ? and rowid != ?', [id, rowid ?? -1]);
+    for (final holder in holders) {
+      if (File(p.join(vault.root, holder['path'] as String)).existsSync()) {
+        id = 'f_${contentHash(rel)}';
+        break;
+      }
+      _deleteRow(holder['rowid'] as int);
+    }
+    final values = [
       id,
       rel,
       kind,
@@ -563,16 +741,33 @@ class SearchIndex {
       mtime,
       size,
       hash,
-    ]);
-    final newRowid = _db.lastInsertRowId;
-    final titleText = [note.title, ...note.aliases, ...note.tags].join(' ');
-    _stmt(
-      'insert into docs_fts(rowid, title_grams, body_grams) values (?, ?, ?)',
-    ).execute([
-      newRowid,
-      toBigrams(titleText),
-      toBigrams('${note.summary}\n${note.body}'),
-    ]);
+      searchHash,
+    ];
+    final int newRowid;
+    if (rowid != null) {
+      _stmt(
+        'update docs set id = ?, path = ?, kind = ?, title = ?, summary = ?, tags = ?, status = ?, mtime = ?, size = ?, hash = ?, '
+        'search_hash = ? where rowid = ?',
+      ).execute([...values, rowid]);
+      newRowid = rowid;
+    } else {
+      _stmt(
+        'insert into docs(id, path, kind, title, summary, tags, status, mtime, size, hash, search_hash) '
+        'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).execute(values);
+      newRowid = _db.lastInsertRowId;
+    }
+    if (!sameSearch) {
+      final titleText = [note.title, ...note.aliases, ...note.tags].join(' ');
+      _stmt(
+        'insert into docs_fts(rowid, title_grams, body_grams) values (?, ?, ?)',
+      ).execute([
+        newRowid,
+        toBigrams(titleText),
+        // 사진 링크는 설명 글만 색인한다: 경로의 assets·png로 노트가 찾히지 않게 (설계서_프롬프트이후 5.5)
+        toBigrams('${note.summary}\n${note.body.replaceAllMapped(assetImageLink, (m) => m.group(1)!)}'),
+      ]);
+    }
     if (kind == 'note') {
       for (final name in {linkKey(note.title), ...note.aliases.map(linkKey)}) {
         if (name.isEmpty) continue;
@@ -585,7 +780,23 @@ class SearchIndex {
         ).execute([newRowid, linkKey(target), target]);
       }
     }
-    return (newRowid, note);
+    return sameSearch ? null : (newRowid, note);
+  }
+
+  /// 문서 번호로 받는 모양: `n_0001`·`f_…`·`r_…`·`L-0001`·`T-0001`처럼 글자·숫자로 시작하는 짧은 한 낱말.
+  static final _idShape = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$');
+
+  /// 글 여러 개의 FNV-1a 64비트 값 (16진수). 처음 색인에서 sha1([contentHash])은 1만 개에 약 0.5초 더 걸렸다.
+  /// 같은 값이면 찾기 색인을 다시 만들지 않을 뿐이라, 드물게 겹쳐도 추천 연결이 한 번 덜 갱신될 뿐 노트는 다치지 않는다.
+  static String _searchHash(List<String> parts) {
+    var h = 0xcbf29ce484222325;
+    for (final part in parts) {
+      for (final unit in part.codeUnits) {
+        h = (h ^ unit) * 0x100000001b3; // 네이티브 Dart의 int는 64비트로 넘친다 (앱·CLI 모두 네이티브)
+      }
+      h = (h ^ 0) * 0x100000001b3; // 칸 구분
+    }
+    return h.toUnsigned(64).toRadixString(16);
   }
 
   /// 실수 노트는 trigger → action을 제목으로, reason을 요약으로 색인한다.
@@ -633,11 +844,72 @@ class SearchIndex {
     final candidates =
         shared.entries.where((e) => e.value >= suggestMinShared).toList()
           ..sort((a, b) => b.value.compareTo(a.value));
+    // 겹친 수가 같아 [suggestLimit]개 경계에 걸린 후보는 노트 번호 순으로 고른다: 줄 번호 순(파일 목록 순서)이면 옮긴 뒤와
+    // 다시 만든 뒤 고르는 노트가 달랐다 (설계서_프롬프트이후 5.1, 11/13 실제 옮기기에서 발견).
+    // 번호는 경계의 후보만 읽는다: 모든 후보의 번호를 읽으면 처음 색인(1만 개)이 20초 → 27초로 느려졌다.
+    if (candidates.length > suggestLimit && candidates[suggestLimit].value == candidates[suggestLimit - 1].value) {
+      final edge = candidates[suggestLimit].value;
+      final tied = candidates.where((e) => e.value == edge).toList();
+      final ids = {
+        for (final row in _stmt(
+          'select rowid, id from docs where rowid in (select value from json_each(?))',
+        ).select([jsonEncode([for (final e in tied) e.key])]))
+          row['rowid'] as int: row['id'] as String,
+      };
+      tied.sort((a, b) => ids[a.key]!.compareTo(ids[b.key]!));
+      final above = candidates.where((e) => e.value > edge).length; // 내림차순이라 앞쪽
+      candidates
+        ..removeWhere((e) => e.value == edge)
+        ..insertAll(above, tied);
+    }
     for (final entry in candidates.take(suggestLimit)) {
       _stmt(
         'insert or replace into suggested_links(from_rowid, to_rowid, score) values (?, ?, ?)',
       ).execute([rowid, entry.key, entry.value / terms.length]);
     }
+  }
+
+  /// [note]와 비슷한 **정리된** 노트 (설계서_프롬프트이후 4.2·4.4). 점수는 추천 연결과 같다:
+  /// [note]의 핵심 단어 5개 중 상대 노트에 나오는 수. AI 호출이 없다.
+  ///
+  /// 초안·합쳐짐은 뺀다: 정리 대기 카드에 "이미 있는 지식"으로, `brain add`에 "고칠 옛 노트"로 보여 주는 것이라
+  /// 확인 전 초안을 근거로 쓰면 안 된다(4.1). [topic](주제 경로 [IndexedDoc.topicPath])을 주면 그 주제 폴더 안에서만 찾는다.
+  /// 저장 전 노트([note]가 색인에 없음)에도 쓴다: 핵심 단어 수만큼 FTS 질의라 1만 개에서도 빠르다.
+  List<SimilarNote> similarNotes(
+    Note note, {
+    String? excludeId,
+    String? topic,
+    int minShared = similarShowMin,
+    int limit = 3,
+  }) {
+    final terms = keyTerms(note);
+    if (terms.isEmpty) return const [];
+    final shared = <int, int>{};
+    for (final term in terms) {
+      for (final row in _stmt(
+        'select f.rowid as rowid from docs_fts f join docs d on d.rowid = f.rowid '
+        "where docs_fts match ? and d.kind = 'note' and d.status = 'active' limit 500",
+      ).select(['"$term"'])) {
+        final rowid = row['rowid'] as int;
+        shared.update(rowid, (n) => n + 1, ifAbsent: () => 1);
+      }
+    }
+    final out = <SimilarNote>[];
+    for (final MapEntry(key: rowid, value: count) in shared.entries) {
+      if (count < minShared) continue;
+      final rows = _stmt('select * from docs where rowid = ?').select([rowid]);
+      if (rows.isEmpty) continue;
+      final doc = IndexedDoc.fromRow(rows.first);
+      if (doc.id == excludeId || doc.id == note.id) continue;
+      if (topic != null && doc.topicPath != topic) continue; // 주제 경로(구역/주제)로 본다: 구역이 다르면 다른 주제
+      out.add(SimilarNote(doc: doc, shared: count, terms: terms.length));
+    }
+    // 점수가 같으면 최근에 고친 노트가 먼저 (지금 쓰는 결정일 가능성이 크다)
+    out.sort((a, b) {
+      final byShared = b.shared.compareTo(a.shared);
+      return byShared != 0 ? byShared : b.doc.mtime.compareTo(a.doc.mtime);
+    });
+    return out.take(limit).toList();
   }
 
   /// 노트의 핵심 조각 상위 [limit]개 (tf × log(N/df)).
@@ -747,7 +1019,8 @@ class SearchIndex {
     for (final row in _db.select(
       'select f.id as from_id, t.id as to_id, s.score as score from suggested_links s '
       'join docs f on f.rowid = s.from_rowid join docs t on t.rowid = s.to_rowid '
-      'order by s.score desc',
+      // 점수가 같으면 번호 순: 양쪽이 서로 추천할 때 어느 쪽을 남길지가 줄 번호에 따라 달라지지 않게 (설계서_프롬프트이후 5.1)
+      'order by s.score desc, f.id, t.id',
     )) {
       final from = row['from_id'] as String;
       final to = row['to_id'] as String;
@@ -877,26 +1150,49 @@ class SearchIndex {
   ///
   /// 모든 검색어가 맞는 결과가 [limit]개보다 적으면, 검색어 중 하나라도 맞는 결과로
   /// 뒤를 채운다 (자연어 질문은 노트에 없는 말이 섞이기 때문).
+  ///
+  /// [includeDrafts]가 false면 확인 전 초안과 합쳐진 노트를 뺀다 — AI에게 주는 찾기·자동 주입용
+  /// (설계서_프롬프트이후 4.1, 합쳐짐은 4.2·4.4).
+  /// 사람이 보는 앱 검색은 초안도 보여야 해서 기본은 true다.
   List<IndexedDoc> search(
     String query, {
     int limit = 5,
     bool includeRaw = false,
     Set<String>? kinds,
     String? topic,
+    bool includeDrafts = true,
   }) {
     final strict = toBigramQuery(query);
-    if (strict == null) return const [];
+    if (strict == null && noteIdsInQuery(query).isEmpty) return const [];
     final wanted = kinds ?? {'note', if (includeRaw) 'raw'};
-    // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다.
-    final prefix = topic == null ? null : 'wiki/$topic/';
+    // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다 — `구역/주제`, 구역 하나 통째(`개발 지식`),
+    // 예전 주제 이름 모두 접두다. 구역 없이 주제 이름만 주면(`Flutter`, 옛 스킬) 구역 안 그 이름의 주제도 본다 (설계서_프롬프트이후 5.1).
+    final scope = topic == null ? null : toNfc(topic.trim());
+    final prefix = scope == null ? null : 'wiki/$scope/';
+    final byName = scope != null && !scope.contains('/') && !isZone(scope);
+    bool inScope(IndexedDoc d) =>
+        d.path.startsWith(prefix!) || (byName && d.zone != null && d.topic.toLowerCase() == scope.toLowerCase());
     List<IndexedDoc> match(String q, int n) {
-      final found = _match(q, prefix == null ? n : n * 20, wanted);
-      return prefix == null
-          ? found
-          : found.where((d) => d.path.startsWith(prefix)).take(n).toList();
+      final found = _match(q, prefix == null ? n : n * 20, wanted, includeDrafts: includeDrafts);
+      return prefix == null ? found : found.where(inScope).take(n).toList();
     }
 
-    final results = match(strict, limit);
+    // 노트 번호로 찾기: `n_0081`·`n0081`·`N_81`, 또는 숫자만(`0081`·`81`)이면 그 노트를 맨 앞에 둔다.
+    // 번호는 본문 글이 아니라서 2글자 조각 찾기로는 걸리지 않는다 (11/14 사용자 요청).
+    final results = <IndexedDoc>[];
+    for (final id in noteIdsInQuery(query)) {
+      if (results.length >= limit) break;
+      final doc = byId(id);
+      if (doc == null || !wanted.contains(doc.kind)) continue;
+      if (!includeDrafts && (doc.isDraft || doc.isMerged)) continue;
+      if (prefix != null && !inScope(doc)) continue;
+      if (results.every((d) => d.id != doc.id)) results.add(doc);
+    }
+    final ids = {for (final d in results) d.id};
+    for (final doc in strict == null ? const <IndexedDoc>[] : match(strict, limit)) {
+      if (results.length >= limit) break;
+      if (ids.add(doc.id)) results.add(doc);
+    }
     if (results.length < limit) {
       final relaxed = toRelaxedQuery(query);
       if (relaxed != null) {
@@ -910,9 +1206,27 @@ class SearchIndex {
     return results;
   }
 
-  /// 주제 폴더 목록 (빈 폴더 포함, 자동 생성 목차·숨김 폴더 제외).
+  /// 주제 폴더 목록 (빈 폴더 포함, 숨김 폴더 제외). 구역 안 주제는 `구역/주제`, 구역 밖(예전 방식)은 `주제`
+  /// (설계서_프롬프트이후 5.1). 구역 폴더 자체는 주제가 아니라 넣지 않는다.
   List<String> topics() {
     final dir = Directory(vault.wikiDir);
+    if (!dir.existsSync()) return const [];
+    final out = <String>[];
+    for (final d in dir.listSync().whereType<Directory>()) {
+      final name = toNfc(p.basename(d.path));
+      if (name.startsWith('.')) continue;
+      if (isZone(name)) {
+        out.addAll([for (final t in zoneTopics(name)) '$name/$t']);
+      } else {
+        out.add(name);
+      }
+    }
+    return out..sort();
+  }
+
+  /// 한 구역의 주제 폴더 이름 (빈 폴더 포함). AI가 저장 전에 기존 주제 전체를 본다 (`brain topics`, 설계서_프롬프트이후 5.1).
+  List<String> zoneTopics(String zone) {
+    final dir = Directory(p.join(vault.wikiDir, zone));
     if (!dir.existsSync()) return const [];
     return [
       for (final d in dir.listSync().whereType<Directory>())
@@ -920,15 +1234,29 @@ class SearchIndex {
     ]..sort();
   }
 
-  List<IndexedDoc> _match(String match, int limit, Set<String> kinds) => _db
+  /// 초안·합쳐짐 거르기는 SQL 안에서 한다: 찾은 뒤 거르면 [limit]개를 못 채운다.
+  List<IndexedDoc> _match(String match, int limit, Set<String> kinds, {bool includeDrafts = true}) => _db
       .select(
         'select d.* from docs_fts f join docs d on d.rowid = f.rowid '
         'where docs_fts match ? and d.kind in (${kinds.map((_) => '?').join(', ')}) '
+        // 합쳐진 노트도 뺀다: [옛 노트 보관]·[합치기] 뒤에도 AI가 옛 내용을 찾으면 소용이 없다 (설계서_프롬프트이후 4.4)
+        "${includeDrafts ? '' : "and d.status not in ('draft', 'merged') "}"
         'order by bm25(docs_fts, 3.0, 1.0) limit ?',
         [match, ...kinds, limit],
       )
       .map(IndexedDoc.fromRow)
       .toList();
+
+  /// 검색어 안의 노트 번호. `n_0081`처럼 접두가 있으면 문장 속에서도 찾고,
+  /// 접두 없는 숫자는 검색어 전체가 숫자일 때만 번호로 본다 — "2026년"·"21px" 같은 말을 번호로 오해하지 않게.
+  static List<String> noteIdsInQuery(String query) {
+    String id(String digits) => 'n_${digits.padLeft(4, '0')}';
+    final trimmed = query.trim();
+    if (RegExp(r'^\d{1,4}$').hasMatch(trimmed)) return [id(trimmed)];
+    return [
+      for (final m in RegExp(r'(?<![A-Za-z0-9])[nN]_?(\d{1,4})(?!\d)').allMatches(query)) id(m.group(1)!),
+    ];
+  }
 
   IndexedDoc? byId(String id) {
     final rows = _db.select('select * from docs where id = ?', [id]);

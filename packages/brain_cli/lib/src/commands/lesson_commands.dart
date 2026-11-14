@@ -60,7 +60,7 @@ class _LessonFind extends Command<int> {
       return 0;
     }
     for (final lesson in found) {
-      stdout.writeln('${lesson.id}  ${lesson.line}');
+      stdout.writeln('${lesson.id}  ${clip(lesson.line, 400)}');
     }
     return 0;
   }
@@ -111,6 +111,7 @@ class _LessonAdd extends Command<int> {
             action: a['action'] as String,
             reason: a['reason'] as String,
             quote: a['quote'] as String?,
+            diff: a['diff'] as String,
           )
         : const <String>[];
     if (problems.isNotEmpty) status = LessonStatus.pending;
@@ -170,7 +171,7 @@ class _LessonList extends Command<int> {
     }
     for (final l in all) {
       stdout.writeln(
-        '${l.id}  [${l.status.label}]  ${l.line}  (지킴 ${l.kept} · 다시 교정 ${l.recorrected})',
+        '${l.id}  [${l.status.label}]  ${clip(l.line, 400)}  (지킴 ${l.kept} · 다시 교정 ${l.recorrected})',
       );
     }
     return 0;
@@ -201,6 +202,18 @@ class _LessonSet extends Command<int> {
     try {
       final id = argResults!.rest.first;
       final status = LessonStatus.parse(argResults!['status']);
+      // 적용 중 규칙을 끄는 것(보관·승인 대기로 내리기)은 사용자가 정한다 (데이터 안전 감사 11/14, 사용자 결정).
+      // AI 대화에서 한 줄로 꺼지면 세션 시작 안내에서 빠지고 알림도 없었다. AI는 근거(사용자 말)가 있어야 켤 수 있어 되돌리지도 못했다.
+      if (status != LessonStatus.active && isAiSessionEnv(Platform.environment)) {
+        final lesson = context.lessons.read(id);
+        if (lesson != null && lesson.status == LessonStatus.active) {
+          stderr.writeln(
+            '$id는 적용 중인 규칙이라 AI 대화에서는 끄지 않습니다. 끄거나 보관하는 것은 사용자가 앱 [배운 것]에서 합니다. '
+            '규칙이 틀렸다고 보면 사용자에게 그 까닭과 함께 알린다.',
+          );
+          return 1;
+        }
+      }
       if (status == LessonStatus.active) {
         final lesson = context.lessons.read(id);
         if (lesson == null) {
@@ -213,6 +226,7 @@ class _LessonSet extends Command<int> {
           action: lesson.action,
           reason: lesson.reason,
           quote: argResults!['quote'] as String?,
+          diff: lesson.diff,
         );
         if (problems.isNotEmpty) {
           stdout.writeln('$id → ${lesson.status.label} (바꾸지 않음)');
@@ -277,8 +291,18 @@ class _LessonEdit extends Command<int> {
             action: edited.action,
             reason: edited.reason,
             quote: a['quote'] as String?,
+            diff: edited.diff,
           )
         : const <String>[];
+    // AI 대화에서 적용 중 규칙을 근거 없이 고치려 하면 아무것도 바꾸지 않는다. 예전에는 고친 문장을 저장한 채 승인 대기로 내려
+    // 사용자가 켠 규칙이 한 줄로 꺼졌다 — `brain lesson set` 보관 거절을 돌아가는 길이었다 (보안 감사 11/14).
+    if (problems.isNotEmpty && isAiSessionEnv(Platform.environment)) {
+      stderr.writeln(
+        '$id는 적용 중인 규칙이라 고치지 않았습니다 (${problems.join(' · ')}). 고친 문장이 맞다고 보면 사용자에게 그 까닭과 함께 알리고, '
+        '사용자가 앱 [배운 것]에서 고치거나, 사용자가 고쳐 달라고 한 말을 --quote로 줍니다.',
+      );
+      return 1;
+    }
     if (problems.isNotEmpty) edited = edited.copyWith(status: LessonStatus.pending);
     context.lessons.save(edited, action: 'lesson-edit');
     stdout.writeln('$id 고침: ${context.lessons.read(id)!.line}${problems.isEmpty ? '' : ' (승인 대기로 바뀜)'}');
@@ -402,7 +426,13 @@ class _LessonChecklist extends Command<int> {
 
 /// `brain undo [묶음 id]`: AI 작업 한 번을 통째로 되돌린다. id 없이 부르면 최근 묶음.
 class UndoCommand extends Command<int> {
-  UndoCommand(this.context);
+  UndoCommand(this.context) {
+    argParser.addFlag(
+      'force',
+      help: '그 뒤 바뀌었거나 확인할 수 없는 파일이 있어도 되돌린다. 덮거나 치우는 지금 파일은 _meta/trash/에 남긴다',
+      negatable: false,
+    );
+  }
 
   final BrainContext context;
 
@@ -422,16 +452,34 @@ class UndoCommand extends Command<int> {
       }
       for (final b in batches) {
         stdout.writeln(
-          '${b.id}  ${shortDate(b.at)} ${b.at.hour.toString().padLeft(2, '0')}:${b.at.minute.toString().padLeft(2, '0')}  파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
+          '${b.id}  ${shortDate(b.at)} ${b.at.hour.toString().padLeft(2, '0')}:${b.at.minute.toString().padLeft(2, '0')}  파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}${b.isPathMoved ? '  (경로 바뀜: 뒤에 옮긴 묶음을 먼저 되돌려야 함)' : ''}',
         );
       }
       return 0;
     }
+    final batch = argResults!.rest.first;
+    // AI 대화는 그 대화가 만든 묶음만 되돌린다. 예전에는 사용자가 앱에서 한 규칙 승인·노트 확인 묶음도 되돌려, 적용 중 규칙을
+    // 끄는 길이 됐다 (보안 감사 11/14). 사람이 터미널·앱에서 하는 되돌리기는 그대로다.
+    final env = Platform.environment;
+    if (isAiSessionEnv(env)) {
+      final current = env['CLAUDE_CODE_SESSION_ID'] ?? '';
+      final events = [for (final e in readChangeHistory(context.vault, months: 12)) if (e.batch == batch) e];
+      final isMine = events.isNotEmpty && events.every((e) => e.isAi && (current.isEmpty || e.aiSession == current));
+      if (!isMine) {
+        stderr.writeln(
+          '$batch는 이 AI 대화가 만든 묶음이 아니라 되돌리지 않았습니다. 사용자의 작업(앱에서 한 승인·편집 포함)은 사용자가 '
+          '앱 [설정] 되돌리기나 터미널의 brain undo로 되돌립니다.',
+        );
+        return 1;
+      }
+    }
     try {
-      final count = undoBatch(context.vault, argResults!.rest.first);
+      final count = undoBatch(context.vault, batch, force: argResults!['force'] as bool);
       context.index.sync();
       VaultSummary(context.vault, context.index).writeAll();
-      stdout.writeln('되돌림: 파일 $count개 (새로 생겼던 파일은 _meta/trash/로 옮김)');
+      stdout.writeln(
+        '되돌림: 파일 $count개 (새로 생겼던 파일${argResults!['force'] as bool ? '과 덮은 지금 파일' : ''}은 _meta/trash/로 옮김)',
+      );
       return 0;
     } on ArgumentError catch (e) {
       stderr.writeln(e.message);
@@ -449,6 +497,7 @@ List<String> activationProblems(
   required String action,
   required String reason,
   String? quote,
+  String? diff,
 }) {
   final problems = lessonSafetyProblems(trigger: trigger, action: action, reason: reason);
   final said = quote?.trim() ?? '';
@@ -462,6 +511,9 @@ List<String> activationProblems(
     problems.add('지금 세션 기록을 찾지 못해 사용자 말을 확인할 수 없음');
   } else if (!isQuoteFromUser(said, context.sessions.userTexts(session))) {
     problems.add('--quote가 이 세션의 사용자 말에 없음');
+  }
+  if (!isQuoteRelated(said, '$trigger\n$action\n$reason\n${diff ?? ''}')) {
+    problems.add('--quote가 규칙 문장과 겹치는 말이 없음 (그 규칙을 만든 사용자 말을 그대로 준다)');
   }
   return problems;
 }

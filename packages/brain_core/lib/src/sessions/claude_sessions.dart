@@ -65,7 +65,7 @@ class ClaudeSession {
   };
 
   /// 요약을 만드는 규칙이 바뀌면 올린다. 다른 판으로 만든 캐시는 다시 읽는다 (2: 작업 알림 빼기, 11/12).
-  static const summaryVersion = 2;
+  static const summaryVersion = 3; // 3: 제목 가림, 사람이 치지 않은 첫 작업 지시 빼기 (보안 감사 11/14)
 
   static ClaudeSession fromJson(Map<String, dynamic> json) => ClaudeSession(
     sessionId: json['sessionId'] as String,
@@ -185,6 +185,31 @@ class ClaudeSessions {
     ];
   }
 
+  /// 놓친 교정 줍기용 (설계서_프롬프트이후 5.10 ①): 사용자 문장마다 바로 앞 AI 답의 끝과 짝지어 돌려준다.
+  /// 교정은 "사용자 말 + 바로 앞 AI 답 끝"만 있으면 가려진다 — 도구 출력은 넣지 않는다 (8번 조사, Haiku에 준 것과 같다).
+  /// 비밀값은 가리고, 사용자 문장은 [userMax]자, AI 답 끝은 [aiTail]자로 자른다.
+  List<({String ai, String user})> exchanges(ClaudeSession session, {int userMax = 300, int aiTail = 140}) {
+    final (_, lines) = _parse(File(session.path));
+    final out = <({String ai, String user})>[];
+    var lastAi = '';
+    for (final line in lines) {
+      if (line.role == 'ai') {
+        lastAi = line.text;
+      } else if (line.role == 'user') {
+        // 가린 **뒤에** 자른다: 자른 뒤 가리면 경계에 걸린 키는 머리(`sk-`)가 잘려 그대로 나갔다 — 90자 키의 89자
+        // (보안 감사 11/14). 서버로 보내는 길(ChatContext)과 세션 축약본도 같은 순서다.
+        final ai = maskSecrets(lastAi).replaceAll(RegExp(r'\s+'), ' ').trim();
+        final user = maskSecrets(line.text).replaceAll(RegExp(r'\s+'), ' ').trim();
+        out.add((
+          ai: ai.length <= aiTail ? ai : '…${ai.substring(ai.length - aiTail)}',
+          user: user.length <= userMax ? user : '${user.substring(0, userMax)}…',
+        ));
+        lastAi = '';
+      }
+    }
+    return out;
+  }
+
   static String _date(DateTime time) {
     final t = time.toLocal();
     return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
@@ -283,9 +308,10 @@ class ClaudeSessions {
         )
         .text;
     final title = (customTitle != null && customTitle.isNotEmpty)
-        ? customTitle
+        ? maskSecrets(customTitle)
+        // 첫 사용자 말은 가린 뒤 자른다: 제목은 세션 목록·앱·raw/sessions 노트 제목에 쓰인다 (보안 감사 11/14).
         : String.fromCharCodes(
-            firstUser.replaceAll(RegExp(r'\s+'), ' ').runes.take(50),
+            maskSecrets(firstUser).replaceAll(RegExp(r'\s+'), ' ').runes.take(50),
           );
     return (
       ClaudeSession(
@@ -314,6 +340,10 @@ class ClaudeSessions {
     final origin = record['origin'];
     if (origin is Map && origin['kind'] != null && origin['kind'] != 'human') return true;
     if (record['promptSource'] == 'system') return true;
+    // origin 없이 promptSource만 있는 줄은 사람이 친 말이 아니다: 다른 세션이 연 세션의 첫 작업 지시, 앱이 넣은 말
+    // ("I hit my usage limit … Please continue"). 압축 뒤 되살리기는 이미 뺐는데, 축약본·놓친 교정·실수 노트 근거 검사는
+    // 사람 말로 셌다 — 다른 세션이 보낸 글이 `--quote` 근거로 통했다 (보안 감사 11/14). origin·promptSource 둘 다 없는 옛 기록은 그대로.
+    if (origin == null && record['promptSource'] != null) return true;
     // origin이 없던 옛 기록
     final text = content is String
         ? content
@@ -323,7 +353,19 @@ class ClaudeSessions {
     return text.trimLeft().startsWith('<task-notification>');
   }
 
-  String? _userText(Object? content) {
+  /// 사람이 직접 친 사용자 문장이면 그 글, 아니면 null. 축약본(`_parse`)과 같은 규칙이다: 곁가지·메타·압축 요약·
+  /// 작업 알림·다른 세션 메시지·도구 결과·명령 줄·끊김 표시는 뺀다. 압축 뒤 되살리기([CompactRecall])가 쓴다
+  /// (설계서_프롬프트이후 11/13 추가: 압축 훅).
+  static String? humanUserText(Map<String, dynamic> record) {
+    if (record['type'] != 'user') return null;
+    if (record['isSidechain'] == true || record['isMeta'] == true || record['isCompactSummary'] == true) return null;
+    final message = record['message'];
+    final content = message is Map ? message['content'] : null;
+    if (_isSystemTurn(record, content)) return null;
+    return _userText(content);
+  }
+
+  static String? _userText(Object? content) {
     String text;
     if (content is String) {
       text = content;

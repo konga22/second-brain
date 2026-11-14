@@ -6,7 +6,7 @@
 |---|---|
 | `marketplace.json` | `.claude-plugin/marketplace.json` (로컬 마켓플레이스 `second-brain-local`) |
 | `plugin.json` | `second-brain/.claude-plugin/plugin.json` |
-| `hooks.json` | `second-brain/hooks/hooks.json` (SessionStart: 온보딩 요약, UserPromptSubmit: 맞는 실수 노트·노트, PreToolUse: `brain` 명령만(`"if": "Bash(brain *)"`, 다른 Bash 호출에는 `brain`을 띄우지 않음), SessionEnd: 저장 안 한 세션 표시) |
+| `hooks.json` | `second-brain/hooks/hooks.json` (SessionStart: 온보딩 요약·프로젝트 폴더면 그 프로젝트의 지금 상태·다음 할 일(`wiki/프로젝트/<이름>/_project.md`, `brain project set`)·압축 직후 사용자 말 원문, PreCompact: 압축 요약 지침, UserPromptSubmit: 맞는 실수 노트·노트, PreToolUse: `brain` 명령만(`"if": "Bash(brain *)"`, 다른 Bash 호출에는 `brain`을 띄우지 않음), SessionEnd: 저장 안 한 세션 표시) |
 | `skills/second-brain/` | `second-brain/skills/second-brain/` (찾고 읽기) |
 | `skills/brain-save/` | `second-brain/skills/brain-save/` (대화 → 지식) |
 | (빌드 결과) `brain`, `libsqlite3.dylib` | `second-brain/bin/brain`, `second-brain/lib/libsqlite3.dylib` |

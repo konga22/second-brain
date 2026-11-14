@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import 'app_config_provider.dart';
 import 'background_tasks.dart';
 import 'claude_code.dart';
 
@@ -22,8 +23,15 @@ final searchIndexProvider = Provider<SearchIndex>((ref) {
   return index;
 });
 
+/// 설정 [이전 방식]의 5.1 폴더 구조 스위치를 지켜본다 (설계서_프롬프트이후 5.1, 11/13 검토): 예전에는 처음 만들 때 한 번만
+/// 설정 파일을 읽어, 스위치를 바꿔도 앱을 다시 켜기 전까지 새 노트·주제 만들기가 옛 방식이었다.
+/// 백그라운드 저장([saveNoteInBackground] 등)은 저장할 때마다 설정 파일을 새로 읽어 따로 맞출 것이 없다.
 final noteStoreProvider = Provider<NoteStore>(
-  (ref) => NoteStore(ref.watch(vaultProvider), ref.watch(searchIndexProvider)),
+  (ref) => NoteStore(
+    ref.watch(vaultProvider),
+    ref.watch(searchIndexProvider),
+    zoned: !ref.watch(appConfigProvider.select((c) => c.usesLegacy(AppConfig.legacyFolders))),
+  ),
 );
 
 final lessonStoreProvider = Provider<LessonStore>(
@@ -77,7 +85,8 @@ class VaultRevision extends Notifier<int> {
           // 자동 목차·온보딩 요약·변경 기록은 노트를 고칠 때 함께 쓰는 파일이라, 그것만으로 다시 그릴 일이 없다
           // (같이 바뀐 노트 파일 이벤트가 따로 온다). 11/12 O-6: 저장 1회에 모든 계산이 두 번 돌던 원인 중 하나.
           final name = p.basename(rel);
-          if (name == 'index.md' || name == '_profile.md' || rel.startsWith('_log')) return;
+          // me.md(나에 대해)도 노트가 아니라 다시 그릴 것이 없다 (설계서_프롬프트이후 5.2).
+          if (name == 'index.md' || name == '_profile.md' || rel == 'me.md' || rel.startsWith('_log')) return;
           // 앱 안에서 방금 고친 것([bump] 뒤 2초 안)은 색인이 이미 맞고 번호도 이미 올렸다. 이때는 실제로
           // 색인이 바뀐 게 있을 때만 올린다. 그 밖(CLI·편집기·자동 정리)은 예전처럼 바뀐 것 자체로 다시 그린다.
           _pendingForce |= DateTime.now().isAfter(_ownWriteUntil);
@@ -216,6 +225,7 @@ final firstSeenProvider = Provider<Map<String, DateTime>>((ref) {
       case 'add' || 'lesson-add' || 'import':
         keep(e.detail.split(' ').first, e.at);
       case 'todo-add' || 'todo-accept' || 'todo-suggest':
+        // detail은 AI 표시를 뗀 내용이다: AI가 넣은 할 일도 키가 `todo:<내용>` (설계서_프롬프트이후 4.3, 11/13 검토)
         keep('todo:${e.detail.trim()}', e.at);
     }
   }
@@ -244,6 +254,20 @@ final lintIssuesProvider = FutureProvider<List<LintIssue>>((ref) {
   ref.watch(vaultRevisionProvider);
   final vault = ref.watch(vaultProvider);
   return lintInBackground(vault.root, vault.indexPath);
+});
+
+/// 정리 대기 카드의 비슷한 정리된 노트 (설계서_프롬프트이후 4.2). 보드를 볼 때만 백그라운드에서 계산한다.
+final draftSimilarProvider = FutureProvider.autoDispose<Map<String, List<SimilarNote>>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final vault = ref.watch(vaultProvider);
+  return draftSimilarInBackground(vault.root, vault.indexPath);
+});
+
+/// 정리 보드 "AI가 고친 노트" (설계서_프롬프트이후 4.3). 보드를 볼 때만 백그라운드에서 계산한다.
+final aiEditsProvider = FutureProvider.autoDispose<List<AiEdit>>((ref) {
+  ref.watch(vaultRevisionProvider);
+  final vault = ref.watch(vaultProvider);
+  return aiEditsInBackground(vault.root, vault.indexPath);
 });
 
 /// 할 일 화면: 할 일 목록·AI 추천(자기 파일만 읽어 가벼움).
@@ -318,7 +342,7 @@ final graphLayoutProvider = FutureProvider<Map<String, Point<double>>>((
   final index = ref.watch(searchIndexProvider);
   final nodes = [
     for (final doc in notes)
-      if (!doc.isMerged) GraphNode(doc.id, doc.topic),
+      if (!doc.isMerged) GraphNode(doc.id, doc.topicPath),
   ];
   final edges = [
     for (final link in links)

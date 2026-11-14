@@ -5,23 +5,27 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/brain_providers.dart';
 import '../../core/claude_code.dart';
+import '../persona/persona_card.dart';
 import 'claude_code_providers.dart';
 import 'system_check_provider.dart';
 import '../../shared/safe_set_state.dart';
 
-/// 연동: Claude Code 연동, 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
+/// 연동: Claude Code 연동, 나에 대해 4문항(설계서_프롬프트이후 5.2), 지난 대화 정리, 실행 환경 점검 (설계서 5.2).
 class ConnectPage extends ConsumerWidget {
   const ConnectPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = ShadTheme.of(context);
+    final status = ref.watch(claudeCodeStatusProvider).value;
     return ListView(
       padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
       children: [
         Text('연동', style: theme.textTheme.h4),
         const SizedBox(height: 24),
         const _ClaudeCodeCard(),
+        // 연동 다음 단계: 4문항 (설계서_프롬프트이후 5.2)
+        PersonaStep(isConnected: status != null && status.isInstalled && status.isEnabled),
         const SizedBox(height: 16),
         const _PastSessionsCard(),
         const SizedBox(height: 16),
@@ -348,6 +352,8 @@ class _SystemCheckCard extends ConsumerWidget {
                 for (final (label, ok) in vault.items)
                   _CheckRow(label: label, isOk: ok),
                 if (vault.error != null) Text(vault.error!),
+                if (result.gitExposure case final exposure?)
+                  _WarningRow(text: exposure.warning),
                 const SizedBox(height: 16),
                 Text('Supabase', style: theme.textTheme.small),
                 switch (result.isSupabaseReachable) {
@@ -389,6 +395,29 @@ class _CheckRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Flexible(child: Text(label)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 실패는 아니지만 사용자가 알아야 하는 점검 결과 (설계서_프롬프트이후 4.6 GitHub 경고).
+class _WarningRow extends StatelessWidget {
+  const _WarningRow({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.triangleAlert, size: 16, color: colors.warning),
+          const SizedBox(width: 8),
+          Flexible(child: Text(text)),
         ],
       ),
     );

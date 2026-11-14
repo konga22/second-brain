@@ -5,14 +5,20 @@ import 'package:brain_core/brain_core.dart';
 
 import 'brain_context.dart';
 import 'commands/check_commands.dart';
+import 'commands/folder_commands.dart';
 import 'commands/hook_command.dart';
 import 'commands/lesson_commands.dart';
 import 'commands/note_commands.dart';
+import 'commands/project_command.dart';
 import 'commands/sessions_command.dart';
 import 'commands/todo_command.dart';
 
 /// brain 명령을 실행하고 종료 코드를 돌려준다 (설계서 5.1).
 Future<int> runBrain(List<String> arguments) async {
+  // AI 대화 안에서 부른 명령이면 변경 기록 줄에 대화 id를 남긴다: 정리 보드가 "AI가 고친 노트"를 가려낸다
+  // (설계서_프롬프트이후 4.3). 앱은 부르지 않는다 — 앱을 Claude Code 터미널에서 띄워도 사람의 편집이다.
+  final env = Platform.environment;
+  if (isAiSessionEnv(env)) markAiSession(env['CLAUDE_CODE_SESSION_ID'] ?? '');
   final context = BrainContext();
   final runner =
       CommandRunner<int>(
@@ -23,6 +29,10 @@ Future<int> runBrain(List<String> arguments) async {
         ..addCommand(ShowCommand(context))
         ..addCommand(AddCommand(context))
         ..addCommand(WriteCommand(context))
+        ..addCommand(TopicsCommand(context))
+        ..addCommand(TocCommand(context))
+        ..addCommand(ProjectCommand(context))
+        ..addCommand(MoveCommand(context))
         ..addCommand(SessionsCommand(context))
         ..addCommand(HookCommand(context))
         ..addCommand(IndexCommand(context))
@@ -98,7 +108,14 @@ class _DoctorCommand extends Command<int> {
       for (final (rel, reason) in context.index.unreadable) {
         stdout.writeln('[주의] 읽을 수 없는 파일 $rel — UTF-8로 다시 저장하거나 지식 폴더 밖으로 ($reason)');
       }
+      // 번호가 겹친 사본은 실수 노트로 읽지 않는다 (보안 감사 11/14: 예전에는 훅 전체가 빈 글이 됐다).
+      for (final rel in context.lessons.strayFiles()) {
+        stdout.writeln('[주의] 실수 노트로 읽지 않은 파일 $rel — 번호가 겹치는 사본이면 지우고, 새 규칙이면 brain lesson add로 넣는다');
+      }
     }
+    // 원격이 붙은 git 폴더 안이면 push 한 번에 지식이 올라간다. 경고만 하고 실패로 치지 않는다 (설계서_프롬프트이후 4.6).
+    final exposure = findGitRemoteExposure(context.vault.root);
+    if (exposure != null) stdout.writeln('[주의] ${exposure.warning}');
     final sessionsDir = Directory(context.sessions.projectsDir).existsSync();
     stdout.writeln(
       '${sessionsDir ? '[통과]' : '[없음]'} Claude Code 세션 기록 ${context.sessions.projectsDir}',

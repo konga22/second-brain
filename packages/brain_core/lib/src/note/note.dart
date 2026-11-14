@@ -150,6 +150,7 @@ class Note {
   }
 
   Note copyWith({
+    String? id,
     String? body,
     NoteStatus? status,
     DateTime? updated,
@@ -157,8 +158,9 @@ class Note {
     String? summary,
     List<String>? tags,
     List<String>? aliases,
+    Map<String, Object?>? extra,
   }) => Note(
-    id: id,
+    id: id ?? this.id,
     title: title ?? this.title,
     summary: summary ?? this.summary,
     tags: tags ?? this.tags,
@@ -169,7 +171,7 @@ class Note {
     updated: updated ?? this.updated,
     status: status ?? this.status,
     body: body ?? this.body,
-    extra: extra,
+    extra: extra ?? this.extra,
     isFrontmatterBroken: isFrontmatterBroken,
   );
 }

@@ -114,12 +114,34 @@ void main() {
     );
   });
 
+  test('나에 대해의 금지어가 든 노트는 편집 창 저장도 막고, 어느 말인지 예외로 돌아온다 (설계서_프롬프트이후 5.2)', () async {
+    const Persona(forbidden: ['연봉']).save(vault);
+    Future<String> save(String? id, String? hash, String body) => saveNoteInBackground(
+      vault.root,
+      indexPath,
+      id: id,
+      expectHash: hash,
+      title: '이직 준비',
+      summary: '면접 질문',
+      body: body,
+      tags: const [],
+      aliases: const [],
+    );
+    await expectLater(
+      save(null, null, '올해 연봉협상 메모'),
+      throwsA(isA<ForbiddenTermException>().having((e) => e.term, 'term', '연봉')),
+    );
+    final (id, hash) = addDirect('이직 준비', '자기소개 1분');
+    await expectLater(save(id, hash, '희망 연봉 적기'), throwsA(isA<ForbiddenTermException>()));
+    expect(bodyOf(id), '자기소개 1분');
+  });
+
   test('노트 패널·사이드바 쓰기: 확정·잇기·옮기기·지우기, 실패는 예외로', () async {
     final (draftId, _) = (() {
       final index = SearchIndex.open(vault, path: indexPath);
       try {
-        final store = NoteStore(vault, index);
-        final (id, _) = store.add(title: '초안 노트', summary: '확정 전', body: '본문', topic: '결제', draft: true);
+        final store = NoteStore(vault, index, zoned: true);
+        final (id, _) = store.add(title: '초안 노트', summary: '확정 전', body: '본문', topic: '개발 지식/결제', draft: true);
         return (id, '');
       } finally {
         index.close();
@@ -143,8 +165,9 @@ void main() {
     expect(doc(draftId)!.isDraft, isFalse);
     await change(NoteChange.appendLink, draftId, linkTitle: '롤백 순서');
     expect(bodyOf(draftId), endsWith('관련: [[롤백 순서]]'));
-    await change(NoteChange.move, draftId, topic: '배포');
-    expect(doc(draftId)!.topic, '배포');
+    // 구역/주제로 옮긴다 (설계서_프롬프트이후 5.1)
+    await change(NoteChange.move, draftId, topic: '개발 지식/배포');
+    expect(doc(draftId)!.topicPath, '개발 지식/배포');
     await change(NoteChange.delete, otherId);
     expect(doc(otherId), isNull);
     await expectLater(change(NoteChange.confirm, 'n_9999'), throwsA(isA<NoteStoreException>()));

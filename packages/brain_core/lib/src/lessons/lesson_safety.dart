@@ -1,4 +1,6 @@
 import '../lint/linter.dart';
+import '../text/nfc.dart';
+import 'lesson_store.dart';
 import '../security/secret_mask.dart';
 
 /// 실수 노트를 "적용 중"으로 만들기 전 안전 검사 (설계서 5.4 v1.3.35, 11/12 사용자 결정 "안전하다 검증되는 즉시 적용").
@@ -27,6 +29,15 @@ bool isQuoteFromUser(String quote, Iterable<String> userTexts) {
   final wanted = _plain(quote);
   if (wanted.runes.length < 8) return false;
   return userTexts.any((t) => _plain(t).contains(wanted));
+}
+
+/// 관련 검사: [quote](근거로 댄 사용자 말)와 [ruleText](규칙의 언제·무엇을·왜·diff)가 낱말 머리를 하나 이상 함께 쓰는가.
+/// 근거 검사는 "그 말이 세션에 있는가"만 봐서, 규칙과 관계없는 말("오늘 회의록 정리도 부탁해")을 대도 바로 적용됐다
+/// (보안 감사 11/14). 지난 교정 27건을 그 교정에서 생긴 실수 노트와 견주면 24건이 이 기준을 지나고, 못 지나는 3건은
+/// 승인 대기로 남는다(사라지지 않는다). AI가 규칙 문장을 근거 말에 맞춰 지으면 지나간다 — 막는 것은 관계없는 말을 그대로 댄 경우다.
+bool isQuoteRelated(String quote, String ruleText) {
+  final rule = toNfc(ruleText).toLowerCase();
+  return LessonStore.wordHeads(quote).any(rule.contains);
 }
 
 String _plain(String text) => text.toLowerCase().replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '');

@@ -77,7 +77,8 @@ void main() {
     expect(lessons.match('Push 해'), hasLength(1));
   });
 
-  test('근거 횟수를 남기고 온보딩 요약에 자주 받은 교정이 들어간다', () {
+  // 온보딩 요약(_profile.md)에 넣던 "자주 받은 교정"은 뺐다 (설계서_프롬프트이후 5.2, persona_test가 지킨다).
+  test('근거 횟수를 남긴다', () {
     final (id, _) = lessons.add(
       trigger: '커밋할 때',
       action: '매번 허락을 받는다',
@@ -88,11 +89,6 @@ void main() {
     lessons.recordEvidence(id, kept: false);
     final lesson = lessons.read(id)!;
     expect((lesson.kept, lesson.recorrected), (1, 1));
-    notes.add(title: '아무 노트', summary: '요약', body: '본문');
-    expect(
-      File(vault.profilePath).readAsStringSync(),
-      contains('자주 받은 교정: 커밋할 때 → 매번 허락을 받는다'),
-    );
   });
 
   test('AI 질문 근거: 노트 상위 5개 + 맞는 규칙, 적으면 검색어 다시 만들기', () {
@@ -141,5 +137,91 @@ void main() {
     expect(() => undoBatch(vault, 'b_ai'), throwsArgumentError);
     index.sync();
     expect(index.byId(id2), isNull);
+  });
+
+  group('최근순과 합치기 (설계서_프롬프트이후 4.5)', () {
+    test('만든 날·다시 교정된 날을 파일에 남기고 다시 읽는다', () {
+      final (id, _) = lessons.add(trigger: '배포할 때', action: '태그를 먼저 단다', reason: '시험', status: LessonStatus.active);
+      final today = formatTime(DateTime.now()).substring(0, 10);
+      expect(File(p.join(vault.lessonsDir, '$id.md')).readAsStringSync(), contains('created: $today'));
+      expect(lessons.read(id)!.recorrectedAt, isNull);
+      lessons.recordEvidence(id, kept: true);
+      expect(lessons.read(id)!.recorrectedAt, isNull); // 지킴은 순서를 바꾸지 않는다
+      lessons.recordEvidence(id, kept: false);
+      final lesson = lessons.read(id)!;
+      expect(formatTime(lesson.recorrectedAt!).substring(0, 10), today);
+      expect(formatTime(lesson.created!).substring(0, 10), today);
+    });
+
+    test('최근순: 날이 늦은 것 → 날 없는 옛 규칙은 뒤, 같으면 번호가 큰 것부터. 이전 방식은 번호 순', () {
+      Lesson l(String id, {String? created, String? recorrected}) => Lesson(
+        id: id,
+        trigger: 't',
+        action: 'a',
+        reason: 'r',
+        created: created == null ? null : DateTime.parse(created),
+        recorrectedAt: recorrected == null ? null : DateTime.parse(recorrected),
+      );
+      final list = [
+        l('L-0001'),
+        l('L-0002'),
+        l('L-0003', created: '2026-11-01', recorrected: '2026-11-20'),
+        l('L-0004', created: '2026-11-10'),
+        l('L-0005', created: '2026-11-10'),
+      ]..sort(Lesson.recentFirst);
+      expect([for (final x in list) x.id], ['L-0003', 'L-0005', 'L-0004', 'L-0002', 'L-0001']);
+    });
+
+    test('세션 시작 목록: 30개를 넘으면 오래된 것이 빠지고, 빠진 수를 돌려준다', () {
+      for (var i = 0; i < 32; i++) {
+        lessons.add(trigger: '작업 $i 할 때', action: '규칙 $i', reason: '시험', status: LessonStatus.active);
+      }
+      final (shown, rest) = lessons.sessionLessons();
+      expect(rest, 2);
+      expect(shown.first.id, 'L-0032');
+      expect(shown.map((l) => l.id), isNot(contains('L-0001')));
+      final (old, oldRest) = lessons.sessionLessons(legacy: true);
+      expect(old.first.id, 'L-0001');
+      expect(old.last.id, 'L-0030');
+      expect(oldRest, 2);
+    });
+
+    test('비슷한 규칙 쌍: 단어 머리가 겹치는 것만', () {
+      Lesson l(String id, String trigger, String action) =>
+          Lesson(id: id, trigger: trigger, action: action, reason: 'r');
+      final pairs = LessonStore.similarPairs([
+        l('L-0001', '커밋하거나 push할 때', '사용자에게 먼저 허락을 받는다'),
+        l('L-0002', 'push하기 전에', '사용자 허락을 받는다'),
+        l('L-0003', '결제 코드를 수정할 때', '테스트 키로 먼저 확인한다'),
+      ]);
+      expect(pairs, hasLength(1));
+      expect({pairs.single.$1.id, pairs.single.$2.id}, {'L-0001', 'L-0002'});
+      expect(LessonStore.similarPairs([l('L-0001', '배포할 때', '태그'), l('L-0002', '결제', '키')]), isEmpty);
+    });
+
+    test('합치기: 하나는 새 문장으로 고치고 다른 하나는 보관, 같은 묶음으로 되돌린다', () {
+      final (a, _) = lessons.add(trigger: '커밋할 때', action: '허락을 받는다', reason: '규칙', status: LessonStatus.active);
+      final (b, _) = lessons.add(trigger: 'push할 때', action: '허락을 받는다', reason: '규칙', status: LessonStatus.active);
+      lessons.recordEvidence(a, kept: true);
+      lessons.recordEvidence(b, kept: false);
+      lessons.merge(b, a, trigger: '커밋·push할 때', action: '매번 허락을 받는다', reason: '사용자 규칙', batch: 'b_merge');
+      final kept = lessons.read(b)!, dropped = lessons.read(a)!;
+      expect(kept.line, '커밋·push할 때 → 매번 허락을 받는다');
+      expect(kept.status, LessonStatus.active);
+      expect((kept.kept, kept.recorrected), (1, 1));
+      expect(kept.body, contains('$a와 합침'));
+      expect(dropped.status, LessonStatus.archived);
+      expect(dropped.body, contains('$b로 합쳐 보관'));
+      expect(() => lessons.merge(a, a, trigger: 't', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
+      expect(() => lessons.merge(a, b, trigger: ' ', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
+      // 이미 보관된 규칙을 다시 합치면 횟수가 두 번 더해졌다 (11/13 검토) → 거절하고 그대로 둔다
+      final keptBefore = lessons.read(b)!.kept;
+      expect(() => lessons.merge(b, a, trigger: 't', action: 'a', reason: 'r'), throwsA(isA<NoteStoreException>()));
+      expect(lessons.read(b)!.kept, keptBefore);
+      undoBatch(vault, 'b_merge');
+      index.sync();
+      expect(lessons.read(b)!.line, 'push할 때 → 허락을 받는다');
+      expect(lessons.read(a)!.status, LessonStatus.active);
+    });
   });
 }

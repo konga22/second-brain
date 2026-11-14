@@ -91,7 +91,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
     final byId = {for (final d in notes) d.id: d};
     final byTopic = <String, List<IndexedDoc>>{};
     for (final d in notes) {
-      byTopic.putIfAbsent(d.topic, () => []).add(d);
+      byTopic.putIfAbsent(d.topicPath, () => []).add(d);
     }
     final pair = <String, Map<String, int>>{};
     final neighborsOf = <String, List<(String, bool)>>{};
@@ -100,13 +100,13 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
       if (a == null || b == null) continue;
       neighborsOf.putIfAbsent(a.id, () => []).add((b.id, l.isSuggested));
       neighborsOf.putIfAbsent(b.id, () => []).add((a.id, l.isSuggested));
-      if (a.topic == b.topic) continue;
+      if (a.topicPath == b.topicPath) continue;
       pair
-          .putIfAbsent(a.topic, () => {})
-          .update(b.topic, (n) => n + 1, ifAbsent: () => 1);
+          .putIfAbsent(a.topicPath, () => {})
+          .update(b.topicPath, (n) => n + 1, ifAbsent: () => 1);
       pair
-          .putIfAbsent(b.topic, () => {})
-          .update(a.topic, (n) => n + 1, ifAbsent: () => 1);
+          .putIfAbsent(b.topicPath, () => {})
+          .update(a.topicPath, (n) => n + 1, ifAbsent: () => 1);
     }
     final selectedNeighbors = {
       for (final (id, _) in neighborsOf[selected] ?? const <(String, bool)>[])
@@ -389,7 +389,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
     final neighbors = neighborsOf[doc.id] ?? const <(String, bool)>[];
     final outside = [
       for (final (id, isSuggested) in neighbors)
-        if (byId[id] case final other? when other.topic != topic)
+        if (byId[id] case final other? when other.topicPath != topic)
           (other, isSuggested),
     ];
     final isSelected = doc.id == selected;
@@ -397,7 +397,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
     final dim =
         _focusedTopic != null &&
         _focusedTopic != topic &&
-        !neighbors.any((n) => byId[n.$1]?.topic == _focusedTopic);
+        !neighbors.any((n) => byId[n.$1]?.topicPath == _focusedTopic);
     final shown = outside.take(3).toList();
     void open(String id) => ref.read(selectedNoteProvider.notifier).select(id);
     return Opacity(
@@ -505,7 +505,7 @@ class _StructureListViewState extends ConsumerState<StructureListView> {
                             ),
                           ),
                           child: Text(
-                            '→ ${shortTitle(other.title, max: 12)}  ${other.topic}',
+                            '→ ${shortTitle(other.title, max: 12)}  ${other.topicPath}',
                             style: TextStyle(
                               fontSize: 11,
                               color: isSuggested

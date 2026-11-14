@@ -22,7 +22,8 @@ class SecondBrainApp extends StatelessWidget {
       supportedLocales: const [Locale('ko', 'KR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       // 지식 폴더가 준비되기 전에는 앱 화면(라우터)을 그리지 않는다 (11/11 K-33).
-      builder: (context, child) => ZoomScope(child: VaultGate(child: child ?? const SizedBox())),
+      // 글꼴을 적지 않은 글도 Pretendard로 (shadcn 글과 섞이지 않게)
+      builder: (context, child) => withAppFont(ZoomScope(child: VaultGate(child: child ?? const SizedBox()))),
     );
   }
 }

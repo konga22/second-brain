@@ -46,18 +46,21 @@ class ChatContext {
   static const snippetChars = 500;
 
   /// [topic]이 있으면 그 주제 폴더(뇌)에서 먼저 찾고, 모자란 만큼 전체에서 채운다.
+  /// 확인 전 초안은 근거로 보내지 않는다 ([includeDrafts], 설계서_프롬프트이후 4.1). 기본값은 "이전 방식" 설정을 따른다.
   static ChatContext build(
     Vault vault,
     SearchIndex index,
     String question, {
     List<String> extraQueries = const [],
     String? topic,
+    bool? includeDrafts,
   }) {
+    final drafts = includeDrafts ?? AppConfig.load().usesLegacy(AppConfig.legacyDrafts);
     final seen = <String>{};
     final docs = <IndexedDoc>[];
     for (final scope in [?topic, null]) {
       for (final query in [question, ...extraQueries]) {
-        for (final doc in index.search(query, limit: maxNotes, topic: scope)) {
+        for (final doc in index.search(query, limit: maxNotes, topic: scope, includeDrafts: drafts)) {
           if (doc.isMerged || !seen.add(doc.id)) continue;
           docs.add(doc);
         }

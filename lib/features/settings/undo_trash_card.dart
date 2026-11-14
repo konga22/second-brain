@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../core/brain_providers.dart';
+import '../../shared/change_labels.dart';
 import '../../shared/date_text.dart';
 import '../../shared/safe_set_state.dart';
 
@@ -23,17 +24,16 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
   static const keepDays = 30;
   String? _message;
 
-  /// 묶음 id → "추가 2 · 상태 1" 같은 요약 (변경 기록에서).
+  /// 묶음 id → "새 노트 2 · 상태 1" 같은 요약 (변경 기록에서).
   Map<String, String> _summaries(Vault vault) {
     final counts = <String, Map<String, int>>{};
     for (final e in readChangeHistory(vault)) {
       final byAction = counts.putIfAbsent(e.batch, () => {});
       byAction[e.action] = (byAction[e.action] ?? 0) + 1;
     }
-    const names = {'add': '추가', 'write': '고침', 'update': '고침', 'status': '상태', 'move': '옮김', 'delete': '지움', 'lint-fix': '형식', 'import': '가져옴'};
     return {
       for (final MapEntry(:key, :value) in counts.entries)
-        key: value.entries.map((e) => '${names[e.key] ?? e.key} ${e.value}').join(' · '),
+        key: value.entries.map((e) => '${changeActionLabel(e.key)} ${e.value}').join(' · '),
     };
   }
 
@@ -53,11 +53,38 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
     return root.existsSync() ? root.listSync(recursive: true).whereType<File>().length : 0;
   }
 
-  void _undo(Vault vault, UndoBatch batch) {
+  /// 그 뒤 바뀐 파일이 있거나 확인할 수 없으면 되돌리지 않는다 (데이터 안전 감사 11/14). 그때만 묻고, [그래도 되돌리기]는
+  /// 지금 파일을 휴지통에 남긴 뒤 되돌린다.
+  Future<void> _undo(Vault vault, UndoBatch batch) async {
     try {
       final count = undoBatch(vault, batch.id);
       setState(() => _message = '${batch.id} 되돌림: 파일 $count개');
       bumpVault(ref);
+    } on UndoDriftError catch (e) {
+      setState(() => _message = '되돌리지 않음: ${e.message}');
+      final isOk = await showShadDialog<bool>(
+        context: context,
+        builder: (context) => ShadDialog.alert(
+          title: const Text('그래도 되돌릴까요?'),
+          description: Text(
+            '이 묶음이 바꾼 파일 ${e.drift.length}개가 그 뒤 다른 작업에서 바뀌었거나 확인할 수 없습니다. '
+            '되돌리면 지금 파일은 휴지통(_meta/trash/${batch.id})에 남기고 묶음 전 상태로 바꿉니다. '
+            '보통은 더 최근 묶음을 먼저 되돌리는 것이 안전합니다.',
+          ),
+          actions: [
+            ShadButton.outline(child: const Text('취소'), onPressed: () => Navigator.of(context).pop(false)),
+            ShadButton.destructive(child: const Text('그래도 되돌리기'), onPressed: () => Navigator.of(context).pop(true)),
+          ],
+        ),
+      );
+      if (isOk != true || !mounted) return;
+      try {
+        final count = undoBatch(vault, batch.id, force: true);
+        setState(() => _message = '${batch.id} 되돌림: 파일 $count개 (그 전 파일은 휴지통에 남김)');
+        bumpVault(ref);
+      } on Object catch (e) {
+        setState(() => _message = '되돌리지 못함: $e');
+      }
     } on Object catch (e) {
       setState(() => _message = '되돌리지 못함: $e');
     }
@@ -111,12 +138,13 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
                 children: [
                   Expanded(
                     child: Text(
-                      '${time(b.at)}  ${summaries[b.id] ?? summaries[b.id.replaceFirst(RegExp(r'-u\d+$'), '')] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}',
+                      '${time(b.at)}  ${summaries[b.id] ?? summaries[b.id.replaceFirst(RegExp(r'-u\d+$'), '')] ?? b.id}  · 파일 ${b.files}개${b.isUndone ? '  (되돌림)' : ''}${b.isPathMoved ? '  (경로 바뀜)' : ''}',
                       style: theme.textTheme.small,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (!b.isUndone)
+                  // 경로 바뀜: 그 뒤 폴더 정리로 옮긴 노트라 되돌리면 같은 노트가 둘이 된다 (설계서_프롬프트이후 8.3)
+                  if (!b.isUndone && !b.isPathMoved)
                     ShadButton.ghost(size: ShadButtonSize.sm, onPressed: () => _undo(vault, b), child: const Text('되돌리기')),
                 ],
               ),

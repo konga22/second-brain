@@ -425,8 +425,8 @@ void _placeNew(
   var temperature = 40.0;
   for (var step = 0; step < 80; step++) {
     for (final i in fresh) {
-      // -1: 트리 안의 어떤 노드와도 같은 번호가 아니므로 자기 자신을 빼는 처리가 필요 없다
-      var (fx, fy) = tree.force(-1, xs[i], ys[i], 0.8, repulsion);
+      // 음수 번호: 트리 밖 노드라 자기 자신을 빼지 않는다. 노드마다 다른 수라 기존 노드와 겹쳐도 떼는 방향이 다르다.
+      var (fx, fy) = tree.force(-1 - i, xs[i], ys[i], 0.8, repulsion);
       for (final j in fresh) {
         if (j == i) continue;
         final ddx = xs[i] - xs[j], ddy = ys[i] - ys[j];
@@ -560,22 +560,38 @@ class _QuadTree {
     return children![right + bottom];
   }
 
+  bool _contains(double x, double y) => x >= x0 && x < x0 + size && y >= y0 && y < y0 + size;
+
+  /// 노드 [i]가 (x, y)에서 받는 밀어내는 힘. [i]가 음수면 트리 밖의 노드다 (자기 자신을 뺄 필요가 없다).
   (double, double) force(int i, double x, double y, double theta, double k) {
-    if (mass == 0 || point == i && children == null) return (0, 0);
+    if (mass == 0) return (0, 0);
+    // 자기 자신이 든 칸은 한 덩어리로 보지 않고 안으로 내려간다. 예전에는 자기 질량까지 넣어 계산해, 두 노드가
+    // 0.1 안으로 겹치면 둘 다 자기 칸에 밀려 같은 쪽으로 최대 걸음만큼 날아갔다 (설계서 5.5 / 설계서_프롬프트이후 5.6, 11/14:
+    // 노트 1만 개에서 n_06381·n_09710이 무리보다 1,230 위로 떨어짐).
+    final isSelf = i >= 0 && _contains(x, y);
+    if (children != null && isSelf) return _childForce(i, x, y, theta, k);
+    // 끝 칸에는 같은 자리에 겹친 노드가 여럿 들어 있을 수 있다 (깊이 40 넘으면 더 나누지 않음). 자기 몫만 뺀다.
+    final others = children == null && isSelf ? mass - 1 : mass;
+    if (others <= 0) return (0, 0);
     var ddx = x - cx;
     var ddy = y - cy;
     var dist2 = ddx * ddx + ddy * ddy;
     if (dist2 < 0.01) {
-      // 같은 자리: 조금 흔들어 떼어 놓는다
-      ddx = (i % 7 - 3) * 0.1 + 0.05;
-      ddy = (i % 5 - 2) * 0.1 + 0.05;
-      dist2 = ddx * ddx + ddy * ddy;
+      // 같은 자리: 노드마다 다른 방향(황금각)으로 뗀다. 예전처럼 번호 % 7·% 5로 정하면 번호가 35 차이 나는
+      // 노드끼리 방향이 같아 떨어지지 않고 함께 밀려 갔다 (11/14).
+      ddx = cos(i * 2.399963) * 0.1;
+      ddy = sin(i * 2.399963) * 0.1;
+      dist2 = 0.01;
     }
     if (children == null || size * size / dist2 < theta * theta) {
-      final f = k * mass / dist2;
+      final f = k * others / dist2;
       final dist = sqrt(dist2);
       return (f * ddx / dist, f * ddy / dist);
     }
+    return _childForce(i, x, y, theta, k);
+  }
+
+  (double, double) _childForce(int i, double x, double y, double theta, double k) {
     var fx = 0.0, fy = 0.0;
     for (final child in children!) {
       final (cfx, cfy) = child.force(i, x, y, theta, k);

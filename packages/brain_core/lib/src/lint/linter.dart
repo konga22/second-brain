@@ -3,11 +3,13 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../index/search_index.dart';
+import '../lessons/lesson_store.dart';
 import '../links/dismissed_links.dart';
 import '../log/change_log.dart';
 import '../note/note.dart';
 import '../note/note_store.dart';
 import '../note/wiki_links.dart';
+import '../text/nfc.dart';
 import '../vault/vault.dart';
 
 /// 점검 항목 (설계서 5.8).
@@ -19,7 +21,10 @@ enum LintType {
   format('형식'),
   unreadable('읽을 수 없는 파일'),
   tooLong('너무 긴 노트'),
-  suspicious('의심 지시문');
+  suspicious('의심 지시문'),
+
+  /// 정리된 노트가 일반 선호·작업 규칙처럼 보인다 (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트). 알리기만 한다.
+  ruleCandidate('규칙 후보');
 
   const LintType(this.label);
 
@@ -73,6 +78,34 @@ class Linter {
     caseSensitive: false,
   );
 
+  /// 규칙 후보 태그 (띄어쓰기를 뺀 이름).
+  static const _ruleTags = {'선호', '취향', '작업규칙', '사용자규칙', '습관'};
+
+  /// 규칙 후보 말 (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트). 프로젝트 이름을 빼도 맞는 "앞으로 ~할 때는 ~한다"를 노린다:
+  /// 좋고 싫음, 늘·항상, "작업 규칙", "~할 때만/때는", "~하기 전에 먼저", 디자인·말투 같은 겉모습을 "쓰지 않는다".
+  /// 그냥 "규칙"·"마다"·"안 함"은 넣지 않는다 — 기술 노트("결제 웹훅 재시도 규칙", "파일마다 따로")가 걸린다.
+  /// 측정(제목 10개씩): 일반 선호 9/10, 프로젝트·기술 0/10 (test/rule_candidate_test.dart). 실제 지식 폴더 사본 86개: 1개(작업 규칙 노트).
+  static final _rulePattern = RegExp(
+    r'선호|싫어|싫다|좋아하|취향|원하지 않|원치 않'
+    r'|앞으로|항상|언제나|매번|모든 프로젝트|프로젝트마다'
+    r'|(작업|사용자|답변|보고|소통|글쓰기) ?(규칙|원칙|습관)'
+    r'|(디자인|말투|문체|이모지|글꼴|스타일)[은는을를이가]?\s[^\n]{0,30}(쓰지 않|하지 않|피한|금지)',
+  );
+
+  /// "~할 때만/때는", "~하기 전에 먼저"는 제목에서만 본다. 요약에서도 보면 실제 지식 폴더 사본(정리된 노트 86개)에서
+  /// 기술 조건("Finder 전체 백업 때만 생긴다")이 3개 걸렸다(11/13 측정, 제목에서만 보면 0개).
+  static final _ruleTitlePattern = RegExp(r'때(만|는|마다)(?=[\s,.]|$)|전에 (먼저|꼭)');
+
+  /// 일반 선호·작업 규칙처럼 보이면 걸린 말, 아니면 null. 제목·요약·태그만 본다(본문은 사례·이유라 헛걸림이 많다).
+  static String? ruleCandidateHint({required String title, String summary = '', String tags = ''}) {
+    for (final tag in tags.split(',')) {
+      final name = tag.replaceAll(RegExp(r'\s'), '');
+      if (_ruleTags.contains(name)) return '태그 $name';
+    }
+    final cleanTitle = toNfc(title);
+    return (_rulePattern.firstMatch('$cleanTitle\n${toNfc(summary)}') ?? _ruleTitlePattern.firstMatch(cleanTitle))?.group(0);
+  }
+
   List<LintIssue> run() {
     index.sync();
     final issues = <LintIssue>[];
@@ -82,6 +115,26 @@ class Linter {
       for (final link in links) ...[link.fromId, link.toId],
     };
 
+    // 합쳐진 옛 노트가 가리키는 노트가 없으면 그 지식이 AI 찾기에서 통째로 사라진다(옛 노트는 합쳐짐이라 빠지고 새 노트는 없음).
+    // 데이터 안전 감사 11/14: [옛 노트 보관] 뒤 새 노트를 버린 경우.
+    for (final doc in index.notes().where((d) => d.isMerged)) {
+      final String text;
+      try {
+        text = File(p.join(vault.root, doc.path)).readAsStringSync();
+      } on FileSystemException {
+        continue;
+      }
+      final into = Note.parse(text, fallbackId: doc.id, fallbackTitle: doc.title).extra['redirect']?.toString().trim() ?? '';
+      if (into.isNotEmpty && index.byId(into) != null) continue;
+      issues.add(
+        LintIssue(
+          type: LintType.deadLink,
+          id: doc.id,
+          message: '합쳐진 노트인데 가리키는 노트(${into.isEmpty ? '없음' : into})가 없음 — 그 지식이 AI 찾기에서 빠졌다. '
+              '가리키던 노트를 휴지통에서 되살리거나(brain undo) 이 노트를 정리됨으로 되돌리기',
+        ),
+      );
+    }
     for (final dead in index.deadLinks()) {
       final similar = index.search(dead.target, limit: 1);
       issues.add(
@@ -129,6 +182,18 @@ class Linter {
           type: LintType.unreadable,
           id: rel,
           message: '색인에서 건너뜀 — UTF-8 텍스트로 다시 저장하거나 지식 폴더 밖으로 옮기기 ($reason)',
+        ),
+      );
+    }
+
+    // 실수 노트 번호를 받지 못한 `lessons/` 파일 (번호가 겹친 사본 등). 실수 노트로 읽지 않으므로 알린다 (보안 감사 11/14).
+    for (final doc in index.docsOf('lesson')) {
+      if (LessonStore.idPattern.hasMatch(doc.id)) continue;
+      issues.add(
+        LintIssue(
+          type: LintType.format,
+          id: doc.path,
+          message: '실수 노트로 읽지 않음 — 번호가 겹치는 사본이면 지우고, 새 규칙이면 brain lesson add로 넣기',
         ),
       );
     }
@@ -201,6 +266,20 @@ class Linter {
             message: '${note.body.runes.length}자 — 섹션별로 나누기 제안',
           ),
         );
+      }
+      // (설계서_프롬프트이후 11/13 추가: 선호 → 실수 노트) 같은 선호가 프로젝트마다 노트로 저장돼, 단어가 맞을 때만 붙었다.
+      // 정리된 노트만 보고(초안은 정리 대기에서 사용자가 본다) 바꾸지는 않는다 — 사용자가 옮길지 정한다.
+      if (!doc.isDraft) {
+        final hint = ruleCandidateHint(title: note.title, summary: note.summary, tags: doc.tags);
+        if (hint != null) {
+          issues.add(
+            LintIssue(
+              type: LintType.ruleCandidate,
+              id: doc.id,
+              message: '사용자 선호·작업 규칙처럼 보임("$hint") — 프로젝트 이름을 빼도 맞는 규칙이면 실수 노트로 옮기기 검토 (자동으로 바꾸지 않음)',
+            ),
+          );
+        }
       }
       // 제목·요약도 본다: 요약은 find 결과와 훅이 미리 넣는 노트 줄에 그대로 나간다.
       final hit = _suspicious.firstMatch('${note.title}\n${note.summary}\n${note.body}');

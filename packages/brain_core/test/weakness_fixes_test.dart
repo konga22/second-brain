@@ -18,7 +18,7 @@ void main() {
     temp = Directory.systemTemp.createTempSync('weak_');
     vault = Vault(p.join(temp.path, 'SecondBrain'));
     index = SearchIndex.open(vault, path: p.join(temp.path, 'index.db'));
-    notes = NoteStore(vault, index);
+    notes = NoteStore(vault, index, zoned: false);
     lessons = LessonStore(vault, index);
   });
 
@@ -208,7 +208,7 @@ void main() {
     File(dbPath).writeAsStringSync('이건 SQLite 파일이 아니다 ' * 200);
     index = SearchIndex.open(vault, path: dbPath);
     expect(index.search('깨진 색인').map((d) => d.title), contains('깨진 색인 노트'));
-    notes = NoteStore(vault, index);
+    notes = NoteStore(vault, index, zoned: false);
     lessons = LessonStore(vault, index);
   });
 

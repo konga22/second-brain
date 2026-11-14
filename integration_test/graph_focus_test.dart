@@ -52,16 +52,19 @@ void main() {
     final before = scale();
     for (var i = 0; i < 4; i++) {
       await tester.tap(find.text('−'));
-      await settle(tester, 200);
+      await settle(tester, 400); // [−]는 0.25초 동안 부드럽게 줄어든다 (설계서_프롬프트이후 5.6)
     }
     // [−] 4번이면 배율이 0.8⁴ ≈ 0.41배가 된다. 예전에는 z축 배율이 1로 남아 늘 1.0으로 읽혔다 (K-38).
     expect(scale(), closeTo(before * 0.4096, before * 0.01), reason: '[−]가 배율을 줄이지 못함');
     final viewer = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
     final viewport = tester.getSize(find.byType(InteractiveViewer));
     final zoom = viewer.transformationController!.value.getMaxScaleOnAxis();
-    final content = tester.getSize(
+    // 그림 영역에는 노드 범위 둘레에 끌기 여유(graphContentForTest.room, 5.6)가 있다. 견주는 것은 노드가 그려진 범위.
+    final area = tester.getSize(
       find.descendant(of: find.byType(InteractiveViewer), matching: find.byType(SizedBox)).first,
     );
+    final room = graphContentForTest.room;
+    final content = Size(area.width - room * 2, area.height - room * 2);
     debugPrint('[시험] 보이는 영역 $viewport, 그림 ${content * zoom} (배율 ${zoom.toStringAsFixed(2)})');
     // 시험이 실제로 "그림이 영역보다 작은" 상황을 만들었는지 먼저 확인한다 (L-0006).
     expect(content.width * zoom, lessThan(viewport.width), reason: '축소가 안 돼 시험 조건이 안 만들어짐');
