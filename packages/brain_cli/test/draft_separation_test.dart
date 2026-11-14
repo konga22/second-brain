@@ -131,6 +131,19 @@ void main() {
     expect(withDrafts, contains(draft));
   });
 
+  test('brain find에 노트 번호를 주면 그 노트가 나온다 — n_0001·0001·1, 단어가 안 맞아 숨기는 단계에도 안 걸림 (11/14)', () async {
+    final note = addNote('결제 웹훅 재시도 규칙', '결제 웹훅은 3번까지 다시 보낸다');
+    final digits = note.substring(2);
+    for (final q in [note, digits, int.parse(digits).toString()]) {
+      final (code, out, _) = await brain(['find', q]);
+      expect(code, 0);
+      expect(out.trimLeft(), startsWith(note), reason: q);
+    }
+    final draft = addNote('결제 웹훅 간격', '1분·5분·30분', draft: true);
+    final (_, out, _) = await brain(['find', draft]);
+    expect(out, isNot(contains('$draft  ')), reason: 'AI용 찾기는 번호로도 확인 전 초안을 내주지 않는다');
+  });
+
   test('brain show의 연결 줄에 초안 제목이 나오지 않는다 (이전 방식이면 나온다)', () async {
     final draft = addNote('결제 웹훅 재시도 횟수 변경', '결제 웹훅은 10번까지 즉시 재시도한다', draft: true);
     final vault = Vault(vaultRoot);

@@ -1139,7 +1139,7 @@ class SearchIndex {
     bool includeDrafts = true,
   }) {
     final strict = toBigramQuery(query);
-    if (strict == null) return const [];
+    if (strict == null && noteIdsInQuery(query).isEmpty) return const [];
     final wanted = kinds ?? {'note', if (includeRaw) 'raw'};
     // 주제(뇌) 범위: 그 폴더 노트만 찾는다. 경로 접두로 거른다 — `구역/주제`, 구역 하나 통째(`개발 지식`),
     // 예전 주제 이름 모두 접두다. 구역 없이 주제 이름만 주면(`Flutter`, 옛 스킬) 구역 안 그 이름의 주제도 본다 (설계서_프롬프트이후 5.1).
@@ -1153,7 +1153,22 @@ class SearchIndex {
       return prefix == null ? found : found.where(inScope).take(n).toList();
     }
 
-    final results = match(strict, limit);
+    // 노트 번호로 찾기: `n_0081`·`n0081`·`N_81`, 또는 숫자만(`0081`·`81`)이면 그 노트를 맨 앞에 둔다.
+    // 번호는 본문 글이 아니라서 2글자 조각 찾기로는 걸리지 않는다 (11/14 사용자 요청).
+    final results = <IndexedDoc>[];
+    for (final id in noteIdsInQuery(query)) {
+      if (results.length >= limit) break;
+      final doc = byId(id);
+      if (doc == null || !wanted.contains(doc.kind)) continue;
+      if (!includeDrafts && (doc.isDraft || doc.isMerged)) continue;
+      if (prefix != null && !inScope(doc)) continue;
+      if (results.every((d) => d.id != doc.id)) results.add(doc);
+    }
+    final ids = {for (final d in results) d.id};
+    for (final doc in strict == null ? const <IndexedDoc>[] : match(strict, limit)) {
+      if (results.length >= limit) break;
+      if (ids.add(doc.id)) results.add(doc);
+    }
     if (results.length < limit) {
       final relaxed = toRelaxedQuery(query);
       if (relaxed != null) {
@@ -1207,6 +1222,17 @@ class SearchIndex {
       )
       .map(IndexedDoc.fromRow)
       .toList();
+
+  /// 검색어 안의 노트 번호. `n_0081`처럼 접두가 있으면 문장 속에서도 찾고,
+  /// 접두 없는 숫자는 검색어 전체가 숫자일 때만 번호로 본다 — "2026년"·"21px" 같은 말을 번호로 오해하지 않게.
+  static List<String> noteIdsInQuery(String query) {
+    String id(String digits) => 'n_${digits.padLeft(4, '0')}';
+    final trimmed = query.trim();
+    if (RegExp(r'^\d{1,4}$').hasMatch(trimmed)) return [id(trimmed)];
+    return [
+      for (final m in RegExp(r'(?<![A-Za-z0-9])[nN]_?(\d{1,4})(?!\d)').allMatches(query)) id(m.group(1)!),
+    ];
+  }
 
   IndexedDoc? byId(String id) {
     final rows = _db.select('select * from docs where id = ?', [id]);

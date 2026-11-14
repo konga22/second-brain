@@ -84,7 +84,12 @@ class FindCommand extends Command<int> {
     if (mode != RetrievalMode.base) {
       // R1: 질문 단어가 본문까지 2개 이상 맞는 노트만 남긴다. 약한 후보는 (약) 표시를 해도 AI가 근거로 써서
       // (토큰분석 6.2) 숨긴다. 제목·요약만 보면 다른 표현(저장 공간 ↔ 디스크)에서 정답까지 숨겨져 본문도 본다.
-      final strong = [for (final d in hits) if (isRelevantMatch(query, d, noteBody(context.vault, d))) d];
+      // 번호로 부른 노트(`brain find n_0081`)는 단어가 안 맞아도 남긴다.
+      final asked = SearchIndex.noteIdsInQuery(query).toSet();
+      final strong = [
+        for (final d in hits)
+          if (asked.contains(d.id) || isRelevantMatch(query, d, noteBody(context.vault, d))) d,
+      ];
       if (strong.isEmpty) {
         stdout.writeln(
           '확실한 노트 없음: $query (약하게 맞은 노트 ${hits.length}개는 숨김. 다른 말로 다시 찾을 수 있음)'
