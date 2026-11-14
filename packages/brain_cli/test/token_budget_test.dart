@@ -33,6 +33,14 @@ void main() {
         topic: ['개발 지식/결제', '개발 지식/배포', '개발 지식/검색', '생활·기기/아이폰', '생활·기기/맥 관리'][i % 5],
       );
     }
+    // 작업 방식 노트: 요청과 같은 단어가 없어도 만들기·설계 요청이면 훅이 붙인다 (설계서_프롬프트이후 5.10)
+    notes.add(
+      title: '초반 설계를 진행한 방식',
+      summary: '아이디어는 내 말로, 큰 결정은 직접, 시안 먼저',
+      body: '1. 아이디어를 던진다\n2. 큰 구조는 직접 정한다\n',
+      tags: ['작업방식'],
+      topic: '개발 지식/배포',
+    );
     final lessons = LessonStore(vault, index);
     for (var i = 0; i < 5; i++) {
       lessons.add(
@@ -273,13 +281,35 @@ void main() {
     expect(text.length, lessThanOrEqualTo(400));
   });
 
-  test('만들기 요청: 안내 + 관련 노트 3개, 500자 이하', () async {
+  test('만들기 요청: 안내 + 관련 노트 3개 + 작업 방식 노트, 650자 이하', () async {
     final text = await prompt('결제 웹훅 재시도 기능 만들어 줘');
     print('[토큰] 만들기 요청 안내 ${text.length}자');
     // 길이만 보면 출력이 0자여도 통과했다 (11/11 K-38). 안내와 관련 노트가 실제로 나왔는지 본다.
     expect(text, contains('만들기 요청이다'));
     expect(text.split('\n').where((l) => l.startsWith('- n_')), isNotEmpty);
-    expect(text.length, lessThanOrEqualTo(500));
+    // 작업 방식 노트는 요청과 같은 단어가 없어도 붙는다 (11/14 응모 세션에서 놓친 것)
+    expect(text, contains('사용자가 정한 작업 방식'));
+    expect(text, contains('초반 설계를 진행한 방식'));
+    expect(text.length, lessThanOrEqualTo(650));
+  });
+
+  test('설계·계획 요청도 만들기로 보고 작업 방식 노트를 붙인다, 묻기만 하는 말은 아니다 (L-0008)', () async {
+    final design = await prompt('일단 응모 관련이야 이것에 대한걸 분석하고 설계해줘');
+    expect(design, contains('만들기 요청이다'));
+    expect(design, contains('초반 설계를 진행한 방식'));
+    // 질문(만들기 아님)에는 작업 방식 노트를 붙이지 않는다
+    final question = await prompt('결제 웹훅 재시도 간격이 어떻게 돼?');
+    expect(question, isNot(contains('사용자가 정한 작업 방식')));
+  });
+
+  test('만들기 의도 단어: 사용자 말투로 걸릴 것과 안 걸릴 것 (L-0008)', () {
+    final hit = ['분석하고 설계해줘', '설계 좀 해 줘', '계획 짜 줘', '계획을 세워 보자', '기획해 줘', '자동화를 만들고싶어', '이거 구현해'];
+    final miss = ['설계서 어디 있어?', '계획이 뭐였지?', '기획안 냈어?', '설계가 맞아?', '오늘 계획 알려줘'];
+    final caught = [for (final s in hit) if (HookCommand.buildIntent.hasMatch(s)) s];
+    final wrong = [for (final s in miss) if (HookCommand.buildIntent.hasMatch(s)) s];
+    print('[의도] 걸림 ${caught.length}/${hit.length}, 헛걸림 ${wrong.length}/${miss.length}');
+    expect(caught, hit);
+    expect(wrong, isEmpty);
   });
 
   test('질문에 확실히 맞는 노트를 미리 넣는다 (R2): 최대 3개, 400자 이하', () async {
