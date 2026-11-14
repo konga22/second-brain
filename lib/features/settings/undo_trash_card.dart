@@ -53,11 +53,38 @@ class _UndoTrashCardState extends ConsumerState<UndoTrashCard> with SafeSetState
     return root.existsSync() ? root.listSync(recursive: true).whereType<File>().length : 0;
   }
 
-  void _undo(Vault vault, UndoBatch batch) {
+  /// 그 뒤 바뀐 파일이 있거나 확인할 수 없으면 되돌리지 않는다 (데이터 안전 감사 11/14). 그때만 묻고, [그래도 되돌리기]는
+  /// 지금 파일을 휴지통에 남긴 뒤 되돌린다.
+  Future<void> _undo(Vault vault, UndoBatch batch) async {
     try {
       final count = undoBatch(vault, batch.id);
       setState(() => _message = '${batch.id} 되돌림: 파일 $count개');
       bumpVault(ref);
+    } on UndoDriftError catch (e) {
+      setState(() => _message = '되돌리지 않음: ${e.message}');
+      final isOk = await showShadDialog<bool>(
+        context: context,
+        builder: (context) => ShadDialog.alert(
+          title: const Text('그래도 되돌릴까요?'),
+          description: Text(
+            '이 묶음이 바꾼 파일 ${e.drift.length}개가 그 뒤 다른 작업에서 바뀌었거나 확인할 수 없습니다. '
+            '되돌리면 지금 파일은 휴지통(_meta/trash/${batch.id})에 남기고 묶음 전 상태로 바꿉니다. '
+            '보통은 더 최근 묶음을 먼저 되돌리는 것이 안전합니다.',
+          ),
+          actions: [
+            ShadButton.outline(child: const Text('취소'), onPressed: () => Navigator.of(context).pop(false)),
+            ShadButton.destructive(child: const Text('그래도 되돌리기'), onPressed: () => Navigator.of(context).pop(true)),
+          ],
+        ),
+      );
+      if (isOk != true || !mounted) return;
+      try {
+        final count = undoBatch(vault, batch.id, force: true);
+        setState(() => _message = '${batch.id} 되돌림: 파일 $count개 (그 전 파일은 휴지통에 남김)');
+        bumpVault(ref);
+      } on Object catch (e) {
+        setState(() => _message = '되돌리지 못함: $e');
+      }
     } on Object catch (e) {
       setState(() => _message = '되돌리지 못함: $e');
     }

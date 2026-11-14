@@ -247,6 +247,8 @@ class HookCommand extends Command<int> {
         if (args.any((w) => w.startsWith('--remove'))) return null;
       case 'sessions':
         if (args.contains('mark')) return null;
+        // corrections --done은 `_meta/correction_scan.json`을 고치는 쓰기다 (데이터 안전 감사 11/14, L-0010)
+        if (args.any((w) => w.startsWith('--done'))) return null;
       case 'todo':
         // `brain todo` 한 가지만 읽기다: `brain todo --source n_1 suggest …`처럼 옵션 뒤에 쓰기 동작이 올 수 있다.
         if (args.isNotEmpty) return null;

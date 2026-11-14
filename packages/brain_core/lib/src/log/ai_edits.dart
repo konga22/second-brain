@@ -129,10 +129,10 @@ class AiEditReview {
   }
 
   /// [확인함]: 이 고침을 봤다고 남긴다. 파일은 그대로다.
-  void acknowledge(AiEdit edit) {
+  void acknowledge(AiEdit edit) => withVaultLock(vault, () {
     final seen = _seen()..addAll(edit.batches);
     writeFileAtomic(_seenFile.path, jsonEncode({'batches': [...seen]..sort()}));
-  }
+  });
 
   /// [되돌리기]: 이 노트를 고친 AI 묶음을 최근 것부터 되돌린다 (`brain undo`와 같다). 반환: 되돌린 파일 수.
   /// 한 묶음에 다른 파일(제목을 바꿀 때 고친 링크)이 있으면 함께 돌아간다.

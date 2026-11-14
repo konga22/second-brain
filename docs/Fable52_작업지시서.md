@@ -75,6 +75,7 @@
 - **먼저 볼 곳**: `packages/brain_core/lib/src/note/note_store.dart`(add/write/update/move/moveMany/merge), `log/change_log.dart`(되돌리기, 경로 바뀜, after.jsonl, moves.jsonl), `log/ai_edits.dart`, `index/search_index.dart`(rowid 이어 쓰기, search_hash, 추천 다시 고르기), `vault/vault.dart`(`withVaultLock`, `_meta/.lock-<pid>`), `lessons/lesson_store.dart`(merge), 앱의 백그라운드 작업 `lib/core/background_tasks.dart`, 폴더 감시.
 - **할 일**: "A 다음에 B가 일어나면" 시나리오를 만든다(옮기기 → 고치기 → 되돌리기, 합치기 중 실패, 앱과 CLI 동시 저장, 압축 중 끊김, 색인 버전 바뀜 직후). 찾은 것마다 재현 시험을 먼저 쓰고, 고칠지 사용자에게 보고한다. 11/13 검토가 찾은 것(n_0092)과 겹치지 않게.
 - **끝난 기준**: 시나리오 목록과 각각 "안전 / 버그(재현 시험 있음) / 확인 못 함".
+- **결과 (11/14)**: 브랜치 `bug/data-safety-audit`(코드는 안 고침, 커밋 전). 시나리오 41개 — 버그 20(재현 시험 22개) · 안전 14 · 확인 못 함 7. 가장 큰 것은 되돌리기(`brain undo`·설정 [되돌리기])가 경로만 보는 것: 버린 초안을 되살리면 그 자리에 새로 저장한 노트가 덮여 사라진다. 그 밖에 잠금 밖에서 고치는 파일(할 일 추천 동시 호출 유실), 색인 동시 맞추기 오류, AI가 적용 중 실수 노트를 끌 수 있음, 놓친 교정 `--done` 상한 없음. 고칠 순서와 재사용 점검표는 [데이터안전감사](데이터안전감사.md) 5·8절. 같은 날 사용자 "권장대로 해"로 고침(Opus 5.5, 버그 19개 고침·1개 거절로 막음, 재현 시험 30개 통과, 10절).
 
 ## 3. 노트 1만 개 성능 최적화
 

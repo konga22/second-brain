@@ -114,6 +114,26 @@ class Linter {
       for (final link in links) ...[link.fromId, link.toId],
     };
 
+    // 합쳐진 옛 노트가 가리키는 노트가 없으면 그 지식이 AI 찾기에서 통째로 사라진다(옛 노트는 합쳐짐이라 빠지고 새 노트는 없음).
+    // 데이터 안전 감사 11/14: [옛 노트 보관] 뒤 새 노트를 버린 경우.
+    for (final doc in index.notes().where((d) => d.isMerged)) {
+      final String text;
+      try {
+        text = File(p.join(vault.root, doc.path)).readAsStringSync();
+      } on FileSystemException {
+        continue;
+      }
+      final into = Note.parse(text, fallbackId: doc.id, fallbackTitle: doc.title).extra['redirect']?.toString().trim() ?? '';
+      if (into.isNotEmpty && index.byId(into) != null) continue;
+      issues.add(
+        LintIssue(
+          type: LintType.deadLink,
+          id: doc.id,
+          message: '합쳐진 노트인데 가리키는 노트(${into.isEmpty ? '없음' : into})가 없음 — 그 지식이 AI 찾기에서 빠졌다. '
+              '가리키던 노트를 휴지통에서 되살리거나(brain undo) 이 노트를 정리됨으로 되돌리기',
+        ),
+      );
+    }
     for (final dead in index.deadLinks()) {
       final similar = index.search(dead.target, limit: 1);
       issues.add(

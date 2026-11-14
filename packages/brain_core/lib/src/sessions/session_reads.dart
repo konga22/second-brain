@@ -32,7 +32,9 @@ class SessionReads {
   ];
 
   /// [from, end)를 읽었다고 적고, [total]자 가운데 아직 안 읽은 범위를 돌려준다.
-  List<(int, int)> record(String sessionId, int from, int end, int total) {
+  /// 잠금 안에서 읽고 쓴다: 두 곳에서 동시에 적으면 서로의 기록을 덮었다 (데이터 안전 감사 11/14).
+  List<(int, int)> record(String sessionId, int from, int end, int total) => withVaultLock(vault, () {
+    Directory(vault.metaDir).createSync(recursive: true);
     final all = _load();
     final merged = _merge([..._ranges(all, sessionId), if (end > from) (from, end)]);
     all[sessionId] = [
@@ -41,7 +43,7 @@ class SessionReads {
     Directory(vault.metaDir).createSync(recursive: true);
     writeFileAtomic(_file.path, jsonEncode(all));
     return _gaps(merged, total);
-  }
+  });
 
   /// [total]자 가운데 아직 안 읽은 범위. 한 번도 안 읽었으면 전체.
   List<(int, int)> unread(String sessionId, int total) => _gaps(_merge(_ranges(_load(), sessionId)), total);
